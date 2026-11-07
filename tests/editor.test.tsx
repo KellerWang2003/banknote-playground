@@ -1155,13 +1155,18 @@ describe('username workspace editor', () => {
     const finishTurn = () => act(() => setTilt({ turn: useTilt.getState().flipped ? 1 : 0 }))
     // Front | Back at the top of the canvas (Keller, 4 November: on the tilt card it was too hidden)
     const side = (name: 'Front' | 'Back') => screen.getByRole('button', { name, exact: true })
+    // The selected banknote's frames, as clips on the timeline
+    const clips = () => document.querySelectorAll('[data-frame-clip]').length
     expect(screen.queryByRole('button', { name: 'Show the back' })).toBeNull()
     expect(side('Front').getAttribute('aria-pressed')).toBe('true')
+    expect(clips()).toBeGreaterThan(0)
 
     // F turns every banknote over, as the switch shows: the back has no thread, the watermark mirrored
     fireEvent.keyDown(window, { key: 'f' })
     expect(useTilt.getState().flipped).toBe(true)
     expect(side('Back').getAttribute('aria-pressed')).toBe('true')
+    // The back has no thread, so the timeline shows no frames, though the banknote is still selected (Keller)
+    expect(clips()).toBe(0)
     finishTurn()
     expect(shown('[data-back]')).not.toBeNull()
     expect(shown('[data-thread]')).toBeNull()
@@ -1184,6 +1189,7 @@ describe('username workspace editor', () => {
     // Picking the thread turns them back round to the front, where it is
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     expect(useTilt.getState().flipped).toBe(false)
+    expect(clips()).toBeGreaterThan(0)
     finishTurn()
     expect(shown('[data-thread]')).not.toBeNull()
     expect(document.querySelector('[data-side-label]')).toBeNull()
@@ -1191,6 +1197,7 @@ describe('username workspace editor', () => {
     await user.click(side('Back'))
     expect(useTilt.getState().flipped).toBe(true)
     expect(tab()).toBe('Banknote')
+    expect(clips()).toBe(0)
     finishTurn()
 
     // Working on the front's design card turns the banknotes to the front, and on the back's to the back

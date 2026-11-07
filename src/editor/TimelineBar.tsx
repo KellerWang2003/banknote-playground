@@ -46,7 +46,8 @@ const ZOOM = { min: 3, max: 40, initial: 10 }
 
 /**
  * Bottom of the canvas: play and pause with the project's playback controls stacked beside it, always, as wide
- * as the tilt pad's panel above them; with a banknote selected the panel widens to show that banknote's frames.
+ * as the tilt pad's panel above them; with a banknote selected the panel widens to show that banknote's frames, on
+ * the front only, where its thread is.
  */
 export function TimelineBar({
   projectId,
@@ -69,12 +70,16 @@ export function TimelineBar({
 }) {
   const source = useTilt((state) => state.source)
   const playing = source === 'wobble'
+  // The thread is only on the front: turned over, even a selected banknote has no frames to show, so the bar stays
+  // as it is with nothing selected (Keller). It follows the switch rather than the turn, so they go as Back is pressed
+  const flipped = useTilt((state) => state.flipped)
+  const trackNote = flipped ? undefined : note
 
   return (
     <Panel
       className={cn(
         'absolute bottom-3 left-3 flex h-[88px] items-stretch gap-2 p-2',
-        note && (besidePanel ? 'right-[calc(var(--panel-w)+20px)]' : 'right-3'),
+        trackNote && (besidePanel ? 'right-[calc(var(--panel-w)+20px)]' : 'right-3'),
       )}
     >
       <div className="flex shrink-0 gap-2" style={{ width: TILT_PANEL_PX - 2 * 8 - 2 }}>
@@ -89,7 +94,7 @@ export function TimelineBar({
         </IconButton>
         <FrameSettings projectId={projectId} note={note ?? notes.at(0)} />
       </div>
-      {note && noteRef && <FrameTrack note={note} noteRef={noteRef} sectionId={sectionId} onScrub={onScrub} />}
+      {trackNote && noteRef && <FrameTrack note={trackNote} noteRef={noteRef} sectionId={sectionId} onScrub={onScrub} />}
     </Panel>
   )
 }
