@@ -11,6 +11,7 @@ import { type InkMask, exportInkMask } from './inkMask'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
 import { copyStarts, imageBox } from './artwork'
 import { fitSections, threadLength } from './thread'
+import type { Quarter } from './rotate'
 import type { Frame, MagneticInk, Note } from './types'
 
 // Draws banknotes to a canvas exactly as NoteView shows them on the canvas, so the tilt can be exported
@@ -492,11 +493,25 @@ export interface ExportCell {
   cy: number
 }
 
+/** How far a note reaches round its centre: up (`top`, negative) and down, and as far either side (`halfWidth`) */
+interface Reach { top: number; bottom: number; halfWidth: number }
+
 /**
- * Banknotes side by side in a row, each in a cell wide and tall enough for its tilted shape at every angle,
- * centred vertically. Sizes are even, which video encoders need.
+ * What a note reaches as it shows rotated `quarter` quarter turns clockwise about its centre (Rotate left and right): on
+ * its side, its reach up and down runs across, and its reach across runs up and down
  */
-export function exportLayout(notes: Note[], scale: number, angles: (Tilt2 | number)[], perspective: boolean) {
+export function rotatedReach(reach: Reach, quarter: Quarter = 0): Reach {
+  const { top, bottom, halfWidth } = reach
+  if (quarter === 2) return { top: -bottom, bottom: -top, halfWidth }
+  if (quarter % 2 === 1) return { top: -halfWidth, bottom: halfWidth, halfWidth: Math.max(-top, bottom) }
+  return reach
+}
+
+/**
+ * Banknotes side by side in a row, each in a cell wide and tall enough for its tilted shape at every angle, rotated as
+ * the canvas shows them (`quarter`), centred vertically. Sizes are even, which video encoders need.
+ */
+export function exportLayout(notes: Note[], scale: number, angles: (Tilt2 | number)[], perspective: boolean, quarter: Quarter = 0) {
   const margin = EXPORT_MARGIN_MM * scale
   const cells = notes.map((note) => {
     const width = note.widthMm * scale, height = note.heightMm * scale
@@ -509,7 +524,7 @@ export function exportLayout(notes: Note[], scale: number, angles: (Tilt2 | numb
         halfWidth = Math.max(halfWidth, b.halfWidth)
       }
     }
-    return { note, top, bottom, halfWidth }
+    return { note, ...rotatedReach({ top, bottom, halfWidth }, quarter) }
   })
   const above = Math.max(...cells.map((c) => -c.top))
   const below = Math.max(...cells.map((c) => c.bottom))
@@ -533,7 +548,8 @@ export const exportReveal = (light: number, angle: Tilt2 | number, backlit = fal
 
 /**
  * Renders one export frame: the background, then every banknote at tilt `angle`, held to the light by `light` (0 to 1)
- * and turned `turn` of the way over (0 front, 1 back), showing its back from halfway as the canvas does
+ * and turned `turn` of the way over (0 front, 1 back), showing its back from halfway as the canvas does, and rotated
+ * `quarter` quarter turns about its centre as the canvas shows it, its tilt still its own
  */
 export function drawExportFrame(
   ctx: Ctx,
@@ -542,7 +558,7 @@ export function drawExportFrame(
   faces: Map<string, OffscreenCanvas>,
   scale: number,
   angle: Tilt2 | number,
-  options: Omit<FaceOptions, 'reveal' | 'offsetMm' | 'back'> & { background?: string; backlit?: boolean; offsets?: Record<string, number> },
+  options: Omit<FaceOptions, 'reveal' | 'offsetMm' | 'back'> & { background?: string; backlit?: boolean; offsets?: Record<string, number>; quarter?: Quarter },
   light = 0,
   turn = 0,
 ) {
@@ -561,7 +577,18 @@ export function drawExportFrame(
     const faceCtx = face.getContext('2d')!
     faceCtx.clearRect(0, 0, face.width, face.height)
     drawFace(faceCtx, cell.note, noteAssets, scale, angle, { ...options, back, reveal, offsetMm: options.offsets?.[cell.note.id] })
-    drawTilted(ctx, face, cell.cx, cell.cy, options.perspective ? withTurn(angle, turn) : 0, perspectiveFor(cell.note, scale))
+    const view = options.perspective ? withTurn(angle, turn) : 0
+    const perspective = perspectiveFor(cell.note, scale)
+    if (!options.quarter) {
+      drawTilted(ctx, face, cell.cx, cell.cy, view, perspective)
+      continue
+    }
+    // Tilted about its own axes, then rotated on screen, as the canvas turns the banknote round its 3D tilt
+    ctx.save()
+    ctx.translate(cell.cx, cell.cy)
+    ctx.rotate((options.quarter * Math.PI) / 2)
+    drawTilted(ctx, face, 0, 0, view, perspective)
+    ctx.restore()
   }
 }
 
@@ -582,18 +609,18 @@ export const RESOLUTIONS = [
  * Px per mm that makes a file `height` px tall. The layout grows in proportion to its scale, so it is
  * measured once at 1 px per mm. Very wide rows are scaled down to stay within MAX_EXPORT_PX.
  */
-export function scaleForHeight(notes: Note[], angles: (Tilt2 | number)[], perspective: boolean, height: number) {
-  const unit = exportLayout(notes, 1, angles, perspective)
+export function scaleForHeight(notes: Note[], angles: (Tilt2 | number)[], perspective: boolean, height: number, quarter: Quarter = 0) {
+  const unit = exportLayout(notes, 1, angles, perspective, quarter)
   return Math.min(height / unit.exactHeight, MAX_EXPORT_PX / unit.exactWidth, MAX_EXPORT_PX / unit.exactHeight)
 }
 
 /** The file groups an export makes: one with every banknote side by side, or one per banknote */
 export const exportGroups = (notes: Note[], separate: boolean) => (separate && notes.length > 1 ? notes.map((n) => [n]) : [notes])
 
-export function exportSize(notes: Note[], options: { height: number; fps: number; loops: number; perspective: boolean; separate: boolean; back?: boolean }) {
+export function exportSize(notes: Note[], options: { height: number; fps: number; loops: number; perspective: boolean; separate: boolean; back?: boolean; quarter?: Quarter }) {
   if (notes.length === 0) return { width: 0, height: 0, seconds: 0 }
   const angles = playbackViews(notes[0], options.fps, options.loops, options.back)
   const layouts = exportGroups(notes, options.separate).map((group) =>
-    exportLayout(group, scaleForHeight(group, angles, options.perspective, options.height), angles, options.perspective))
+    exportLayout(group, scaleForHeight(group, angles, options.perspective, options.height, options.quarter), angles, options.perspective, options.quarter))
   return { width: Math.max(...layouts.map((l) => l.width)), height: Math.max(...layouts.map((l) => l.height)), seconds: angles.length / options.fps }
 }

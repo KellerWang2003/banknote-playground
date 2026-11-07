@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { mirrored } from '../lib/back'
 import { LAYER_NAMES, type PlacedLayer } from '../lib/layers'
 import { type Corner, PLACE_STEP, type PlacedBox, dragBoxCorner, moveBox } from '../lib/placed'
+import { type Quarter, onItsSide, unturn } from '../lib/rotate'
 import type { Note } from '../lib/types'
 
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se']
@@ -20,14 +21,17 @@ const MIRRORED: Record<Corner, Corner> = { nw: 'ne', ne: 'nw', sw: 'se', se: 'sw
  * Canvas-only placing surface for a layer placed on a flat banknote (the watermark, shown clear, or magnetic ink): drag
  * the box to move the layer, a corner to resize it with its proportions kept, in 0.5 mm steps; arrow keys nudge it.
  * It takes its gestures before the banknote can tilt or pan. On the banknote's back (`mirror`, only the watermark shows
- * there) it sits where the layer shows, the other side round, and moves the way the pointer does there.
+ * there) it sits where the layer shows, the other side round, and moves the way the pointer does there. On a rotated
+ * banknote (`quarter`, quarter turns clockwise) it turns with it, and drags and arrow keys still move it the way they point
+ * on screen.
  */
-export function PlacingBox({ note, layer, box, scale, mirror = false, onChange }: {
+export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 0, onChange }: {
   note: Note
   layer: PlacedLayer
   box: PlacedBox
   scale: number
   mirror?: boolean
+  quarter?: Quarter
   onChange: (box: PlacedBox) => void
 }) {
   const gesture = useRef<Gesture | null>(null)
@@ -69,8 +73,9 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, onChange }
         event.stopPropagation()
         // A release that never reached us: stop following the pointer
         if (event.buttons === 0) return finish(event)
-        const dx = (across * (event.clientX - g.startX)) / scale
-        const dy = (event.clientY - g.startY) / scale
+        const along = unturn(event.clientX - g.startX, event.clientY - g.startY, quarter)
+        const dx = (across * along.x) / scale
+        const dy = along.y / scale
         const next = g.mode === 'move' ? moveBox(g.original, dx, dy, note) : dragBoxCorner(g.original, g.mode, dx, dy, note)
         if (next.xMm !== box.xMm || next.yMm !== box.yMm || next.widthMm !== box.widthMm) onChange(next)
       }}
@@ -83,7 +88,8 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, onChange }
         event.preventDefault()
         event.stopPropagation()
         const step = event.shiftKey ? 10 * PLACE_STEP : PLACE_STEP
-        onChange(moveBox(box, across * by[0] * step, by[1] * step, note))
+        const along = unturn(by[0], by[1], quarter)
+        onChange(moveBox(box, across * along.x * step, along.y * step, note))
       }}
     >
       {CORNERS.map((corner) => (
@@ -96,7 +102,8 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, onChange }
           aria-label={`Resize ${name} from its ${CORNER_NAMES[corner]} corner`}
           className={cn(
             'absolute z-10 size-2.5 min-w-0 rounded-sm border-fuchsia-500 p-0 active:translate-y-0',
-            corner === 'nw' || corner === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize',
+            // On its side, a corner shows on the other diagonal
+            (corner === 'nw' || corner === 'se') !== onItsSide(quarter) ? 'cursor-nwse-resize' : 'cursor-nesw-resize',
           )}
           style={{
             [corner[0] === 'n' ? 'top' : 'bottom']: 0,

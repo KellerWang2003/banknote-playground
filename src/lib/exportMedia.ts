@@ -2,6 +2,7 @@ import { zipSync } from 'fflate'
 import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 import { BufferTarget, CanvasSource, Mp4OutputFormat, Output, QUALITY_HIGH, WebMOutputFormat, getFirstEncodableVideoCodec } from 'mediabunny'
 import type { Side } from './back'
+import type { Quarter } from './rotate'
 import { drawExportFrame, exportGroups, exportLayout, loadNoteAssets, playbackLights, playbackTilts, playbackTurns, playbackViews, scaleForHeight, turnsOver, type SideAssets } from './exportRender'
 import type { Note } from './types'
 
@@ -27,6 +28,8 @@ export interface ExportOptions {
   backlit?: boolean
   /** Every banknote's back, as the canvas shows them turned over: the video starts on the backs, Flip moves turning them as on the canvas */
   back?: boolean
+  /** Every banknote rotated this many quarter turns clockwise about its centre, as the canvas shows them (Rotate left and right) */
+  quarter?: Quarter
   /** Where each banknote's thread pattern starts along its thread (mm, by banknote id), as the canvas previews it */
   offsets?: Record<string, number>
 }
@@ -41,8 +44,8 @@ async function renderFile(notes: Note[], assets: Map<string, SideAssets>, option
   const turns = playbackTurns(notes[0], options.fps, loops, options.back)
   // Laid out with room for what the banknotes turn through on screen, turning over included
   const views = playbackViews(notes[0], options.fps, loops, options.back)
-  const scale = scaleForHeight(notes, views, options.perspective, options.height)
-  const layout = exportLayout(notes, scale, views, options.perspective)
+  const scale = scaleForHeight(notes, views, options.perspective, options.height, options.quarter)
+  const layout = exportLayout(notes, scale, views, options.perspective, options.quarter)
   const canvas = new OffscreenCanvas(layout.width, layout.height)
   const ctx = canvas.getContext('2d', { willReadFrequently: options.format === 'gif' })!
   const faces = new Map(notes.map((n) => [n.id, new OffscreenCanvas(Math.ceil(n.widthMm * scale), Math.ceil(n.heightMm * scale))]))
@@ -106,7 +109,7 @@ export async function exportTilt(projectName: string, options: ExportOptions, on
   const scales = new Map<string, number>()
   for (const group of groups) {
     const angles = playbackViews(group[0], options.fps, options.format === 'gif' ? 1 : options.loops, options.back)
-    const scale = scaleForHeight(group, angles, options.perspective, options.height)
+    const scale = scaleForHeight(group, angles, options.perspective, options.height, options.quarter)
     for (const note of group) scales.set(note.id, Math.max(scales.get(note.id) ?? 0, scale))
   }
   // What the side the banknotes show needs, or both sides when playback turns them over

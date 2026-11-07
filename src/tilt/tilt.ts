@@ -44,6 +44,12 @@ interface TiltState {
    */
   turn: number
   /**
+   * Quarter turns clockwise every banknote is rotated on screen (Rotate left and right, R and Shift+R; `src/lib/rotate.ts`),
+   * counted on either way (−1, 5) so each turn plays the way it was asked; `quarterOf` reads it as 0 to 3. A way of looking,
+   * as `flipped` is: the tilt stays the banknote's own
+   */
+  quarterTurns: number
+  /**
    * Where each banknote's timeline was scrubbed to, by banknote id, as the tilt that would show it: that banknote's
    * frames show what it would while every banknote keeps the tilt, as scrubbing picks a frame and never tilts, and only
    * on that banknote (Keller: each banknote's timeline is its own, and it follows manual tilt, not the other way round).
@@ -71,6 +77,7 @@ export const useTilt = create<TiltState>()(() => ({
   light: 0,
   flipped: false,
   turn: 0,
+  quarterTurns: 0,
   frameTilts: {},
 }))
 
@@ -134,6 +141,9 @@ export const showsBack = (s: Pick<TiltState, 'turn'>) => showsBackAt(s.turn)
 
 /** Turns every banknote over to its back, or back to its front (by default whichever it isn't on) */
 export const turnOver = (back = !useTilt.getState().flipped) => setTilt({ flipped: back })
+
+/** Rotates every banknote a quarter turn on screen, right (clockwise) or left, each about its own middle */
+export const rotateNotes = (by: 1 | -1) => setTilt({ quarterTurns: useTilt.getState().quarterTurns + by })
 
 /** Shared by the keyboard shortcut and the playback button. Pause holds the rendered angle. */
 export function togglePlayback() {

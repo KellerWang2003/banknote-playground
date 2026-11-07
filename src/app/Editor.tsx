@@ -1,6 +1,6 @@
 import { undoProject, redoProject, updateNote } from '../lib/store'
 import { beginHistoryGroup, endHistoryGroup, breakHistoryGroup } from '../lib/history'
-import { pressLight, releaseLight, setTilt, springToFlat, togglePlayback, turnOver, useTilt } from '../tilt/tilt'
+import { pressLight, releaseLight, rotateNotes, setTilt, springToFlat, togglePlayback, turnOver, useTilt } from '../tilt/tilt'
 import { playbackLens, playbackTilt } from '../lib/pattern'
 import { Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -122,8 +122,8 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     // Only on turning over
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flipped])
-  // Each project opens on its fronts
-  useEffect(() => () => setTilt({ flipped: false, turn: 0 }), [])
+  // Each project opens on its fronts, upright
+  useEffect(() => () => setTilt({ flipped: false, turn: 0, quarterTurns: 0 }), [])
 
   // Escape leaves window editing or placing a layer, otherwise clears the selection, unless a field or dialog is handling it
   useEffect(() => {
@@ -200,16 +200,20 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     }
   }, [])
 
-  // F turns every banknote over to its back, or back to its front; not in Thread Studio, as the thread is only on the front
+  // F turns every banknote over to its back, or back to its front, and R rotates every banknote a quarter turn right
+  // (Shift+R left), as the buttons beside Front | Back do; not in Thread Studio, as the thread is only on the front
   const inStudio = threadNoteId !== undefined && note?.id === threadNoteId
   useEffect(() => {
     if (inStudio) return
     const onDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'f' || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.defaultPrevented) return
+      const key = event.key.toLowerCase()
+      if ((key !== 'f' && key !== 'r') || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.defaultPrevented) return
       const element = event.target instanceof Element ? event.target : null
       if (element?.closest(TYPING) || document.querySelector(POPUP)) return
       event.preventDefault()
-      if (!event.repeat) turnOver()
+      if (event.repeat) return
+      if (key === 'f') turnOver()
+      else rotateNotes(event.shiftKey ? -1 : 1)
     }
     window.addEventListener('keydown', onDown)
     return () => window.removeEventListener('keydown', onDown)
@@ -342,7 +346,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       ) : (
         <>
           {tiltPad && <TiltRail limit={lens?.viewDeg} playback={reference && lens ? { projectId: project.id, tilt: playbackTilt(reference), lens } : undefined} />}
-          {/* Front | Back, where it can't be missed (Keller); F does the same */}
+          {/* Front | Back and Rotate left and right, where they can't be missed (Keller); F, Shift+R and R do the same */}
           {!isEmpty && <SideSwitch besidePanel={note !== undefined} />}
           <ProjectPanel isDemo={isDemo} project={project} selectedId={note?.id} layer={shownLayer} onSelect={selectFromList} onAdd={() => setAdding(true)} aboveTilt={tiltPad}
             onAddLayer={addFrom} onRemoveLayer={dropLayer} />

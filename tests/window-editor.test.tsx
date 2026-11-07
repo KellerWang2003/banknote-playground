@@ -5,18 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WindowEditor } from '../src/editor/WindowEditor'
 import { createNote, createProject, migrateProject } from '../src/lib/notes'
 import { migrateWindows, threadWindowMask } from '../src/lib/thread'
+import type { Quarter } from '../src/lib/rotate'
 import type { ThreadWindow } from '../src/lib/types'
 
 const makeNote = () => createNote({ name: 'Windows', x: 0, y: 0, widthMm: 100, heightMm: 70, color: '#123456' })
 const initial = [{ id: 'first', startMm: 10, endMm: 20 }, { id: 'second', startMm: 30, endMm: 40 }]
-function Harness({ direction, outer, scale = 10 }: { direction: 'horizontal' | 'vertical'; outer: () => void; scale?: number }) {
+function Harness({ direction, outer, scale = 10, quarter = 0 }: { direction: 'horizontal' | 'vertical'; outer: () => void; scale?: number; quarter?: Quarter }) {
   const [sections, setSections] = useState<ThreadWindow[]>(initial)
   const [selected, setSelected] = useState<string>()
   const note = makeNote()
   note.thread.direction = direction
   note.thread.windows = { enabled: true, sections }
   return <div onPointerDown={outer}>
-    <WindowEditor note={note} scale={scale} selectedId={selected} onSelect={setSelected} onChange={setSections} />
+    <WindowEditor note={note} scale={scale} quarter={quarter} selectedId={selected} onSelect={setSelected} onChange={setSections} />
     <output data-testid="sections">{JSON.stringify(sections)}</output>
   </div>
 }
@@ -125,6 +126,41 @@ describe.each(['vertical', 'horizontal'] as const)('%s canvas window editing', (
     expect(read()[0].startMm).toBe(12)
     fireEvent.pointerCancel(surface, pointer(direction, 17))
     expect(read()).toEqual(initial)
+  })
+})
+
+describe('window editing on a rotated banknote', () => {
+  // jsdom lays nothing out: the thread's box on screen starts at 0, 0, as wide as the thread is long once on its side
+  it('reads the pointer along the thread as it lies, its top at the right once turned right', () => {
+    render(<Harness direction="vertical" outer={vi.fn()} quarter={1} />)
+    const surface = screen.getByRole('group', { name: 'Edit thread windows' })
+    // 70 mm long at 10 px per mm, running from the right of the screen
+    const at = (mm: number) => ({ pointerId: 1, button: 0, clientX: 700 - mm * 10, clientY: 20 })
+    fireEvent.pointerDown(surface, at(8))
+    fireEvent.pointerMove(surface, at(2.3))
+    fireEvent.pointerUp(surface, at(2.3))
+    expect(read()[0]).toMatchObject({ startMm: 2.5, endMm: 8 })
+    // Its ends resize across the screen now
+    expect(screen.getByRole('button', { name: 'Start of window 1' }).className).toContain('cursor-ew-resize')
+  })
+  it('turned left, runs a horizontal thread up the screen from its left end, now at the bottom', () => {
+    render(<Harness direction="horizontal" outer={vi.fn()} quarter={3} />)
+    const surface = screen.getByRole('group', { name: 'Edit thread windows' })
+    const at = (mm: number) => ({ pointerId: 1, button: 0, clientX: 20, clientY: 1000 - mm * 10 })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Window 1', exact: true }), at(15))
+    fireEvent.pointerMove(surface, at(17))
+    fireEvent.pointerUp(surface, at(17))
+    expect(read()[0]).toMatchObject({ startMm: 12, endMm: 22 })
+    expect(screen.getByRole('button', { name: 'Start of window 1' }).className).toContain('cursor-ns-resize')
+  })
+  it('upside down, reads it from the other end', () => {
+    render(<Harness direction="vertical" outer={vi.fn()} quarter={2} />)
+    const surface = screen.getByRole('group', { name: 'Edit thread windows' })
+    const at = (mm: number) => ({ pointerId: 1, button: 0, clientX: 20, clientY: 700 - mm * 10 })
+    fireEvent.pointerDown(surface, at(2))
+    fireEvent.pointerMove(surface, at(6))
+    fireEvent.pointerUp(surface, at(6))
+    expect(read()[0]).toMatchObject({ startMm: 2, endMm: 6 })
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  drawExportFrame, drawFace, drawInk, exportLayout, exportSize, framePx, loadNoteAssets, perspectiveFor, playbackAngles, playbackTurns, playbackViews, projectRow,
+  drawExportFrame, drawFace, drawInk, exportLayout, exportSize, framePx, loadNoteAssets, perspectiveFor, playbackAngles, playbackTurns, playbackViews, projectRow, rotatedReach,
   sourceRow, tiltedBounds, turnsOver,
 } from '../src/lib/exportRender'
 import type { InkMask } from '../src/lib/inkMask'
@@ -283,5 +283,68 @@ describe('turning over in an export', () => {
       expect(drawn).toContainEqual(expect.objectContaining({ side }))
       expect(drawn).not.toContainEqual(expect.objectContaining({ side: other }))
     }
+  })
+})
+
+describe('rotating in an export', () => {
+  it('turns what a banknote reaches with it: on its side its reach up and down runs across, upside down its top is its bottom', () => {
+    const reach = { top: -40, bottom: 60, halfWidth: 75 }
+    expect(rotatedReach(reach, 0)).toEqual(reach)
+    expect(rotatedReach(reach, 2)).toEqual({ top: -60, bottom: 40, halfWidth: 75 })
+    // Each cell is as wide either side, so it takes the further of the two
+    expect(rotatedReach(reach, 1)).toEqual({ top: -75, bottom: 75, halfWidth: 60 })
+    expect(rotatedReach(reach, 3)).toEqual({ top: -75, bottom: 75, halfWidth: 60 })
+  })
+
+  it('lays the banknotes out on their sides, as the canvas shows them, and sizes the file for them', () => {
+    const note = makeNote(150, 75)
+    const upright = exportLayout([note], 2, [0], false)
+    const turned = exportLayout([note], 2, [0], false, 1)
+    // 6 mm round each at 2 px per mm: 150 × 75 mm upright, 75 × 150 on its side
+    expect([upright.width, upright.height]).toEqual([324, 174])
+    expect([turned.width, turned.height]).toEqual([174, 324])
+    expect(exportLayout([note], 2, [0], false, 2)).toEqual(upright)
+    const options = { height: 1080, fps: 30, loops: 1, perspective: false, separate: false }
+    // 75 + 12 mm wide and 150 + 12 tall: 1080 px tall at 6⅔ px per mm
+    expect(exportSize([note], { ...options, quarter: 1 })).toMatchObject({ height: 1080, width: 580 })
+    expect(exportSize([note], options).width).toBeGreaterThan(exportSize([note], { ...options, quarter: 3 }).width)
+  })
+
+  it('draws each banknote tilted about its own axes, then turned about its middle', () => {
+    const calls: unknown[][] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get(target, key) {
+        if (key in target) return target[key as string]
+        return (...args: unknown[]) => calls.push([key, ...args])
+      },
+      set(target, key, value) {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as OffscreenCanvasRenderingContext2D
+    const quiet = new Proxy({} as Record<string, unknown>, {
+      get(target, key) {
+        if (key in target) return target[key as string]
+        if (key === 'createLinearGradient') return () => ({ addColorStop() {} })
+        return () => {}
+      },
+      set(target, key, value) {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as OffscreenCanvasRenderingContext2D
+    const note = makeNote(150, 75)
+    const face = { width: 300, height: 150, getContext: () => quiet } as unknown as OffscreenCanvas
+    const assets = new Map([[note.id, { front: { frames: new Map() }, back: { frames: new Map() } }]])
+    const faces = new Map([[note.id, face]])
+    const layout = exportLayout([note], 2, [0], false, 1)
+    const { cx, cy } = layout.cells[0]
+    drawExportFrame(ctx, layout, assets, faces, 2, 0, { sheen: false, perspective: false, quarter: 1 }, 0, 0)
+    const drawing = calls.filter((c) => c[0] !== 'clearRect')
+    expect(drawing).toEqual([['save'], ['translate', cx, cy], ['rotate', Math.PI / 2], ['drawImage', face, -150, -75], ['restore']])
+    // Upright, straight onto the canvas
+    calls.length = 0
+    drawExportFrame(ctx, exportLayout([note], 2, [0], false), assets, faces, 2, 0, { sheen: false, perspective: false }, 0, 0)
+    expect(calls.filter((c) => c[0] !== 'clearRect').map((c) => c[0])).toEqual(['drawImage'])
   })
 })

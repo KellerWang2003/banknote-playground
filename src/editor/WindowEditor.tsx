@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { LengthField } from '../components/controls'
 import { clamp } from '../lib/frames'
+import { type Quarter, onItsSide, unturnedPoint } from '../lib/rotate'
 import { sectionBounds, snapWindow, threadLength, WINDOW_STEP } from '../lib/thread'
 import type { Note, ThreadWindow } from '../lib/types'
 import { Measure } from './Measure'
@@ -29,10 +30,15 @@ const TILE_ROOM = { along: 16, across: 8 }
 /** Lengths typed in any unit are kept to a millionth of a mm, as the fields keep them, without float dust */
 const exact = (mm: number) => Math.round(mm * 1e6) / 1e6
 
-/** Canvas-only editing surface; it intercepts gestures before the banknote can tilt or pan. */
-export function WindowEditor({ note, scale, selectedId, onSelect, onChange }: {
+/**
+ * Canvas-only editing surface; it intercepts gestures before the banknote can tilt or pan. On a rotated banknote
+ * (`quarter`, quarter turns clockwise) it turns with it, measures and all, and reads the pointer along the thread as it
+ * lies there.
+ */
+export function WindowEditor({ note, scale, quarter = 0, selectedId, onSelect, onChange }: {
   note: Note
   scale: number
+  quarter?: Quarter
   selectedId?: string
   onSelect: (id: string | undefined) => void
   onChange: (sections: ThreadWindow[]) => void
@@ -43,10 +49,12 @@ export function WindowEditor({ note, scale, selectedId, onSelect, onChange }: {
   const sections = note.thread.windows.sections
   // In order along the thread, as they are numbered (the Checks' Window 1, Window 2…)
   const windows = sections.toSorted((a, b) => a.startMm - b.startMm)
-  const resizeCursor = horizontal ? 'cursor-ew-resize' : 'cursor-ns-resize'
+  // On a banknote rotated onto its side, the thread runs the other way on screen
+  const resizeCursor = horizontal !== onItsSide(quarter) ? 'cursor-ew-resize' : 'cursor-ns-resize'
   const point = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    return clamp(snapWindow((horizontal ? event.clientX - rect.left : event.clientY - rect.top) / scale), 0, length)
+    const size = horizontal ? { width: length * scale, height: note.thread.widthMm * scale } : { width: note.thread.widthMm * scale, height: length * scale }
+    const at = unturnedPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), quarter, size)
+    return clamp(snapWindow((horizontal ? at.x : at.y) / scale), 0, length)
   }
   const finish = (event: React.PointerEvent<HTMLDivElement>, cancel = false) => {
     if (!gesture.current) return

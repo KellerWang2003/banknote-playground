@@ -609,7 +609,8 @@ describe('username workspace editor', () => {
     localStorage.setItem('of-thread-workspace', 'pan-zoom-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
     await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
-    const note = () => document.querySelector('[data-note-body]')!.parentElement as HTMLElement
+    // The banknote's place on the canvas, round what turns with it once rotated
+    const note = () => document.querySelector('[data-note-body]')!.parentElement!.parentElement as HTMLElement
     const layer = () => note().parentElement as HTMLElement
     const canvas = layer().parentElement as HTMLElement
     const left = parseFloat(note().style.left)
@@ -951,7 +952,8 @@ describe('username workspace editor', () => {
     await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const body = () => document.querySelector('[data-note-body]')!
-    const note = () => body().parentElement as HTMLElement
+    // The banknote's place on the canvas, round what turns with it once rotated
+    const note = () => body().parentElement!.parentElement as HTMLElement
     const canvas = () => note().parentElement!.parentElement as HTMLElement
     const left = () => parseFloat(note().style.left)
     const target = () => ({ y: useTilt.getState().target, x: useTilt.getState().targetX })
@@ -1211,6 +1213,100 @@ describe('username workspace editor', () => {
     await user.click(screen.getByRole('button', { name: 'Export', exact: true }))
     expect(await screen.findByText(/· backs/)).toBeDefined()
     expect(saves).not.toHaveBeenCalled()
+  })
+
+  it('rotates every banknote a quarter turn left or right beside Front | Back, its name upright and drags going the way the pointer goes', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      callback: ResizeObserverCallback
+      constructor(callback: ResizeObserverCallback) { this.callback = callback }
+      observe() { this.callback([{ contentRect: { width: 1280, height: 720 } } as ResizeObserverEntry], this as unknown as ResizeObserver) }
+      unobserve() {} disconnect() {}
+    })
+    for (const name of ['setPointerCapture', 'releasePointerCapture', 'hasPointerCapture']) {
+      Object.defineProperty(HTMLElement.prototype, name, { configurable: true, value: vi.fn(() => true) })
+    }
+    setTilt({ flipped: false, turn: 0, quarterTurns: 0, angle: 0, angleX: 0, target: 0, targetX: 0, lockX: false, lockY: false })
+    const user = userEvent.setup()
+    localStorage.setItem('of-thread-workspace', 'rotate-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    const demo = useProjects.getState().demoPreview!
+    const note = () => useProjects.getState().demoPreview!.notes[0]
+    act(() => updateNote(demo.id, demo.notes[0].id, (n) => ({ ...n, watermark: { ...newWatermark(n), imageId: 'fixture-watermark' } })))
+    const body = () => document.querySelector('[data-note-body]')!
+    const shown = (selector: string) => document.querySelector(`[data-note-body] ${selector}`)!
+    // What turns with the banknote, and where its name sits, upright, over it
+    const turned = () => body().parentElement!
+    const name = () => document.querySelector<HTMLElement>('[data-note-label]')!
+    const quarterTurns = () => useTilt.getState().quarterTurns
+    const tilt = () => ({ y: useTilt.getState().target, x: useTilt.getState().targetX })
+    const drag = (element: Element, dx: number, dy: number, release = true) => {
+      fireEvent.pointerDown(element, { button: 0, buttons: 1, pointerId: 1, clientX: 400, clientY: 300 })
+      fireEvent.pointerMove(element, { buttons: 1, pointerId: 1, clientX: 400 + dx, clientY: 300 + dy })
+      if (release) fireEvent.pointerUp(element, { button: 0, pointerId: 1, clientX: 400 + dx, clientY: 300 + dy })
+    }
+    expect(turned().style.transform).toBe('')
+    expect(turned().dataset.noteTurn).toBeUndefined()
+
+    // Rotate right, beside Front | Back: every banknote a quarter turn clockwise about its middle
+    await user.click(screen.getByRole('button', { name: 'Rotate right' }))
+    expect(quarterTurns()).toBe(1)
+    expect(turned().style.transform).toBe('rotate(90deg)')
+    expect(turned().dataset.noteTurn).toBe('1')
+    // Its name stays upright, over the top left of the banknote as it shows: 150 × 70 on its side shows 70 wide and
+    // 150 tall about the same middle, so 40 mm in from its own left and 40 mm above its own top
+    expect(turned().contains(name())).toBe(false)
+    expect(parseFloat(name().parentElement!.style.left)).toBeCloseTo((40 / 150) * 100)
+    expect(parseFloat(name().parentElement!.style.top)).toBeCloseTo((-40 / 70) * 100)
+
+    // A drag to the right of the screen tilts it towards its top edge, which shows there, as a drag up does upright
+    drag(body(), 40, 0, false)
+    expect(tilt()).toEqual({ y: 7.5, x: 0 })
+    fireEvent.pointerUp(body(), { button: 0, pointerId: 1 })
+    expect(tilt()).toEqual({ y: 0, x: 0 })
+
+    // Its thread now runs across the screen: a drag down moves it along the banknote's width, which runs down the screen,
+    // and a drag along it leaves it where it is
+    const from = note().thread.positionMm
+    drag(shown('[data-thread]'), 0, 40)
+    const moved = note().thread.positionMm
+    expect(moved).toBeGreaterThan(from)
+    drag(shown('[data-thread]'), 40, 0)
+    expect(note().thread.positionMm).toBe(moved)
+
+    // The watermark moves the way the pointer goes too, and so do its arrow keys: → is towards the banknote's top
+    const placed = note().watermark!
+    drag(shown('[data-watermark]'), 0, 40)
+    expect(note().watermark!.xMm).toBeGreaterThan(placed.xMm)
+    expect(note().watermark!.yMm).toBe(placed.yMm)
+    const nudged = note().watermark!
+    fireEvent.keyDown(screen.getByRole('group', { name: 'Place watermark' }), { key: 'ArrowRight' })
+    expect(note().watermark!).toMatchObject({ xMm: nudged.xMm, yMm: nudged.yMm - 0.5 })
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // R turns them right again, once for a key held down, and Shift+R left: counted on, so each turn plays the way it went
+    fireEvent.keyDown(window, { key: 'r' })
+    fireEvent.keyDown(window, { key: 'r', repeat: true })
+    expect(quarterTurns()).toBe(2)
+    expect(turned().style.transform).toBe('rotate(180deg)')
+    // Upside down it covers its own box, its name back at its top left
+    expect(name().parentElement!.style.left).toBe('0%')
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(window, { key: 'R', shiftKey: true })
+    expect(quarterTurns()).toBe(-1)
+    expect(turned().style.transform).toBe('rotate(-90deg)')
+    expect(turned().dataset.noteTurn).toBe('3')
+    await user.click(screen.getByRole('button', { name: 'Rotate left' }))
+    await user.click(screen.getByRole('button', { name: 'Rotate right' }))
+    expect(quarterTurns()).toBe(-1)
+
+    // An export of them turned comes out turned
+    await user.click(screen.getByRole('button', { name: 'Export', exact: true }))
+    expect(await screen.findByText(/· rotated 90° left/)).toBeDefined()
+    // A way of looking, never saved, and upright again once the project closes
+    expect(saves).not.toHaveBeenCalled()
+    cleanup()
+    expect(quarterTurns()).toBe(0)
   })
 
   it('keeps the watermark when a banknote is duplicated, removes it from its layer, and undoes the removal', async () => {

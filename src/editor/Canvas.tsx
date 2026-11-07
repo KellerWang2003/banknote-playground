@@ -19,6 +19,7 @@ import type { Note } from '../lib/types'
 import { lengthIn, useLengthUnit } from '../lib/units'
 import { isPlaced, type PlacedLayer } from '../lib/layers'
 import { type PlacedBox, moveBox } from '../lib/placed'
+import { type Quarter, ROTATE_SECONDS, noteBox, onItsSide, quarterOf, turnedCorner, unturn, unturnedPoint } from '../lib/rotate'
 import { setTilt, showsBack, springToFlat, useTilt, useTiltLoop } from '../tilt/tilt'
 import { EdgeMarks, NeighbourRing } from './ContinuousView'
 import { addImageFrames, type NoteRef } from './frameActions'
@@ -67,13 +68,15 @@ type Gesture =
    */
   | { mode: 'placed'; layer: PlacedLayer; noteId: string; startX: number; startY: number; original: PlacedBox; moved: boolean; mirror: boolean }
 
-function fitView(notes: Note[], size: { width: number; height: number }): View {
+function fitView(notes: Note[], size: { width: number; height: number }, quarter: Quarter = 0): View {
   // A widened right panel takes more room
   const FIT_INSETS = { ...FIT, right: Math.max(FIT.right, usePanelWidth.getState().width + 36) }
-  const minX = Math.min(...notes.map((n) => n.x))
-  const minY = Math.min(...notes.map((n) => n.y))
-  const maxX = Math.max(...notes.map((n) => n.x + n.widthMm))
-  const maxY = Math.max(...notes.map((n) => n.y + n.heightMm))
+  // The banknotes as they show, rotated onto their sides or not
+  const boxes = notes.map((n) => noteBox(n, quarter))
+  const minX = Math.min(...boxes.map((b) => b.x))
+  const minY = Math.min(...boxes.map((b) => b.y))
+  const maxX = Math.max(...boxes.map((b) => b.x + b.width))
+  const maxY = Math.max(...boxes.map((b) => b.y + b.height))
   const zoom = clamp(
     Math.min(
       (size.width - FIT_INSETS.left - FIT_INSETS.right) / ((maxX - minX) * PX_PER_MM),
@@ -158,6 +161,10 @@ export function Canvas({
   const frameNumbers = useTilt((s) => s.frameNumbers)
   // Turned over, the banknotes show their backs (from halfway round, as NoteView does)
   const back = useTilt(showsBack)
+  // Rotated (Rotate left and right beside Front | Back), every banknote turns about its own middle, counted on either way
+  // so each quarter turn plays the way it was asked
+  const quarterTurns = useTilt((s) => s.quarterTurns)
+  const quarter = quarterOf(quarterTurns)
   // Space held: a press pans, whatever it lands on
   const hand = useSpaceHand((s) => s.held)
 
@@ -173,7 +180,7 @@ export function Canvas({
   const unit = useLengthUnit((s) => s.unit)
 
   // Until the first pan or zoom, the view simply fits every note
-  const current = view ?? (size && notes.length ? fitView(notes, size) : undefined)
+  const current = view ?? (size && notes.length ? fitView(notes, size, quarter) : undefined)
   const scale = current ? current.zoom * PX_PER_MM : 0
 
   /**
@@ -188,8 +195,12 @@ export function Canvas({
   committed.current = current
   const viewRef = useRef(current)
   viewRef.current = live.current ?? current
+  // Still fitting every note: nothing has panned or zoomed it yet
+  const fitting = useRef(view === undefined)
+  fitting.current = view === undefined
 
   const showView = (v: View) => {
+    stopGlide()
     const base = committed.current
     const element = ref.current
     if (!base || !content.current || !element) return setView(v)
@@ -221,15 +232,31 @@ export function Canvas({
   }
   /** Ends a live pan or zoom: React draws the view for real */
   const commitView = () => {
+    stopGlide()
     clearTimeout(commitTimer.current)
     const v = live.current
     if (v) setView(v)
   }
   /** A jump (zoom buttons, fit, focus) replaces any live view straight away */
   const jumpTo = (v: View) => {
+    stopGlide()
     clearTimeout(commitTimer.current)
     live.current = undefined
     setView(v)
+  }
+  /** The layer as React drew it, with no transform, and the dots for the committed view */
+  const settle = () => {
+    if (content.current) {
+      content.current.style.transform = ''
+      content.current.style.willChange = ''
+      for (const label of content.current.querySelectorAll<HTMLElement>('[data-note-label], [data-keep-size]')) label.style.transform = ''
+    }
+    const v = committed.current
+    if (ref.current && v) {
+      const g = gridStep(v.zoom * PX_PER_MM)
+      ref.current.style.backgroundSize = `${g}px ${g}px`
+      ref.current.style.backgroundPosition = `${v.x}px ${v.y}px`
+    }
   }
   // Once React has drawn the committed view, the layer goes back to no transform, in the same frame
   useLayoutEffect(() => {
@@ -237,20 +264,55 @@ export function Canvas({
     live.current = undefined
     cancelAnimationFrame(frame.current)
     frame.current = 0
-    if (content.current) {
-      content.current.style.transform = ''
-      content.current.style.willChange = ''
-      for (const label of content.current.querySelectorAll<HTMLElement>('[data-note-label], [data-keep-size]')) label.style.transform = ''
-    }
-    if (ref.current && current) {
-      const g = gridStep(current.zoom * PX_PER_MM)
-      ref.current.style.backgroundSize = `${g}px ${g}px`
-      ref.current.style.backgroundPosition = `${current.x}px ${current.y}px`
-    }
+    settle()
   })
+
+  /**
+   * Rotating (Rotate left and right): a view that has been panned or zoomed stays where it is, so the banknotes turn in
+   * place, and Fit takes them all in again; a view still fitting every banknote glides, as they turn, to fit them as they
+   * show once turned, so none turns off the screen. The glide is a live view, as a pan's is, never committed, so the view
+   * goes on fitting; a pan, zoom or press stops it where it is.
+   */
+  const turnFrom = useRef<View>(undefined)
+  const glide = useRef(0)
+  const stopGlide = () => {
+    cancelAnimationFrame(glide.current)
+    glide.current = 0
+  }
+  useEffect(() => useTilt.subscribe((state, previous) => {
+    if (state.quarterTurns !== previous.quarterTurns && fitting.current) turnFrom.current = viewRef.current
+  }), [])
+  useLayoutEffect(() => {
+    const from = turnFrom.current
+    const to = committed.current
+    turnFrom.current = undefined
+    if (!from || !to || !fitting.current) return
+    stopGlide()
+    const start = performance.now()
+    const step = (now: number) => {
+      const t = clamp((now - start) / (ROTATE_SECONDS * 1000), 0, 1)
+      // Eased in and out, as the banknotes turn
+      const k = t < 0.5 ? 2 * t * t : 1 - (2 - 2 * t) ** 2 / 2
+      if (t < 1) {
+        live.current = { zoom: from.zoom + (to.zoom - from.zoom) * k, x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k }
+        viewRef.current = live.current
+        drawLive()
+        glide.current = requestAnimationFrame(step)
+      } else {
+        glide.current = 0
+        live.current = undefined
+        viewRef.current = committed.current
+        settle()
+      }
+    }
+    step(start)
+    // Only as the banknotes start to turn
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quarterTurns])
   useEffect(() => () => {
     clearTimeout(commitTimer.current)
     cancelAnimationFrame(frame.current)
+    cancelAnimationFrame(glide.current)
   }, [])
 
   const zoomAround = (factor: number, cx: number, cy: number) => {
@@ -414,10 +476,12 @@ export function Canvas({
           onSelectLayer(note.id, 'thread')
           const rect = (e.target as HTMLElement).closest('[data-note-body]')?.firstElementChild?.getBoundingClientRect()
           const horizontal = note.thread.direction === 'horizontal'
-          const alongMm = rect
+          // Where the press is on the banknote as it lies, rotated or not
+          const at = rect && unturnedPoint(e.clientX, e.clientY, rect, quarter)
+          const alongMm = at
             ? horizontal
-              ? ((e.clientX - rect.left) / rect.width) * note.widthMm
-              : ((e.clientY - rect.top) / rect.height) * note.heightMm
+              ? (at.x / at.width) * note.widthMm
+              : (at.y / at.height) * note.heightMm
             : -1
           gesture.current = { mode: 'thread', noteId: note.id, startX: e.clientX, startY: e.clientY, startPosition: note.thread.positionMm, alongMm }
         } else if (onPlaced && placed && note) {
@@ -454,50 +518,54 @@ export function Canvas({
         if (g.mode === 'pan') {
           showView({ ...g.view, x: g.view.x + dx, y: g.view.y + dy })
         } else if (g.mode === 'thread') {
+          // Along the banknote's own axes, which a rotated banknote turns on screen
+          const along = unturn(dx, dy, quarter)
           updateNote(projectId, g.noteId, (n) => {
             const horizontal = n.thread.direction === 'horizontal'
             const across = horizontal ? n.heightMm : n.widthMm
             const half = n.thread.widthMm / 2
-            const positionMm = clamp(Math.round((g.startPosition + (horizontal ? dy : dx) / scale) * 2) / 2, half, across - half)
+            const positionMm = clamp(Math.round((g.startPosition + (horizontal ? along.y : along.x) / scale) * 2) / 2, half, across - half)
             return positionMm === n.thread.positionMm ? n : { ...n, thread: { ...n.thread, positionMm } }
           })
         } else if (g.mode === 'placed') {
           if (!g.moved && Math.hypot(dx, dy) < 3) return
           g.moved = true
-          // From where the press found it, in 0.5 mm steps, kept on the banknote
+          // From where the press found it, in 0.5 mm steps, kept on the banknote, the way the pointer goes on it rotated
           const note = notes.find((n) => n.id === g.noteId)
           const box = note?.[g.layer]
-          const next = note && moveBox(g.original, (g.mirror ? -dx : dx) / scale, dy / scale, note)
+          const along = unturn(dx, dy, quarter)
+          const next = note && moveBox(g.original, (g.mirror ? -along.x : along.x) / scale, along.y / scale, note)
           if (box && next && (next.xMm !== box.xMm || next.yMm !== box.yMm)) placeLayer({ projectId, noteId: g.noteId }, g.layer, next)
         } else if (g.mode === 'move') {
           const round = (mm: number) => Math.round(mm * 2) / 2
           const rawX = g.noteX + dx / scale
           const rawY = g.noteY + dy / scale
           const moving = notes.find((n) => n.id === g.noteId)
-          // Edges and centres snap to the other banknotes; hold ⌘/Ctrl to place freely on the 0.5 mm grid
+          // Edges and centres snap to the other banknotes as they show, rotated or not; hold ⌘/Ctrl to place freely on the
+          // 0.5 mm grid
+          const shown = moving && noteBox({ x: rawX, y: rawY, widthMm: moving.widthMm, heightMm: moving.heightMm }, quarter)
           const snapped =
-            moving && !(e.metaKey || e.ctrlKey)
-              ? snapBox(
-                  { x: rawX, y: rawY, width: moving.widthMm, height: moving.heightMm },
-                  notes.filter((n) => n.id !== g.noteId).map((n) => ({ x: n.x, y: n.y, width: n.widthMm, height: n.heightMm })),
-                  SNAP_PX / scale,
-                )
+            shown && !(e.metaKey || e.ctrlKey)
+              ? snapBox(shown, notes.filter((n) => n.id !== g.noteId).map((n) => noteBox(n, quarter)), SNAP_PX / scale)
               : undefined
-          const x = snapped && snapped.guides.some((d) => d.axis === 'x') ? snapped.x : round(rawX)
-          const y = snapped && snapped.guides.some((d) => d.axis === 'y') ? snapped.y : round(rawY)
+          // The banknote moves as far as the box it shows snapped
+          const x = shown && snapped && snapped.guides.some((d) => d.axis === 'x') ? rawX + snapped.x - shown.x : round(rawX)
+          const y = shown && snapped && snapped.guides.some((d) => d.axis === 'y') ? rawY + snapped.y - shown.y : round(rawY)
           setGuides(snapped?.guides ?? [])
           updateNote(projectId, g.noteId, (n) => (n.x === x && n.y === y ? n : { ...n, x, y }))
         } else {
           if (!g.moved && Math.hypot(dx, dy) < 3) return
           g.moved = true
           // About 160 px of drag tilts the note 30°; past one cycle the frames loop. Both directions always
-          // tilt, unless locked on the tilt pad.
+          // tilt, unless locked on the tilt pad. Rotated, the drag is turned back to the banknotes' own axes, so they tilt
+          // the way the pointer goes on screen and the lens plays as it would turned in the hand
           const limit = loopLens.viewDeg
           const { lockX, lockY } = useTilt.getState()
+          const along = unturn(dx, dy, quarter)
           setTilt({
             source: 'drag',
-            target: lockY ? g.start : clamp(g.start - (dy * 30) / 160, -limit, limit),
-            targetX: lockX ? g.startSide : clamp(g.startSide + (dx * 30) / 160, -limit, limit),
+            target: lockY ? g.start : clamp(g.start - (along.y * 30) / 160, -limit, limit),
+            targetX: lockX ? g.startSide : clamp(g.startSide + (along.x * 30) / 160, -limit, limit),
           })
         }
       }}
@@ -558,61 +626,76 @@ export function Canvas({
           const face = designFace(note, back ? 'back' : 'front')
           const check = picked === 'note' && face.background === 'image' && face.faceImageId ? note.continuous : undefined
           const drift = check ? driftWithin(drifts[note.id], check.cutMm) : undefined
+          // Where the banknote's top-left corner shows once rotated, for its name
+          const corner = turnedCorner(note.widthMm, note.heightMm, quarter)
           return (
             <div
               key={note.id}
               className="absolute"
-              style={{ left: current.x + note.x * scale, top: current.y + note.y * scale }}
+              style={{ left: current.x + note.x * scale, top: current.y + note.y * scale, width: note.widthMm * scale, height: note.heightMm * scale }}
             >
-              {drift && <NeighbourRing note={face} scale={scale} drift={drift} quiet={quiet} />}
-              <div
-                data-note-label={note.id}
-                className={cn(
-                  'absolute bottom-full left-0 mb-1.5 flex origin-bottom-left items-baseline gap-1.5 text-xs whitespace-nowrap',
-                  'cursor-move',
-                  drift && 'invisible',
-                )}
-              >
-                <span className={cn('font-medium', isSelected ? 'text-foreground' : 'text-muted-foreground')}>{note.name}</span>
-                <span className="text-muted-foreground/70 tabular-nums">
-                  {lengthIn(note.widthMm, unit)} × {lengthIn(note.heightMm, unit)} {unit}
-                </span>
-                {/* Which side shows, once turned over, as the back has no thread to tell it by */}
-                {back && <span data-side-label="" className="text-muted-foreground/70">Back</span>}
+              {/* The name stays upright over the top left of the banknote as it shows, rotated or not, gliding there as it
+                  turns (in shares of the banknote, so a zoom doesn't set it gliding) */}
+              <div className="absolute transition-[left,top] ease-in-out motion-reduce:transition-none"
+                style={{ left: `${corner.x * 100}%`, top: `${corner.y * 100}%`, transitionDuration: `${ROTATE_SECONDS}s` }}>
+                <div
+                  data-note-label={note.id}
+                  className={cn(
+                    'absolute bottom-full left-0 mb-1.5 flex origin-bottom-left items-baseline gap-1.5 text-xs whitespace-nowrap',
+                    'cursor-move',
+                    drift && 'invisible',
+                  )}
+                >
+                  <span className={cn('font-medium', isSelected ? 'text-foreground' : 'text-muted-foreground')}>{note.name}</span>
+                  <span className="text-muted-foreground/70 tabular-nums">
+                    {lengthIn(note.widthMm, unit)} × {lengthIn(note.heightMm, unit)} {unit}
+                  </span>
+                  {/* Which side shows, once turned over, as the back has no thread to tell it by */}
+                  {back && <span data-side-label="" className="text-muted-foreground/70">Back</span>}
+                </div>
               </div>
-              <div
-                data-note-body={note.id}
-                // A short perspective, relative to the note's size, so the near edge visibly widens and the far edge
-                // narrows: you can see which way the note is tilting, not just that it got shorter
-                style={{ perspective: 2.2 * Math.max(note.widthMm, note.heightMm) * scale, borderRadius: 1.5 * scale }}
-                className={cn(
-                  'outline-offset-4 transition-[outline-color] duration-150 cursor-ns-resize',
-                  drift ? 'outline-0' : picked === 'note' ? 'outline-2' : hovered === 'note' ? 'outline-1' : 'outline-0',
-                  quiet ? 'outline-primary/5' : 'outline-primary/25',
-                  // NoteView's own shadow would darken the seam
-                  drift && '[&>div:first-child]:shadow-none',
-                )}
-              >
-                {/* Editing windows shows the banknote flat with its watermark faint; placing a layer, flat (the watermark clear) */}
-                <NoteView note={note} scale={scale} live perspective={perspective && !editingThis && !placingThis} sheen={sheen}
-                  reveal={editingThis ? 0 : placingThis === 'watermark' ? 1 : undefined} showWindowCuts={editingThis} showFrameNumber={frameNumbers} offsetMm={offsets[note.id]}
-                  selected={picked === 'note' || editingThis || placingThis || quiet ? undefined : picked} hovered={hovered === 'note' ? undefined : hovered}
-                  faceShiftMm={drift && (drift.x || drift.y) ? drift : undefined} />
-                {placingThis && (
-                  <PlacingBox note={note} layer={placingThis} box={note[placingThis]!} scale={scale} mirror={back} onChange={(next) => placeLayer(ref, placingThis, next)} />
-                )}
-                {isSelected && editingWindows && note.thread.windows.enabled && (
-                  <WindowEditor note={note} scale={scale} selectedId={selectedWindowId} onSelect={onWindowSelect}
-                    onChange={(sections) => updateNote(projectId, note.id, (n) => ({ ...n, thread: { ...n.thread, windows: { ...n.thread.windows, sections } } }))} />
-                )}
-                {/* A side showing no design has a + in its middle to upload one (Keller), out of the way while it plays or is
-                    dragged, edited or placed on, and on banknotes too small on screen to hold it */}
-                {!(face.background === 'image' && face.faceImageId) && !quiet && !editingThis && !placingThis
-                  && Math.min(note.widthMm, note.heightMm) * scale >= 64 && (
-                  <UploadDesignButton noteRef={ref} side={back ? 'back' : 'front'} />
-                )}
+              {/* Rotated, everything on the banknote turns with it about its middle, its tilt in 3D still about its own axes
+                  inside. On its side, its thread's cursor turns too, unless Space's hand is showing */}
+              <div data-note-turn={quarter || undefined}
+                className={cn('absolute inset-0 transition-transform ease-in-out motion-reduce:transition-none',
+                  onItsSide(quarter) && !grab && (note.thread.direction === 'vertical' ? '[&_[data-thread]]:cursor-ns-resize!' : '[&_[data-thread]]:cursor-ew-resize!'))}
+                style={{ transform: quarterTurns ? `rotate(${quarterTurns * 90}deg)` : undefined, transitionDuration: `${ROTATE_SECONDS}s` }}>
+                {drift && <NeighbourRing note={face} scale={scale} drift={drift} quiet={quiet} />}
+                <div
+                  data-note-body={note.id}
+                  // A short perspective, relative to the note's size, so the near edge visibly widens and the far edge
+                  // narrows: you can see which way the note is tilting, not just that it got shorter
+                  style={{ perspective: 2.2 * Math.max(note.widthMm, note.heightMm) * scale, borderRadius: 1.5 * scale }}
+                  className={cn(
+                    'outline-offset-4 transition-[outline-color] duration-150 cursor-ns-resize',
+                    drift ? 'outline-0' : picked === 'note' ? 'outline-2' : hovered === 'note' ? 'outline-1' : 'outline-0',
+                    quiet ? 'outline-primary/5' : 'outline-primary/25',
+                    // NoteView's own shadow would darken the seam
+                    drift && '[&>div:first-child]:shadow-none',
+                  )}
+                >
+                  {/* Editing windows shows the banknote flat with its watermark faint; placing a layer, flat (the watermark clear) */}
+                  <NoteView note={note} scale={scale} live perspective={perspective && !editingThis && !placingThis} sheen={sheen}
+                    reveal={editingThis ? 0 : placingThis === 'watermark' ? 1 : undefined} showWindowCuts={editingThis} showFrameNumber={frameNumbers} offsetMm={offsets[note.id]}
+                    selected={picked === 'note' || editingThis || placingThis || quiet ? undefined : picked} hovered={hovered === 'note' ? undefined : hovered}
+                    faceShiftMm={drift && (drift.x || drift.y) ? drift : undefined} />
+                  {placingThis && (
+                    <PlacingBox note={note} layer={placingThis} box={note[placingThis]!} scale={scale} mirror={back} quarter={quarter}
+                      onChange={(next) => placeLayer(ref, placingThis, next)} />
+                  )}
+                  {isSelected && editingWindows && note.thread.windows.enabled && (
+                    <WindowEditor note={note} scale={scale} quarter={quarter} selectedId={selectedWindowId} onSelect={onWindowSelect}
+                      onChange={(sections) => updateNote(projectId, note.id, (n) => ({ ...n, thread: { ...n.thread, windows: { ...n.thread.windows, sections } } }))} />
+                  )}
+                  {/* A side showing no design has a + in its middle to upload one (Keller), out of the way while it plays or is
+                      dragged, edited or placed on, and on banknotes too small on screen to hold it */}
+                  {!(face.background === 'image' && face.faceImageId) && !quiet && !editingThis && !placingThis
+                    && Math.min(note.widthMm, note.heightMm) * scale >= 64 && (
+                    <UploadDesignButton noteRef={ref} side={back ? 'back' : 'front'} />
+                  )}
+                </div>
+                {drift && <EdgeMarks note={face} scale={scale} drift={drift} quiet={quiet} />}
               </div>
-              {drift && <EdgeMarks note={face} scale={scale} drift={drift} quiet={quiet} />}
             </div>
           )
         })}
@@ -654,7 +737,7 @@ export function Canvas({
             <IconButton className="rounded-lg" label="Zoom in" onClick={() => zoomAround(1.25, size.width / 2, size.height / 2)}>
               <Plus />
             </IconButton>
-            <IconButton className="rounded-lg" label="Fit all notes" onClick={() => jumpTo(fitView(notes, size))}>
+            <IconButton className="rounded-lg" label="Fit all notes" onClick={() => jumpTo(fitView(notes, size, quarter))}>
               <Maximize />
             </IconButton>
             {onExport && (

@@ -11,6 +11,7 @@ import type { ExportFormat } from '../lib/exportMedia'
 import { RESOLUTIONS, exportSize, turnsOver } from '../lib/exportRender'
 import type { Project } from '../lib/types'
 import { usePatternOffsets } from '../lib/patternOffset'
+import { ROTATION_NAMES, quarterOf } from '../lib/rotate'
 import { useTilt } from '../tilt/tilt'
 
 const FORMATS = [{ value: 'mp4' as const, label: 'MP4' }, { value: 'gif' as const, label: 'GIF' }]
@@ -65,20 +66,22 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
   const sheen = useTilt((s) => s.sheen)
   const perspective = useTilt((s) => s.perspective)
   const frameNumbers = useTilt((s) => s.frameNumbers)
-  // The lamp switch left on holds the whole video up to the light, as # carries frame numbers into it, and banknotes
-  // turned over export their backs
+  // The lamp switch left on holds the whole video up to the light, as # carries frame numbers into it, banknotes
+  // turned over export their backs, and rotated ones export rotated
   const backlit = useTilt((s) => s.backlit)
   const back = useTilt((s) => s.flipped)
+  const quarter = useTilt((s) => quarterOf(s.quarterTurns))
   const offsets = usePatternOffsets((s) => s.offsets)
 
   const notes = project.notes.filter((n) => chosen.has(n.id))
   const several = notes.length > 1
   const allChosen = notes.length === project.notes.length
   const options = { format, notes, separate: several && separate, height, fps, loops: format === 'gif' ? 1 : loops, sheen, perspective, frameNumbers, backlit, back,
-    background: format === 'gif' && transparent ? undefined : background, offsets }
+    quarter, background: format === 'gif' && transparent ? undefined : background, offsets }
   const size = exportSize(notes, options)
   // Turned over, the banknotes export their backs, or start on them when Flip moves turn them over
   const sides = !back ? '' : notes.length > 0 && turnsOver(notes[0]) ? ' · from the backs' : ' · backs'
+  const rotated = quarter ? ` · ${ROTATION_NAMES[quarter]}` : ''
   const busy = progress !== undefined
   const files = options.separate ? notes.length : 1
 
@@ -171,7 +174,7 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
             <Progress className="flex-1" value={Math.round(progress * 100)} />
           ) : (
             <span className="text-xs text-muted-foreground tabular-nums">
-              {notes.length > 0 && `${size.width} × ${size.height} · ${size.seconds.toFixed(1)} s${files > 1 ? ` · ${files} files` : ''}${sides}${backlit ? ' · held to the light' : ''}`}
+              {notes.length > 0 && `${size.width} × ${size.height} · ${size.seconds.toFixed(1)} s${files > 1 ? ` · ${files} files` : ''}${sides}${rotated}${backlit ? ' · held to the light' : ''}`}
             </span>
           )}
           <div className="flex shrink-0 gap-2">
