@@ -36,6 +36,7 @@ uniform vec2 uSize;
 uniform float uEye;
 uniform vec2 uAxis;
 uniform float uEdge;
+uniform vec2 uRest;
 uniform float uLobe;
 uniform vec3 uLamp;
 uniform vec3 uDown;
@@ -75,10 +76,10 @@ void main() {
   vec3 p = uRot * vec3(uOrigin + vUv * uSize, 0.0);
   vec3 v = normalize(vec3(0.0, 0.0, uEye) - p);
   vec3 l = normalize(uLamp - p);
-  // The magnet's curve across the shape, each flake a little off it
-  float phi = (dot(vUv, uAxis) - 0.5) * 2.0 * uEdge;
+  // The magnet's curve across the shape, its middle facing the eye, each flake a little off it
+  float phi = (dot(vUv, uAxis) - 0.5) * 2.0 * uEdge + uRest.x;
   vec2 cell = floor(vUv * uRes / uCell);
-  vec3 flake = vec3(uAxis * sin(phi), cos(phi));
+  vec3 flake = normalize(vec3(uAxis * sin(phi) + uAxis.yx * (tan(uRest.y) * cos(phi)), cos(phi)));
   vec3 n = normalize(uRot * normalize(flake + vec3(hash(cell) - 0.5, hash(cell + 17.0) - 0.5, 0.0) * ${glsl(2 * GRAIN_TILT)}));
   float facing = dot(n, v);
   vec3 r = 2.0 * facing * n - v;
@@ -99,7 +100,7 @@ void main() {
   gl_FragColor = vec4(encode(tone(light)) * m, m);
 }`
 
-const UNIFORMS = ['uMask', 'uRes', 'uCell', 'uRot', 'uOrigin', 'uSize', 'uEye', 'uAxis', 'uEdge', 'uLobe', 'uLamp', 'uDown', 'uFlat', 'uTilted', 'uHue'] as const
+const UNIFORMS = ['uMask', 'uRes', 'uCell', 'uRot', 'uOrigin', 'uSize', 'uEye', 'uAxis', 'uEdge', 'uRest', 'uLobe', 'uLamp', 'uDown', 'uFlat', 'uTilted', 'uHue'] as const
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext
 /** A mask the ink is drawn through: its alpha is how much ink each pixel takes */
@@ -286,6 +287,7 @@ export function drawLitInk(
   gl.uniform1f(u('uEye'), light.eye)
   gl.uniform2f(u('uAxis'), ...light.axis)
   gl.uniform1f(u('uEdge'), light.edge)
+  gl.uniform2f(u('uRest'), ...light.rest)
   gl.uniform1f(u('uLobe'), light.lobe)
   gl.uniform3f(u('uLamp'), ...light.lamp)
   gl.uniform3f(u('uDown'), ...light.down)

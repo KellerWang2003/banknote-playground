@@ -12,10 +12,11 @@ import type { MagneticInk } from './types'
  * the ink is cured: the bright bar is the band of flakes mirroring the lamp to the eye, and it rolls as a tilt brings the
  * next band round. Here the flakes curve across the shape the way the bar rolls, just far enough that the bar rolls off by
  * INK_ROLL_DEG, as the flat look's does; Bar width sets how wide the lamp's reflection is, and Flat and Tilted are the
- * colour seen square-on and from REAL_SHIFT_DEG off it. There is one light, a lamp just above the viewer's eye, so the bar
- * rests in the middle flat, and holding the banknote to the light leaves the ink as it was. The numbers are tuned by eye on
- * Keller's 15 strip, as the flat look's are, and are not settings. This file sets up each draw (`inkLight`); the GPU shades
- * every pixel with it (inkRenderer.ts), on the canvas and in exports alike.
+ * colour seen square-on and from REAL_SHIFT_DEG off it. There is one light, a lamp just above the viewer's eye, and the
+ * magnet sets the flakes to face that viewer (`flakeRest`), so the bar rests in the middle of the ink flat wherever it sits
+ * on the banknote, as the flat look's does, and as bright; holding the banknote to the light leaves the ink as it was. The
+ * numbers are tuned by eye on Keller's 15 strip, as the flat look's are, and are not settings. This file sets up each draw
+ * (`inkLight`); the GPU shades every pixel with it (inkRenderer.ts), on the canvas and in exports alike.
  */
 
 const RAD = Math.PI / 180
@@ -61,12 +62,30 @@ export const flakeEdge = (barWidth: number) => (INK_ROLL_DEG / (1 + barWidth)) *
 export const lampLobe = (barWidth: number) => (barWidth * flakeEdge(barWidth)) / Math.sqrt(Math.LN2)
 
 /**
- * A flake's facing `t` of the way across the shape the way the bar rolls (down for a level bar, right for an upright one),
- * before the banknote turns: square-on in the middle, turning up to `flakeEdge` towards either edge
+ * How the flakes in the middle of the ink are turned to face the eye of the viewer `eye` mm out from the middle of the
+ * banknote, as the magnet sets them: radians the way the bar rolls, and across it. So, flat, the bar rests in the middle of
+ * the ink wherever it sits, as the flat look's does, and as bright as in the banknote's middle. Square-on flakes would
+ * mirror the eye only nearer the banknote's middle, resting the bar off towards it, and off to its side would mirror the
+ * lamp past the eye, leaving the bar only its glow.
  */
-export function flakeNormal(barAxis: MagneticInk['barAxis'], barWidth: number, t: number): [number, number, number] {
-  const phi = (t - 0.5) * 2 * flakeEdge(barWidth)
-  return barAxis === 'x' ? [Math.sin(phi), 0, Math.cos(phi)] : [0, Math.sin(phi), Math.cos(phi)]
+export function flakeRest(ink: Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'barAxis'>, note: Size, eye: number): [number, number] {
+  const x = ink.xMm + ink.widthMm / 2 - note.widthMm / 2
+  const y = ink.yMm + ink.heightMm / 2 - note.heightMm / 2
+  const [along, across] = ink.barAxis === 'x' ? [x, y] : [y, x]
+  // + 0 turns a negative zero into 0
+  return [Math.atan2(-along, eye) + 0, Math.atan2(-across, eye) + 0]
+}
+
+/**
+ * A flake's facing `t` of the way across the shape the way the bar rolls (down for a level bar, right for an upright one),
+ * before the banknote turns: turned `rest` in the middle (`flakeRest`; square-on for a viewer far off), turning up to
+ * `flakeEdge` further the way the bar rolls towards either edge
+ */
+export function flakeNormal(barAxis: MagneticInk['barAxis'], barWidth: number, t: number, rest: [number, number] = [0, 0]): [number, number, number] {
+  const phi = (t - 0.5) * 2 * flakeEdge(barWidth) + rest[0]
+  const along = Math.sin(phi), across = Math.tan(rest[1]) * Math.cos(phi), z = Math.cos(phi)
+  const length = Math.hypot(along, across, z)
+  return barAxis === 'x' ? [along / length, across / length, z / length] : [across / length, along / length, z / length]
 }
 
 /**
@@ -124,8 +143,9 @@ export interface InkLight {
   eye: number
   /** Which way the flakes curve: across for an upright bar, up and down for a level one */
   axis: [number, number]
-  /** `flakeEdge` and `lampLobe` */
+  /** `flakeEdge`, `flakeRest` and `lampLobe` */
   edge: number
+  rest: [number, number]
   lobe: number
   /** Where the lamp is, and which way is down in the room, as they lie on the banknote's own turn, before Rotate turns it on screen */
   lamp: [number, number, number]
@@ -161,6 +181,7 @@ export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quar
     eye,
     axis: ink.barAxis === 'x' ? [1, 0] : [0, 1],
     edge: flakeEdge(ink.barWidth),
+    rest: flakeRest(ink, note, eye),
     lobe: lampLobe(ink.barWidth),
     lamp: room(0, -LAMP_ABOVE * eye, eye),
     down: room(0, 1, 0),

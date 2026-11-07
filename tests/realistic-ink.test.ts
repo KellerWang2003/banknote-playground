@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_INK, INK_ROLL_DEG, barCentre, inkRoll } from '../src/lib/magneticInk'
+import { perspectiveFor } from '../src/lib/frames'
+import { DEFAULT_INK, INK_ROLL_DEG, barCentre, inkRoll, newMagneticInk } from '../src/lib/magneticInk'
 import {
-  LAMP_ABOVE, MAX_INK_PIXELS, MAX_INK_SIDE, REAL_SHIFT_DEG, filmShift, flakeEdge, flakeNormal, hueTravel, inkLight, inkPixels, lampLobe, oklch,
-  tiltMatrix, turned,
+  LAMP_ABOVE, MAX_INK_PIXELS, MAX_INK_SIDE, REAL_SHIFT_DEG, filmShift, flakeEdge, flakeNormal, flakeRest, hueTravel, inkLight, inkPixels, lampLobe,
+  oklch, tiltMatrix, turned,
 } from '../src/lib/realisticInk'
 import type { MagneticInk } from '../src/lib/types'
 
@@ -10,6 +11,10 @@ const RAD = Math.PI / 180
 const ink = (change: Partial<MagneticInk> = {}): MagneticInk => ({ xMm: 96, yMm: 8, widthMm: 14, heightMm: 54, ...DEFAULT_INK, realistic: true, ...change })
 const note = { widthMm: 150, heightMm: 70 }
 const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const unit = (a: number[]): [number, number, number] => {
+  const length = Math.hypot(a[0], a[1], a[2])
+  return [a[0] / length, a[1] / length, a[2] / length]
+}
 
 /**
  * Where across the shape (0 to 1 the way the bar rolls, carried on past the edges) the flakes face a viewer far off
@@ -23,6 +28,41 @@ function barMiddle(barAxis: MagneticInk['barAxis'], barWidth: number, tilt: { x:
     if (facing > best.facing) best = { t, facing }
   }
   return best.t
+}
+
+/**
+ * The same, seen as the canvas sees it: from the eye in front of the banknote's middle, lit by the lamp just above it, along
+ * the line through the middle of the ink, as the GPU lights each pixel
+ */
+function barSeen(lit: MagneticInk, tilt: { x: number; y: number }) {
+  const eye = perspectiveFor(note, 1)
+  const light = inkLight(lit, note, tilt, eye)
+  const along = lit.barAxis === 'x' ? 0 : 1
+  let best = { t: 0, score: -Infinity }
+  for (let t = -1; t <= 2; t += 0.0005) {
+    const at: [number, number, number] = [light.origin[0] + light.size[0] / 2, light.origin[1] + light.size[1] / 2, 0]
+    at[along] = light.origin[along] + t * light.size[along]
+    const p = turned(light.rot, at)
+    const v = unit([-p[0], -p[1], eye - p[2]])
+    const l = unit([light.lamp[0] - p[0], light.lamp[1] - p[1], light.lamp[2] - p[2]])
+    // The flake mirrors the lamp to the eye when it faces halfway between them
+    const score = dot(turned(light.rot, flakeNormal(lit.barAxis, lit.barWidth, t, light.rest)), unit([v[0] + l[0], v[1] + l[1], v[2] + l[2]]))
+    if (score > best.score) best = { t, score }
+  }
+  return best.t
+}
+
+/** How bright the lamp's core is in the middle of the ink, flat, from 0 to 1, seen as the GPU sees it */
+function coreSeen(lit: MagneticInk) {
+  const eye = perspectiveFor(note, 1)
+  const light = inkLight(lit, note, { x: 0, y: 0 }, eye)
+  const p = [light.origin[0] + light.size[0] / 2, light.origin[1] + light.size[1] / 2, 0]
+  const v = unit([-p[0], -p[1], eye])
+  const l = unit([light.lamp[0] - p[0], light.lamp[1] - p[1], light.lamp[2]])
+  const n = flakeNormal(lit.barAxis, lit.barWidth, 0.5, light.rest)
+  const facing = dot(n, v)
+  const r = [2 * facing * n[0] - v[0], 2 * facing * n[1] - v[1], 2 * facing * n[2] - v[2]]
+  return Math.exp(-(Math.acos(Math.min(1, dot(r, l))) ** 2) / light.lobe ** 2)
 }
 
 describe('realistic magnetic ink', () => {
@@ -53,6 +93,37 @@ describe('realistic magnetic ink', () => {
     }
     // A wider bar's flakes curve less, so it still rolls off in the same tilt
     expect(flakeEdge(1)).toBeCloseTo(flakeEdge(0) / 2)
+  })
+
+  it('rests the bar in the middle of the ink flat wherever it sits on the banknote, as bright, and rolls it off either edge alike', () => {
+    // A new ink sits low and to the right, the eye in front of the banknote's middle above and left of it: the magnet turns its
+    // middle flakes up and left to face the eye, the way the bar rolls and across it
+    const placed = newMagneticInk(note)
+    expect(placed.yMm + placed.heightMm / 2).toBeGreaterThan(note.heightMm / 2 + 10)
+    const eye = perspectiveFor(note, 1)
+    const [below, right] = [placed.yMm + placed.heightMm / 2 - 35, placed.xMm + placed.widthMm / 2 - 75]
+    expect(flakeRest({ ...placed, barAxis: 'y' }, note, eye)).toEqual([Math.atan2(-below, eye), Math.atan2(-right, eye)])
+    expect(flakeRest({ ...placed, barAxis: 'x' }, note, eye)).toEqual([Math.atan2(-right, eye), Math.atan2(-below, eye)])
+    for (const at of [{}, { xMm: 4, yMm: 3 }, { xMm: 60, yMm: 25 }]) {
+      for (const barAxis of ['y', 'x'] as const) {
+        const lit = { ...placed, ...at, ...DEFAULT_INK, barAxis, realistic: true }
+        const tilt = (deg: number) => (barAxis === 'x' ? { x: deg, y: 0 } : { x: 0, y: deg })
+        // The lamp hangs a little above the eye, which lifts a level bar a hair
+        const rest = barSeen(lit, tilt(0))
+        expect(Math.abs(rest - 0.5)).toBeLessThan(0.015)
+        // Its bright core mirrored to the eye there, not only its glow
+        expect(coreSeen(lit)).toBeGreaterThan(0.9)
+        // As far either way, but for the banknote's edge turning nearer the eye one way and further off the other
+        for (const deg of [8, INK_ROLL_DEG]) {
+          const [on, back] = [barSeen(lit, tilt(deg)) - rest, barSeen(lit, tilt(-deg)) - rest]
+          expect(Math.sign(on)).toBe(barAxis === 'x' ? -1 : 1)
+          expect(Math.abs(on + back)).toBeLessThan(0.025)
+        }
+        // Off both edges as the flat look's bar is
+        expect(Math.min(barSeen(lit, tilt(INK_ROLL_DEG)), barSeen(lit, tilt(-INK_ROLL_DEG)))).toBeLessThan(0)
+        expect(Math.max(barSeen(lit, tilt(INK_ROLL_DEG)), barSeen(lit, tilt(-INK_ROLL_DEG)))).toBeGreaterThan(1)
+      }
+    }
   })
 
   it("makes the bar's bright core as wide as the flat look's bar: half as bright a quarter of a bar from its middle", () => {
@@ -100,6 +171,9 @@ describe('realistic magnetic ink', () => {
     expect(light.axis).toEqual([0, 1])
     expect(light.rot).toEqual(tiltMatrix({ x: 0, y: 12 }))
     expect(light.lobe).toBeCloseTo(lampLobe(DEFAULT_INK.barWidth))
+    // The strip sits midway down and right of the middle: its flakes turn left to face the eye, and none up or down
+    expect(light.rest).toEqual([0, Math.atan2(-(96 + 7 - 75), 330)])
+    expect(inkLight(ink({ barAxis: 'x' }), note, { x: 0, y: 0 }, 330).rest).toEqual([Math.atan2(-(96 + 7 - 75), 330), 0])
     expect(light.lamp).toEqual([0, -LAMP_ABOVE * 330, 330])
     expect(light.down).toEqual([0, 1, 0])
     expect(inkLight(ink({ barAxis: 'x' }), note, { x: 0, y: 0 }, 330).axis).toEqual([1, 0])
