@@ -1,4 +1,4 @@
-import { RotateCcwSquare, RotateCwSquare } from 'lucide-react'
+import { RotateCcw, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { IconButton, Panel, Segmented } from '../components/controls'
 import type { Side } from '../lib/back'
@@ -22,10 +22,10 @@ export function SideSwitch({ besidePanel }: { besidePanel: boolean }) {
           <Segmented value={side} options={SIDES} onChange={(next) => turnOver(next === 'back')} />
         </div>
         <IconButton className="rounded-lg" label="Rotate left" title="Rotate every banknote 90° left (Shift+R)" onClick={() => rotateNotes(-1)}>
-          <RotateCcwSquare />
+          <RotateCcw />
         </IconButton>
         <IconButton className="rounded-lg" label="Rotate right" title="Rotate every banknote 90° right (R)" onClick={() => rotateNotes(1)}>
-          <RotateCwSquare />
+          <RotateCw />
         </IconButton>
       </Panel>
     </div>
