@@ -204,6 +204,11 @@ export interface MagneticInk {
   barAxis: 'y' | 'x'
   /** How wide the bar is, as a share of the shape the way it rolls (INK_BAR) */
   barWidth: number
+  /**
+   * Lit as metal flakes, with the same colours and bar (realisticInk.ts): the lamp's reflection with a soft glow round it,
+   * the colour shifting across the shape as each flake is seen, and sparkle. Saved only when on
+   */
+  realistic?: boolean
 }
 
 /**

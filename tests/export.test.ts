@@ -6,7 +6,8 @@ import {
 import type { InkMask } from '../src/lib/inkMask'
 import type { Relief } from '../src/lib/relief'
 import { DEFAULT_INK, INK_BAR_LIGHT, INK_ROLL_DEG, barCentre, inkShift } from '../src/lib/magneticInk'
-import { FLIP_SECONDS, PAPER } from '../src/lib/back'
+import { inkLight } from '../src/lib/realisticInk'
+import { FLIP_SECONDS, PAPER, turnDeg } from '../src/lib/back'
 import { createNote } from '../src/lib/notes'
 import { SWEEP_SECONDS } from '../src/lib/playback'
 import { copyStarts, imageBox } from '../src/lib/artwork'
@@ -14,6 +15,15 @@ import type { Note, PlaybackMove } from '../src/lib/types'
 
 const loadImageUrl = vi.hoisted(() => vi.fn(async (_id: string, _px?: number): Promise<string | undefined> => undefined))
 vi.mock('../src/lib/images', () => ({ loadImageUrl }))
+
+// jsdom has no WebGL: realistic magnetic ink's renderer notes what it was asked to light, and lights it or not as told
+const gpu = vi.hoisted(() => ({ lights: true, drawn: [] as unknown[][] }))
+vi.mock('../src/lib/inkRenderer', () => ({
+  drawLitInk: (...args: unknown[]) => {
+    gpu.drawn.push(args)
+    return gpu.lights
+  },
+}))
 
 const makeNote = (widthMm = 68, heightMm = 120) => createNote({ name: 'Test', x: 0, y: 0, widthMm, heightMm, color: '#ffffff' })
 
@@ -176,6 +186,66 @@ describe('magnetic ink in an export', () => {
     // Only where the shape takes ink, then onto the banknote at its box
     expect(calls.slice(-2)).toEqual([['composite', 'destination-in'], ['draw', 'mask', 0, 0, 60, 40]])
     expect(face.drawImage).toHaveBeenCalledWith(expect.anything(), 20, 10, 60, 40)
+  })
+
+  it('lights it as metal with the canvas’s renderer when Realistic, turned over and rotated as the banknote shows, else draws it flat', () => {
+    gpu.drawn = []
+    gpu.lights = true
+    const note = makeNote(150, 70)
+    const ink = { xMm: 10, yMm: 5, widthMm: 30.2, heightMm: 20, ...DEFAULT_INK, realistic: true }
+    const face = { drawImage: vi.fn() }
+    const mask = { canvas: 'mask' as unknown as HTMLCanvasElement }
+    drawInk(face as unknown as CanvasRenderingContext2D, ink, mask, (mm) => mm * 2, { x: 3, y: 12 }, { note, turn: 0.2, quarter: 1, grain: 2 })
+    expect(gpu.drawn).toEqual([[
+      face, { x: 20, y: 10, width: 60.4, height: 40 }, 'mask', inkLight(ink, note, { x: 3 + turnDeg(0.2), y: 12 }, 2.2 * 150, 1), { width: 60, height: 40 }, 2,
+    ]])
+    expect(face.drawImage).not.toHaveBeenCalled()
+
+    // Without WebGL, or off the banknote, it keeps the flat look
+    gpu.lights = false
+    const layer = new Proxy({}, { get: (_target, key) => (key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}), set: () => true })
+    vi.stubGlobal('OffscreenCanvas', class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return layer }
+    })
+    drawInk(face as unknown as CanvasRenderingContext2D, ink, mask, (mm) => mm * 2, { x: 3, y: 12 }, { note })
+    expect(face.drawImage).toHaveBeenCalledTimes(1)
+    drawInk(face as unknown as CanvasRenderingContext2D, ink, mask, (mm) => mm * 2, { x: 3, y: 12 })
+    vi.unstubAllGlobals()
+    expect(face.drawImage).toHaveBeenCalledTimes(2)
+    expect(gpu.drawn).toHaveLength(2)
+  })
+
+  it('turns realistic ink over with the banknote only as it shows turning, in perspective, with a grain for the video’s size', () => {
+    gpu.drawn = []
+    gpu.lights = true
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}),
+      set: (target, key, value) => {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as CanvasRenderingContext2D
+    const note = { ...makeNote(150, 70), noThread: true, magneticInk: { imageId: 'i', xMm: 100, yMm: 10, widthMm: 20, heightMm: 20, ...DEFAULT_INK, realistic: true } }
+    const assets = { frames: new Map(), ink: { canvas: 'mask' } as unknown as InkMask }
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3, grain: 2 })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, turn: 0.3, quarter: 3 })
+    const lit = (x: number) => inkLight(note.magneticInk, note, { x, y: 10 }, perspectiveFor(note, 1), 3)
+    expect(gpu.drawn.map((args) => [args[3], args[5]])).toEqual([[lit(turnDeg(0.3)), 2], [lit(0), 1]])
+
+    // An export frame passes its turn, its rotation and a grain cell a px of a 1080p video
+    gpu.drawn = []
+    const layout = exportLayout([note], 12, [0], true, 1)
+    const faces = new Map([[note.id, { width: 1800, height: 840, getContext: () => ctx } as unknown as OffscreenCanvas]])
+    // Turned in 3D on scratch canvases, which only need to take the drawing
+    vi.stubGlobal('OffscreenCanvas', class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return ctx }
+    })
+    drawExportFrame(ctx, layout, new Map([[note.id, { front: assets }]]), faces, 12, { x: 0, y: 4 }, { sheen: false, perspective: true, quarter: 1 }, 0, 0.1)
+    vi.unstubAllGlobals()
+    expect(gpu.drawn.map((args) => args[3])).toEqual([inkLight(note.magneticInk, note, { x: turnDeg(0.1), y: 4 }, perspectiveFor(note, 1), 1)])
+    expect(gpu.drawn[0][5]).toBe(Math.max(1, Math.round(layout.height / 1080)))
   })
 })
 

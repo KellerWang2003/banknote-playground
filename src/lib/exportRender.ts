@@ -1,5 +1,5 @@
 import { PAPER, mirrored, showsBackAt, sideImageId, turnDeg, type Side } from './back'
-import { SHADE_DEG } from './frames'
+import { SHADE_DEG, perspectiveFor } from './frames'
 import { lensMix, type Tilt2 } from './lens'
 import { watermarkOpacity, watermarkReveal } from './light'
 import { lightAt, playbackPlan, tiltAt, turnAt, type PlaybackPlan } from './moves'
@@ -8,7 +8,10 @@ import { patternMix, playbackLens, playbackTilt, preparePattern, sectionSpans, s
 import { SWEEP_SECONDS, playbackEase, playbackSettings } from './playback'
 import { type Relief, exportRelief } from './relief'
 import { type InkMask, exportInkMask } from './inkMask'
+import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
+import type { Size } from './placed'
+import { inkLight } from './realisticInk'
 import { copyStarts, imageBox } from './artwork'
 import { fitSections, threadLength } from './thread'
 import type { Quarter } from './rotate'
@@ -16,8 +19,8 @@ import type { Frame, MagneticInk, Note } from './types'
 
 // Draws banknotes to a canvas exactly as NoteView shows them on the canvas, so the tilt can be exported
 
-/** Same perspective as the canvas: relative to the note's size, so the near edge visibly widens */
-export const perspectiveFor = (note: Pick<Note, 'widthMm' | 'heightMm'>, scale: number) => 2.2 * Math.max(note.widthMm, note.heightMm) * scale
+/** Same perspective as the canvas (frames.ts) */
+export { perspectiveFor }
 /** Space around and between banknotes in an export, in mm */
 export const EXPORT_MARGIN_MM = 6
 
@@ -196,6 +199,12 @@ export interface FaceOptions {
   offsetMm?: number
   /** The banknote's back, as the canvas shows it turned over: its own background and the watermark, mirrored (its assets loaded for it) */
   back?: boolean
+  /** How far it has turned over, 0 (front) to 1 (back), which turns realistic magnetic ink from the lamp as it shows turning (with `perspective`) */
+  turn?: number
+  /** Quarter turns the banknotes are rotated on screen, which realistic magnetic ink's lamp stays still through */
+  quarter?: Quarter
+  /** Realistic magnetic ink's grain, px across a cell (by default 1) */
+  grain?: number
 }
 
 /** The flat note at `scale` px per mm, as NoteView draws it before it is turned in 3D */
@@ -245,7 +254,9 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.restore()
     return
   }
-  if (magneticInk && assets.ink) drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle })
+  if (magneticInk && assets.ink) {
+    drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle }, { note, turn: options.perspective ? options.turn : 0, quarter: options.quarter, grain: options.grain })
+  }
   // A banknote without a thread ends there too (Keller, 4 November: the thread is added like any other feature)
   if (note.noThread) {
     drawShade(ctx, width, height, { x: angleX, y: angle }, options.perspective)
@@ -381,11 +392,26 @@ function drawShade(ctx: Ctx, width: number, height: number, tilt: Tilt2, perspec
 
 /**
  * Magnetic ink as NoteView draws it, over the watermark and under the thread: its Flat colour, the Tilted one over it as
- * far as the note has turned away, and the bright bar where it has rolled, all through the ink's mask
+ * far as the note has turned away, and the bright bar where it has rolled, all through the ink's mask. Realistic, on its
+ * banknote (`lit`), it is lit as metal by the canvas's renderer instead, turned over and rotated as the banknote shows
+ * (`lit.turn`, `lit.quarter`), where the browser can.
  */
-export function drawInk(ctx: Ctx, ink: MagneticInk, mask: Pick<InkMask, 'canvas'>, mm: (value: number) => number, tilt: Tilt2) {
+export function drawInk(
+  ctx: Ctx,
+  ink: MagneticInk,
+  mask: Pick<InkMask, 'canvas'>,
+  mm: (value: number) => number,
+  tilt: Tilt2,
+  lit?: { note: Size; turn?: number; quarter?: Quarter; grain?: number },
+) {
   const width = Math.max(1, Math.round(mm(ink.widthMm)))
   const height = Math.max(1, Math.round(mm(ink.heightMm)))
+  if (ink.realistic && lit) {
+    const view = { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }
+    const light = inkLight(ink, lit.note, view, perspectiveFor(lit.note, 1), lit.quarter)
+    const box = { x: mm(ink.xMm), y: mm(ink.yMm), width: mm(ink.widthMm), height: mm(ink.heightMm) }
+    if (drawLitInk(ctx, box, mask.canvas, light, { width, height }, lit.grain ?? 1)) return
+  }
   const layer = new OffscreenCanvas(width, height)
   const lctx = layer.getContext('2d')
   if (!lctx) return
@@ -558,12 +584,14 @@ export function drawExportFrame(
   faces: Map<string, OffscreenCanvas>,
   scale: number,
   angle: Tilt2 | number,
-  options: Omit<FaceOptions, 'reveal' | 'offsetMm' | 'back'> & { background?: string; backlit?: boolean; offsets?: Record<string, number>; quarter?: Quarter },
+  options: Omit<FaceOptions, 'reveal' | 'offsetMm' | 'back' | 'turn' | 'grain'> & { background?: string; backlit?: boolean; offsets?: Record<string, number> },
   light = 0,
   turn = 0,
 ) {
   const reveal = exportReveal(light, angle, options.backlit)
   const back = showsBackAt(turn)
+  // Realistic magnetic ink's grain: a cell a px up to 1080p, and wider in a bigger video, so it looks the same full screen
+  const grain = Math.max(1, Math.round(layout.height / 1080))
   ctx.clearRect(0, 0, layout.width, layout.height)
   if (options.background) {
     ctx.fillStyle = options.background
@@ -576,7 +604,7 @@ export function drawExportFrame(
     if (!face || !noteAssets) continue
     const faceCtx = face.getContext('2d')!
     faceCtx.clearRect(0, 0, face.width, face.height)
-    drawFace(faceCtx, cell.note, noteAssets, scale, angle, { ...options, back, reveal, offsetMm: options.offsets?.[cell.note.id] })
+    drawFace(faceCtx, cell.note, noteAssets, scale, angle, { ...options, back, reveal, offsetMm: options.offsets?.[cell.note.id], turn, grain })
     const view = options.perspective ? withTurn(angle, turn) : 0
     const perspective = perspectiveFor(cell.note, scale)
     if (!options.quarter) {

@@ -1436,6 +1436,12 @@ describe('username workspace editor', () => {
     expect(ink()).toEqual({ ...moved, invert: true })
     await user.click(screen.getByRole('switch', { name: 'Invert' }))
     expect(ink()).toEqual(moved)
+    // Realistic lights it as metal (here, without WebGL, it keeps its flat look); switched off, it is left unsaid too
+    await user.click(screen.getByRole('switch', { name: 'Realistic' }))
+    expect(ink()).toEqual({ ...moved, realistic: true })
+    expect(hit().hasAttribute('data-realistic')).toBe(false)
+    await user.click(screen.getByRole('switch', { name: 'Realistic' }))
+    expect(ink()).toEqual(moved)
     expect(saves).not.toHaveBeenCalled()
   })
 

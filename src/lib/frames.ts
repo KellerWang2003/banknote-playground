@@ -35,6 +35,11 @@ export function sliceRange(index: number, spans: number[]): [number, number] {
 export const TILT_LIMIT = 90
 /** The tilt at which light and shade on a banknote reach full strength (they keep growing past it) */
 export const SHADE_DEG = 60
+/**
+ * How far the viewer is from a banknote turning in 3D, px at `scale` px per mm, the canvas's and the exports' perspective:
+ * a short one, relative to the banknote's size, so the near edge visibly widens and the far edge narrows
+ */
+export const perspectiveFor = (note: { widthMm: number; heightMm: number }, scale: number) => 2.2 * Math.max(note.widthMm, note.heightMm) * scale
 
 /**
  * Which frames show at a tilt angle, with frames of any length. The cycle starts flat and loops:

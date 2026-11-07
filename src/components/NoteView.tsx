@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { PAPER, backOf, mirrored, turnDeg, type Side } from '../lib/back'
-import { SHADE_DEG, TILT_LIMIT } from '../lib/frames'
-import { lensMix } from '../lib/lens'
+import { SHADE_DEG, TILT_LIMIT, perspectiveFor } from '../lib/frames'
+import { lensMix, type Tilt2 } from '../lib/lens'
 import { watermarkOpacity, watermarkReveal } from '../lib/light'
 import { THUMB_PX, designPx, devicePx, useImageUrl, useWarmImages } from '../lib/images'
 import { copyStarts, imageBox } from '../lib/artwork'
@@ -12,7 +12,10 @@ import { threadWindowMask, windowEdges } from '../lib/thread'
 import type { Frame, MagneticInk, Note } from '../lib/types'
 import { paintRelief, reliefPixels, useRelief } from '../lib/relief'
 import { useInkMask } from '../lib/inkMask'
+import { litInkAvailable, paintLitInk } from '../lib/inkRenderer'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
+import { inkLight, inkPixels } from '../lib/realisticInk'
+import { type Quarter, quarterOf } from '../lib/rotate'
 import { hasThread, type PlacedLayer } from '../lib/layers'
 import { framesTiltOf, showsBack, useTilt } from '../tilt/tilt'
 import { DesignTiles } from './DesignTiles'
@@ -249,10 +252,10 @@ const SIDE_LIGHT = `rgba(255,255,255,${0.12 * SHADE_MAX})`
 const SIDE_DARK = `rgba(0,0,0,${0.08 * SHADE_MAX})`
 
 /**
- * The tilt, light and turn a live note follows, and the tilt its frames are shown at while the timeline has been
- * scrubbed
+ * The tilt, light and turn a live note follows, the tilt its frames are shown at while the timeline has been scrubbed,
+ * and the quarter turns the banknotes are rotated on screen (which realistic magnetic ink's lamp stays still through)
  */
-type LiveState = { angle: number; angleX: number; light: number; turn: number; frameTilts: Record<string, { x: number; y: number }> }
+type LiveState = { angle: number; angleX: number; light: number; turn: number; frameTilts: Record<string, { x: number; y: number }>; quarterTurns?: number }
 
 /**
  * The note with its thread, drawn at `scale` px per mm. The frame shown comes from the tilt (up/down `angle`,
@@ -260,8 +263,9 @@ type LiveState = { angle: number; angleX: number; light: number; turn: number; f
  * the note also turns in 3D, and `sheen` adds a highlight that travels along the thread. Its watermark, in the
  * note's own colours under the thread, is only a hint flat, comes out clearly as the note tilts, and shows flat
  * held to the light. Its magnetic ink, over the watermark and under the thread, shifts colour as the note turns away
- * and rolls its bright bar on one tilt. Its back (`side`, or for a live note the shared turn) shows the back's own
- * background and the watermark through it, mirrored, and nothing else: no thread, no magnetic ink.
+ * and rolls its bright bar on one tilt, or with Realistic on is lit as metal flakes. Its back (`side`, or for a live
+ * note the shared turn) shows the back's own background and the watermark through it, mirrored, and nothing else: no
+ * thread, no magnetic ink.
  */
 export function NoteView({
   note,
@@ -337,6 +341,17 @@ export function NoteView({
   const inkMask = useInkMask(magneticInk, magneticInk && devicePx(Math.max(magneticInk.widthMm, magneticInk.heightMm) * scale))
   // Only its bar's look changes how it tilts
   const inkBar: InkBar | undefined = magneticInk && { barAxis: magneticInk.barAxis, barWidth: magneticInk.barWidth }
+  // Realistic, it is lit as metal into a canvas of its own, as many pixels as it shows with, where the browser can (WebGL);
+  // elsewhere it keeps its flat look
+  const realistic = magneticInk?.realistic === true && litInkAvailable()
+  const inkPx = realistic && magneticInk ? inkPixels(magneticInk.widthMm * scale, magneticInk.heightMm * scale, devicePx(1)) : undefined
+  const inkCanvas = useRef<HTMLCanvasElement>(null)
+  const paintInk = (tilt: Tilt2, quarter: Quarter) => {
+    const canvas = inkCanvas.current
+    if (canvas && magneticInk && inkMask?.canvas && inkPx) {
+      paintLitInk(canvas, inkMask.canvas, inkLight(magneticInk, note, tilt, perspectiveFor(note, 1), quarter), inkPx.cell)
+    }
+  }
   const revealOf = (state: LiveState) => reveal ?? watermarkReveal(state.light, { x: state.angleX, y: state.angle })
 
   // Live: write the continuous parts straight onto the elements, after every render and on every tilt change
@@ -355,14 +370,21 @@ export function NoteView({
         const section = part.dataset.section
         Object.assign(part.style, section === undefined ? style.parts[part.dataset.tilt as TiltPart] : { opacity: blends[Number(section)] ?? 0 })
       }
+      // Realistic ink turns from the lamp as the banknote turns on screen, turning over included; it draws again only when
+      // that changes, not with the light or the timeline
+      if (realistic) paintInk({ x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }, quarterOf(state.quarterTurns ?? 0))
     }
     apply.current(useTilt.getState())
+  })
+  // A still note's realistic ink, as at its own tilt
+  useLayoutEffect(() => {
+    if (!live && realistic) paintInk({ x: angleX, y: angle }, 0)
   })
   useLayoutEffect(() => {
     if (!live) return
     return useTilt.subscribe((state, previous) => {
       if (state.angle !== previous.angle || state.angleX !== previous.angleX || state.light !== previous.light || state.turn !== previous.turn
-        || state.frameTilts[note.id] !== previous.frameTilts[note.id]) apply.current(state)
+        || state.frameTilts[note.id] !== previous.frameTilts[note.id] || state.quarterTurns !== previous.quarterTurns) apply.current(state)
     })
   }, [live, note.id])
 
@@ -427,7 +449,16 @@ export function NoteView({
       {/* Magnetic ink's shape still being had or worked out: a shimmer in its box meanwhile */}
       {!back && inkBox && magneticInk?.imageId && inkMask === undefined && <Loading style={inkBox} />}
 
-      {!back && inkBox && magneticInk?.imageId && inkShape && inkBar && (
+      {!back && inkBox && magneticInk?.imageId && inkMask && inkPx && (
+        // Realistic: lit as metal through its mask, drawn whole on the GPU (inkRenderer.ts), in the same place and taking a
+        // press the same way
+        <div data-magnetic-ink={note.id} data-placed="magneticInk" data-realistic=""
+          className={cn('absolute', live ? 'cursor-move' : 'pointer-events-none')} style={inkBox}>
+          <canvas ref={inkCanvas} width={inkPx.width} height={inkPx.height} className="absolute inset-0 size-full" />
+        </div>
+      )}
+
+      {!back && inkBox && magneticInk?.imageId && !inkPx && inkShape && inkBar && (
         // Magnetic ink, printed over the design and the watermark, under the thread: its Flat colour, the Tilted one fading
         // in over it as the note turns away, and the bright bar rolling across on its tilt, all clipped to the shape by
         // its mask (inkMask.ts). Like the watermark, it takes a press on the canvas anywhere in its box, to drag it

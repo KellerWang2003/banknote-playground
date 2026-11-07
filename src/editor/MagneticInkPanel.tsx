@@ -9,7 +9,8 @@ import { LayerImage, PlaceFields } from './PlacedFields'
 /**
  * Right, under the Magnetic ink tab: the selected banknote's magnetic ink, SPARK Flow PRIME's look. One image, whose shape
  * takes the ink (whatever stands out from its background), or the ink goes round it with Invert. Its colour flat and
- * tilted away, the bar that rolls across it on one tilt and how wide, and where it sits. Removing it is beside the tabs.
+ * tilted away, the bar that rolls across it on one tilt and how wide, whether it is lit as metal (Realistic), and where it
+ * sits. Removing it is beside the tabs.
  */
 export function MagneticInkPanel({ note, ink, noteRef, onPlace }: {
   note: Note
@@ -58,6 +59,8 @@ export function MagneticInkPanel({ note, ink, noteRef, onPlace }: {
               onChange={(width) => change((i) => ({ ...i, barWidth: width / 100 }))} />
           </Labeled>
         </div>
+        <SwitchField label="Realistic" title="Lit as metal flakes: the lamp's reflection with a soft glow, the colour shifting across the shape, and sparkle"
+          checked={ink.realistic === true} onChange={(on) => change((i) => ({ ...i, realistic: on }))} />
       </Section>
 
       <Section nested>

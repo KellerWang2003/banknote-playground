@@ -33,10 +33,13 @@ describe('placing magnetic ink', () => {
     expect(fitMagneticInk(ink({ xMm: 99, yMm: -9 }), note)).toEqual(ink({ xMm: 95, yMm: -7.5 }))
     expect(fitMagneticInk(ink({ widthMm: 1, heightMm: 0.5 }), note)).toMatchObject({ widthMm: 4, heightMm: 2 })
     const damaged = { imageId: 'img', xMm: Number.NaN, yMm: 'left', widthMm: -3, heightMm: null, color: 'gold', tiltedColor: '#12345',
-      barAxis: 'z', barWidth: 7, invert: 'yes', glow: true } as unknown as MagneticInk
+      barAxis: 'z', barWidth: 7, invert: 'yes', realistic: 1, glow: true } as unknown as MagneticInk
     expect(fitMagneticInk(damaged, note)).toEqual({ imageId: 'img', xMm: 0, yMm: 0, widthMm: 20, heightMm: 20, ...DEFAULT_INK, barWidth: 1 })
     expect(fitMagneticInk(ink({ invert: true, barAxis: 'x', barWidth: 0.01 }), note)).toEqual(ink({ invert: true, barAxis: 'x', barWidth: 0.05 }))
     expect(fitMagneticInk(ink({ invert: false }), note)).toEqual(ink())
+    // Realistic is kept as Invert is: only while it is on
+    expect(fitMagneticInk(ink({ realistic: true }), note)).toEqual(ink({ realistic: true }))
+    expect(fitMagneticInk(ink({ realistic: false }), note)).toEqual(ink())
   })
 
   it("takes a new image's proportions about its middle, keeping the rest", () => {

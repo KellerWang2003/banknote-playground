@@ -7,7 +7,7 @@ import { IconButton, Panel } from '../components/controls'
 import { NoteView } from '../components/NoteView'
 import { designFace } from '../lib/back'
 import { driftWithin, useCutDrift } from '../lib/continuous'
-import { clamp } from '../lib/frames'
+import { clamp, perspectiveFor } from '../lib/frames'
 import { lensState } from '../lib/lens'
 import { playbackPlan } from '../lib/moves'
 import { usePanelWidth } from '../lib/panelWidth'
@@ -665,7 +665,7 @@ export function Canvas({
                   data-note-body={note.id}
                   // A short perspective, relative to the note's size, so the near edge visibly widens and the far edge
                   // narrows: you can see which way the note is tilting, not just that it got shorter
-                  style={{ perspective: 2.2 * Math.max(note.widthMm, note.heightMm) * scale, borderRadius: 1.5 * scale }}
+                  style={{ perspective: perspectiveFor(note, scale), borderRadius: 1.5 * scale }}
                   className={cn(
                     'outline-offset-4 transition-[outline-color] duration-150 cursor-ns-resize',
                     drift ? 'outline-0' : picked === 'note' ? 'outline-2' : hovered === 'note' ? 'outline-1' : 'outline-0',

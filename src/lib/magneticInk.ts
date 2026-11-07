@@ -9,7 +9,7 @@ import type { MagneticInk } from './types'
  * colour shifts from Flat to Tilted as the banknote turns away from the viewer, either way, and a bright bar rolls
  * across the shape on one tilt, from its middle flat right off its edge. How far each goes is fixed, tuned by eye as
  * the watermark's 30° was, not a setting. The canvas and the export both use these numbers. Reading its shape from
- * the image is in inkMask.ts.
+ * the image is in inkMask.ts. With Realistic on it is lit as metal flakes instead, from the same settings (realisticInk.ts).
  */
 
 /** Tilt, either way or both together, from which the ink shows only its Tilted colour */
@@ -33,8 +33,8 @@ const colour = (value: unknown, fallback: string) => (typeof value === 'string' 
 
 /**
  * Keeps magnetic ink on its banknote, as every placed layer is kept (`fitBox`), with its bar's width in range. Also
- * repairs a damaged save: colours that aren't #rrggbb and an unknown bar axis go back to the defaults, Invert is kept
- * only when it is on, and anything unknown is dropped.
+ * repairs a damaged save: colours that aren't #rrggbb and an unknown bar axis go back to the defaults, Invert and
+ * Realistic are kept only when they are on, and anything unknown is dropped.
  */
 export function fitMagneticInk(ink: MagneticInk, note: Size): MagneticInk {
   const barWidth = typeof ink.barWidth === 'number' && Number.isFinite(ink.barWidth) ? ink.barWidth : DEFAULT_INK.barWidth
@@ -46,6 +46,7 @@ export function fitMagneticInk(ink: MagneticInk, note: Size): MagneticInk {
     barWidth: clamp(barWidth, INK_BAR.min, INK_BAR.max),
   }
   if (ink.invert === true) fitted.invert = true
+  if (ink.realistic === true) fitted.realistic = true
   return typeof ink.imageId === 'string' ? { imageId: ink.imageId, ...fitted } : fitted
 }
 
