@@ -12,10 +12,13 @@ import type { MagneticInk } from './types'
  * the ink is cured: the bright bar is the band of flakes mirroring the lamp to the eye, and it rolls as a tilt brings the
  * next band round. Here the flakes curve across the shape the way the bar rolls, just far enough that the bar rolls off by
  * INK_ROLL_DEG, as the flat look's does; Bar width sets how wide the lamp's reflection is, and Flat and Tilted are the
- * colour seen square-on and from REAL_SHIFT_DEG off it. There is one light, a lamp just above the viewer's eye, and the
- * magnet sets the flakes to face that viewer (`flakeRest`), so the bar rests in the middle of the ink flat wherever it sits
- * on the banknote, as the flat look's does, and as bright; holding the banknote to the light leaves the ink as it was. The
- * numbers are tuned by eye on Keller's 15 strip, as the flat look's are, and are not settings. This file sets up each draw
+ * colour seen square-on and from REAL_SHIFT_DEG off it. There is one light, a lamp hanging over the viewer's head (Keller,
+ * 8 November: lit from above, as more realistic than the lamp at the eye it first had), and the magnet
+ * sets the flakes to face that viewer (`flakeRest`), so wherever the ink sits on the banknote its bar rests the same way:
+ * flat, towards the top, where the flakes face halfway between the lamp and the eye, and in the middle, as bright, with the
+ * banknote's top tipped back by half LAMP_HEIGHT_DEG. An upright bar shows only near that tip, the lamp being above it
+ * rather than in its curve. Holding the banknote to the light leaves the ink as it was. The numbers are tuned by eye on
+ * Keller's 15 strip, as the flat look's are, and are not settings. This file sets up each draw
  * (`inkLight`); the GPU shades every pixel with it (inkRenderer.ts), on the canvas and in exports alike.
  */
 
@@ -31,8 +34,14 @@ export const SHIFT_DIP = 0.2
 export const LAMP_POWER = 3
 /** The soft glow round the bar, three times as wide as its core: the flakes are never all perfectly aligned */
 export const LAMP_GLOW = 0.35
-/** How far above the viewer's eye the lamp hangs, as a share of how far away the viewer is */
-export const LAMP_ABOVE = 0.015
+/**
+ * How high the lamp hangs over the viewer's head: degrees above the line from the middle of the banknote to their eye.
+ * Flat, the bar rests towards the top of the ink, where the flakes face halfway between the lamp and the eye, and tipping
+ * the banknote's top back by half this brings it to the middle. Straight above the eye, so the lamp and the eye see an ink
+ * from the same side whatever its place on the banknote, and every ink's bar rests alike (a lamp further off would rest
+ * each upright bar off its middle, towards the banknote's)
+ */
+export const LAMP_HEIGHT_DEG = 20
 /** The light the room gives, mirrored from above and from below */
 export const ROOM_LIGHT = { above: 0.8, below: 0.4 }
 /** How far each flake strays from the curve, radians either way, and how much brighter or darker it is: the metal's fine grain */
@@ -63,10 +72,11 @@ export const lampLobe = (barWidth: number) => (barWidth * flakeEdge(barWidth)) /
 
 /**
  * How the flakes in the middle of the ink are turned to face the eye of the viewer `eye` mm out from the middle of the
- * banknote, as the magnet sets them: radians the way the bar rolls, and across it. So, flat, the bar rests in the middle of
- * the ink wherever it sits, as the flat look's does, and as bright as in the banknote's middle. Square-on flakes would
- * mirror the eye only nearer the banknote's middle, resting the bar off towards it, and off to its side would mirror the
- * lamp past the eye, leaving the bar only its glow.
+ * banknote, as the magnet sets them: radians the way the bar rolls, and across it. So the bar rests in the same place in
+ * the ink wherever it sits (flat, towards the top, the lamp hanging above; in the middle with the top tipped back by half
+ * LAMP_HEIGHT_DEG), and as bright as in the banknote's middle. Square-on flakes would face the eye only nearer the
+ * banknote's middle, resting the bar off towards it, and off to its side would mirror the lamp past the eye, leaving the
+ * bar only its glow.
  */
 export function flakeRest(ink: Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'barAxis'>, note: Size, eye: number): [number, number] {
   const x = ink.xMm + ink.widthMm / 2 - note.widthMm / 2
@@ -183,7 +193,7 @@ export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quar
     edge: flakeEdge(ink.barWidth),
     rest: flakeRest(ink, note, eye),
     lobe: lampLobe(ink.barWidth),
-    lamp: room(0, -LAMP_ABOVE * eye, eye),
+    lamp: room(0, -Math.tan(LAMP_HEIGHT_DEG * RAD) * eye, eye),
     down: room(0, 1, 0),
     flat,
     tilted: [tilted[0], tilted[1]],
