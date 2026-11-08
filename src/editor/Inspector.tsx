@@ -1,4 +1,4 @@
-import { Banknote, Columns2, Droplet, Magnet, RectangleHorizontal, RectangleVertical, Rows2, Shuffle, Trash2, TriangleAlert } from 'lucide-react'
+import { Banknote, Columns2, Droplet, Magnet, Rainbow, RectangleHorizontal, RectangleVertical, Rows2, Shuffle, Trash2, TriangleAlert } from 'lucide-react'
 import { create } from 'zustand'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
@@ -15,6 +15,7 @@ import { fitSections } from '../lib/thread'
 import type { Note } from '../lib/types'
 import { showsBack, useTilt } from '../tilt/tilt'
 import { AddFeatureMenu } from './AddFeatureMenu'
+import { ArcEnCielPanel } from './ArcEnCielPanel'
 import { ChecksDrawer, ContinuousSection } from './DesignChecks'
 import { EffectSection, LensMenu, LensPreview, ThreadPrint, type SetLens } from './EffectSection'
 import { DesignCards } from './DesignCards'
@@ -34,7 +35,7 @@ type Change = (note: Note) => Note
  * Right: the selected banknote, one tab per part, as the Banknotes list has its layers: the banknote itself (size,
  * background), its security thread (where it sits and its lens, with the lens's preview in a drawer at the foot; what
  * is printed on it, its artwork and sections, is designed in Thread Studio, which opens from the button under the
- * thread on the canvas) and its watermark and magnetic ink once it has them. The tab is the
+ * thread on the canvas) and its watermark, Arc-en-Ciel and magnetic ink once it has them. The tab is the
  * part picked: a click on the canvas or in the list turns to it, and turning to a tab picks that part. One part at a
  * time, so the panel never grows with features. Every control has a small label over it (`Labeled`) unless a word in
  * it or beside it already says what it is.
@@ -61,7 +62,7 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
   const setThread = (patch: Partial<Note['thread']>) => update((n) => ({ ...n, thread: { ...n.thread, ...patch } }))
   const acrossOf = (n: Pick<Note, 'widthMm' | 'heightMm'>, direction: Note['thread']['direction']) =>
     direction === 'vertical' ? n.widthMm : n.heightMm
-  // The watermark and magnetic ink stay where they were, as far as they fit (wholly on the banknote if they were)
+  // The watermark, Arc-en-Ciel and magnetic ink stay where they were, as far as they fit (wholly on the banknote if they were)
   const setSize = (widthMm: number, heightMm: number) =>
     update((n) => fitLayers({
       ...n,
@@ -81,7 +82,7 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
         positionMm: Math.round((n.thread.positionMm / acrossOf(n, n.thread.direction)) * acrossOf(n, direction) * 2) / 2,
       },
     }))
-  // Turning the note keeps the thread, the watermark and magnetic ink at the same relative position across it
+  // Turning the note keeps the thread and the placed layers at the same relative position across it
   const flipOrientation = () =>
     update((n) => {
       const flipped = { widthMm: n.heightMm, heightMm: n.widthMm }
@@ -108,6 +109,7 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
           <PartTab value="note"><Banknote />Banknote</PartTab>
           {hasThread(note) && <PartTab value="thread">{thread.direction === 'vertical' ? <Columns2 /> : <Rows2 />}Thread</PartTab>}
           {note.watermark && <PartTab value="watermark"><Droplet />Watermark</PartTab>}
+          {note.arcEnCiel && <PartTab value="arcEnCiel"><Rainbow />Arc-en-Ciel</PartTab>}
           {note.magneticInk && <PartTab value="magneticInk"><Magnet />Magnetic ink</PartTab>}
         </TabStrip>
         {/* Every feature is added from the + after its tabs and removed the same way, by the bin while its tab is open */}
@@ -198,6 +200,11 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
       {note.watermark && (
         <TabsContent value="watermark" className="min-h-0 overflow-y-auto">
           <WatermarkPanel note={note} watermark={note.watermark} noteRef={noteRef} onPlace={onPlace} />
+        </TabsContent>
+      )}
+      {note.arcEnCiel && (
+        <TabsContent value="arcEnCiel" className="min-h-0 overflow-y-auto">
+          <ArcEnCielPanel note={note} arc={note.arcEnCiel} noteRef={noteRef} onPlace={onPlace} />
         </TabsContent>
       )}
       {note.magneticInk && (

@@ -9,8 +9,9 @@ import { LayerImage, PlaceFields } from './PlacedFields'
 
 /**
  * Right, under the Watermark tab: the selected banknote's watermark. One image, read only by brightness, as paper has no
- * colour: its light parts are thinner paper that lets more light through, or its dark parts with Invert. Its levels,
- * Auto or by hand, then shape how thin. Where it sits and how strongly it shows. Removing it is beside the tabs.
+ * colour: its light parts are thinner paper that lets more light through, or its dark parts with Invert. Where it sits
+ * comes first, then the image, whose levels, Auto or by hand, shape how thin, then how strongly it shows. Removing it is
+ * beside the tabs.
  */
 export function WatermarkPanel({ note, watermark, noteRef, onPlace }: {
   note: Note
@@ -26,6 +27,11 @@ export function WatermarkPanel({ note, watermark, noteRef, onPlace }: {
 
   return (
     <Group>
+      {/* Where it sits first, then its image, then how strongly it shows, as every placed layer's panel reads (Keller, 8 November) */}
+      <Section nested>
+        <PlaceFields note={note} box={watermark} name="Watermark" onChange={change} />
+      </Section>
+
       <Section nested>
         {/* In greyscale, as only its brightness counts */}
         <LayerImage imageId={watermark.imageId} grayscale
@@ -46,12 +52,12 @@ export function WatermarkPanel({ note, watermark, noteRef, onPlace }: {
       </Section>
 
       <Section nested>
-        <PlaceFields note={note} box={watermark} name="Watermark" onChange={change}>
+        <div className="grid grid-cols-2 gap-2">
           <Labeled label="Depth">
             <ScrubField label="D" title="How strongly the watermark shows at its clearest, tilted or held to the light" value={Math.round(watermark.depth * 100)} min={0} max={100}
               step={5} unit="%" onChange={(depth) => change((w) => ({ ...w, depth: depth / 100 }))} />
           </Labeled>
-        </PlaceFields>
+        </div>
       </Section>
     </Group>
   )

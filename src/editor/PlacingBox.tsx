@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { mirrored } from '../lib/back'
 import { LAYER_NAMES, type PlacedLayer } from '../lib/layers'
 import { type Corner, PLACE_STEP, type PlacedBox, dragBoxCorner, moveBox } from '../lib/placed'
-import { type Quarter, onItsSide, unturn } from '../lib/rotate'
+import { type Quarter, onItsSide, unturn, unturnedPoint } from '../lib/rotate'
 import type { Note } from '../lib/types'
 
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se']
@@ -23,9 +23,10 @@ const MIRRORED: Record<Corner, Corner> = { nw: 'ne', ne: 'nw', sw: 'se', se: 'sw
  * It takes its gestures before the banknote can tilt or pan. On the banknote's back (`mirror`, only the watermark shows
  * there) it sits where the layer shows, the other side round, and moves the way the pointer does there. On a rotated
  * banknote (`quarter`, quarter turns clockwise) it turns with it, and drags and arrow keys still move it the way they point
- * on screen.
+ * on screen. A double-click in it, away from its corners, can place something there (`onDoubleClick`: one more of
+ * Arc-en-Ciel's points).
  */
-export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 0, onChange }: {
+export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 0, onChange, onDoubleClick }: {
   note: Note
   layer: PlacedLayer
   box: PlacedBox
@@ -33,6 +34,8 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
   mirror?: boolean
   quarter?: Quarter
   onChange: (box: PlacedBox) => void
+  /** Where a double-click lands on the banknote, mm from its front's top-left */
+  onDoubleClick?: (at: { xMm: number; yMm: number }) => void
 }) {
   const gesture = useRef<Gesture | null>(null)
   const name = LAYER_NAMES[layer].toLowerCase()
@@ -82,6 +85,14 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
       onPointerUp={(event) => finish(event)}
       onPointerCancel={(event) => finish(event, true)}
       onLostPointerCapture={() => { gesture.current = null }}
+      onDoubleClick={(event) => {
+        if (!onDoubleClick || (event.target as HTMLElement).closest('[data-corner]')) return
+        // Where in the box as it lies before the banknote was turned, then on the banknote; on the back the other side round
+        const at = unturnedPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), quarter,
+          { width: shown.widthMm * scale, height: shown.heightMm * scale })
+        const xMm = shown.xMm + at.x / scale
+        onDoubleClick({ xMm: mirror ? note.widthMm - xMm : xMm, yMm: shown.yMm + at.y / scale })
+      }}
       onKeyDown={(event) => {
         const by = NUDGE[event.key]
         if (!by) return

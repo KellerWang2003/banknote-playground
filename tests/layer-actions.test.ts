@@ -45,6 +45,14 @@ describe('adding a watermark or magnetic ink', () => {
     await vi.waitFor(() => expect(held.note!.magneticInk!.imageId).toBe('stand-in'))
   })
 
+  it('gives Arc-en-Ciel its disc, whose proportions set its height', async () => {
+    addLayer(ref, 'arcEnCiel')
+    const box = held.note!.arcEnCiel!
+    expect(box).toMatchObject({ flow: 'edge', colors: ['#e0a91b', '#d23a7c', '#3a68d6'] })
+    await vi.waitFor(() => expect(held.note!.arcEnCiel!.imageId).toBe('stand-in'))
+    expect(held.note!.arcEnCiel).toMatchObject({ widthMm: box.widthMm, heightMm: box.widthMm * 1.25 })
+  })
+
   it('leaves a layer that got an image of its own meanwhile, or went, as it is', async () => {
     addLayer(ref, 'watermark')
     held.note = { ...held.note!, watermark: { ...held.note!.watermark!, imageId: 'mine' } }

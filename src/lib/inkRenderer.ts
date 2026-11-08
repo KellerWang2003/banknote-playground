@@ -1,13 +1,16 @@
+import { ARC_LINE_POINTS, ARC_POINTS, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb } from './arcEnCiel'
+import type { BandField, BandLook } from './bandMap'
 import {
   AWAY_LIGHT, FILM_FULL, FILM_N2, GLINT_LOBE, GLINT_POWER, GLINT_TILT, GLINT_WHITE, GRAIN_LIGHT, GRAIN_TILT, LAMP_GLOW, LAMP_POWER,
   ROOM_LIGHT, SHIFT_DIP, type InkLight,
 } from './realisticInk'
 
 /**
- * Realistic magnetic ink's renderer: one WebGL context for every banknote's ink, on the canvas and in exports, as browsers
- * allow only a few. It lights an ink at a tilt (realisticInk.ts) in its own canvas and copies the result where it goes: a
- * canvas in the ink's box on a banknote (`paintLitInk`), redrawn only when the tilt, the turn or the zoom changes, or the
- * export's banknote face (`drawLitInk`). Without WebGL there is nothing to light it with, and the ink keeps its flat look.
+ * The GPU renderer for realistic magnetic ink and Arc-en-Ciel: one WebGL context for every banknote's, on the canvas and
+ * in exports, as browsers allow only a few, with a program for each. It draws a layer at a tilt in its own canvas and
+ * copies the result where it goes: a canvas in the layer's box on a banknote (`paintLitInk`, `paintBands`), redrawn only
+ * when what it shows changes, or the export's banknote face (`drawLitInk`, `drawBands`). Without WebGL there is nothing to
+ * draw them with: the ink keeps its flat look, and Arc-en-Ciel shows its bands at rest (bandMap.ts).
  */
 
 const glsl = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n))
@@ -102,10 +105,125 @@ void main() {
 
 const UNIFORMS = ['uMask', 'uRes', 'uCell', 'uRot', 'uOrigin', 'uSize', 'uEye', 'uAxis', 'uEdge', 'uRest', 'uLobe', 'uLamp', 'uDown', 'uFlat', 'uTilted', 'uHue'] as const
 
+/** Spots the bands program takes: Point's starts, or Line's points with a control past each end */
+const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
+
+// Every pixel of Arc-en-Ciel's box: how far it is from where the bands start (from the map, the nearest point, or Line),
+// slid along by the tilt, gives its place among the bands and so its colour, through the shape's mask. The same sums as
+// bandMap.ts's, which draws it without the GPU
+const BANDS_FRAGMENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec2 vUv;
+uniform sampler2D uMask;
+uniform sampler2D uMap;
+uniform vec2 uMapSize;
+uniform float uMapMax;
+uniform int uFrom;
+uniform vec2 uBox;
+uniform vec2 uSpots[${MAX_SPOTS}];
+uniform int uSpotCount;
+uniform float uBand;
+uniform float uSlide;
+uniform vec3 uColours[4];
+uniform int uColourCount;
+uniform vec3 uAverage;
+uniform float uPixel;
+
+// The map holds 16 bits a texel, its high byte in luminance and its low one in alpha, read whole and blended here, as the
+// GPU's own blending would mix the bytes apart
+float texelAt(vec2 at) {
+  vec4 t = texture2D(uMap, (clamp(at, vec2(0.0), uMapSize - 1.0) + 0.5) / uMapSize);
+  return (t.r * 65280.0 + t.a * 255.0) / 65535.0 * uMapMax;
+}
+float fieldAt(vec2 uv) {
+  vec2 p = clamp(uv * uMapSize - 0.5, vec2(0.0), uMapSize - 1.0);
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  return mix(mix(texelAt(i), texelAt(i + vec2(1.0, 0.0)), f.x), mix(texelAt(i + vec2(0.0, 1.0)), texelAt(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float pointsAt(vec2 p) {
+  float best = 1e9;
+  for (int i = 0; i < ${ARC_POINTS}; i++) {
+    if (i >= uSpotCount) break;
+    best = min(best, distance(p, uSpots[i]));
+  }
+  return best;
+}
+// How far from Line, + on one side and - on the other: the curve through its points in CURVE_STEPS straight steps a
+// stretch, its first and last steps running on for ever
+float lineAt(vec2 p) {
+  float best = 1e9;
+  float side = 1.0;
+  int last = (uSpotCount - 1) * ${CURVE_STEPS} - 1;
+  vec2 a = uSpots[1];
+  for (int s = 0; s < ${ARC_LINE_POINTS - 1}; s++) {
+    if (s >= uSpotCount - 1) break;
+    vec2 p0 = uSpots[s];
+    vec2 p1 = uSpots[s + 1];
+    vec2 p2 = uSpots[s + 2];
+    vec2 p3 = uSpots[s + 3];
+    vec2 c1 = 0.5 * (p2 - p0);
+    vec2 c2 = 0.5 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3);
+    vec2 c3 = 0.5 * (3.0 * p1 - p0 - 3.0 * p2 + p3);
+    for (int k = 1; k <= ${CURVE_STEPS}; k++) {
+      float t = float(k) / ${glsl(CURVE_STEPS)};
+      vec2 b = p1 + (c1 + (c2 + c3 * t) * t) * t;
+      vec2 v = b - a;
+      vec2 w = p - a;
+      float h = dot(w, v) / max(dot(v, v), 1e-12);
+      int at = s * ${CURVE_STEPS} + k - 1;
+      if (at > 0) h = max(h, 0.0);
+      if (at < last) h = min(h, 1.0);
+      float d = length(w - v * h);
+      if (d < best) {
+        best = d;
+        side = v.x * w.y - v.y * w.x < 0.0 ? -1.0 : 1.0;
+      }
+      a = b;
+    }
+  }
+  return best * side;
+}
+vec3 colourAt(float i) {
+  if (i < 0.5) return uColours[0];
+  if (i < 1.5) return uColours[1];
+  if (i < 2.5) return uColours[2];
+  return uColours[3];
+}
+vec3 encode(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+
+void main() {
+  float m = texture2D(uMask, vUv).a;
+  if (m < 0.002) { gl_FragColor = vec4(0.0); return; }
+  vec2 p = vUv * uBox;
+  float d = uFrom == 0 ? fieldAt(vUv) * uBox.x : uFrom == 1 ? pointsAt(p) : lineAt(p);
+  float phase = d / uBand - uSlide;
+  float n = float(uColourCount);
+  float f = phase - n * floor(phase / n);
+  float i = min(floor(f), n - 1.0);
+  float blend = smoothstep(${glsl(1 - BAND_BLEND)}, 1.0, f - i);
+  vec3 colour = mix(colourAt(i), colourAt(i + 1.0 < n ? i + 1.0 : 0.0), blend);
+  colour = mix(colour, uAverage, smoothstep(${glsl(BAND_BLUR.from)}, ${glsl(BAND_BLUR.to)}, uPixel / uBand));
+  gl_FragColor = vec4(encode(colour) * m, m);
+}`
+
+const BAND_UNIFORMS = [
+  'uMask', 'uMap', 'uMapSize', 'uMapMax', 'uFrom', 'uBox', 'uSpots', 'uSpotCount', 'uBand', 'uSlide', 'uColours', 'uColourCount', 'uAverage', 'uPixel',
+] as const
+
 type GL = WebGLRenderingContext | WebGL2RenderingContext
 /** A mask the ink is drawn through: its alpha is how much ink each pixel takes */
 export type MaskSource = HTMLCanvasElement | OffscreenCanvas | ImageBitmap
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+
+/** A program and where its uniforms are */
+interface Program<U extends string> {
+  program: WebGLProgram
+  uniforms: Record<U, WebGLUniformLocation | null>
+}
 
 interface Renderer {
   canvas: HTMLCanvasElement
@@ -115,15 +233,22 @@ interface Renderer {
   /** The largest texture, and the largest drawing */
   maxTexture: number
   maxDraw: number
-  program?: WebGLProgram
-  uniforms: Partial<Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>>
+  /** Realistic magnetic ink's program, and Arc-en-Ciel's: each missing if this GPU can't run it */
+  ink?: Program<(typeof UNIFORMS)[number]>
+  bands?: Program<(typeof BAND_UNIFORMS)[number]>
   /** Masks on the GPU, the latest used last */
   textures: Map<MaskSource, WebGLTexture>
+  /** Arc-en-Ciel's maps on the GPU, the latest used last */
+  maps: Map<BandField, WebGLTexture>
+  /** An empty map, for bands that need none */
+  noMap?: WebGLTexture
   lost: boolean
 }
 
 /** Masks kept on the GPU: every banknote's on the canvas and an export's */
 const TEXTURES_KEPT = 4
+/** Maps kept on the GPU */
+const MAPS_KEPT = 4
 
 let renderer: Renderer | null | undefined
 
@@ -135,27 +260,50 @@ function compile(gl: GL, type: number, source: string) {
   return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : undefined
 }
 
-/** The program and the square it is drawn on: again after the context is lost and restored, when the GPU has forgotten them */
+/** A program from the shared vertex shader and `fragment`, its square's corners always at attribute 0 */
+function link<U extends string>(gl: GL, fragment: string, uniforms: readonly U[]): Program<U> | undefined {
+  const vertexShader = compile(gl, gl.VERTEX_SHADER, VERTEX)
+  const fragmentShader = compile(gl, gl.FRAGMENT_SHADER, fragment)
+  const program = gl.createProgram()
+  if (!vertexShader || !fragmentShader || !program) return undefined
+  gl.attachShader(program, vertexShader)
+  gl.attachShader(program, fragmentShader)
+  gl.bindAttribLocation(program, 0, 'aPos')
+  gl.linkProgram(program)
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return undefined
+  return { program, uniforms: Object.fromEntries(uniforms.map((name) => [name, gl.getUniformLocation(program, name)])) as Record<U, WebGLUniformLocation | null> }
+}
+
+/**
+ * The programs and the square they draw on: again after the context is lost and restored, when the GPU has forgotten
+ * them. False when neither program runs here
+ */
 function prepare(r: Renderer) {
   const { gl } = r
-  const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX)
-  const fragment = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT)
-  const program = gl.createProgram()
-  if (!vertex || !fragment || !program) return false
-  gl.attachShader(program, vertex)
-  gl.attachShader(program, fragment)
-  gl.linkProgram(program)
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return false
-  gl.useProgram(program)
+  r.ink = link(gl, FRAGMENT, UNIFORMS)
+  r.bands = link(gl, BANDS_FRAGMENT, BAND_UNIFORMS)
+  if (!r.ink && !r.bands) return false
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
-  const position = gl.getAttribLocation(program, 'aPos')
-  gl.enableVertexAttribArray(position)
-  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0)
-  r.program = program
-  r.uniforms = Object.fromEntries(UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]))
+  gl.enableVertexAttribArray(0)
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
   r.textures.clear()
+  r.maps.clear()
+  r.noMap = gl.createTexture() ?? undefined
+  if (r.noMap) {
+    gl.bindTexture(gl.TEXTURE_2D, r.noMap)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE_ALPHA, 1, 1, 0, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, new Uint8Array(2))
+    nearest(gl)
+  }
   return true
+}
+
+/** Read texel by texel, never blended, and never repeated past the edges */
+function nearest(gl: GL) {
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 }
 
 function create(): Renderer | null {
@@ -176,8 +324,8 @@ function create(): Renderer | null {
     anySizeMipmaps: typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext,
     maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
     maxDraw: Math.min(viewport[0], viewport[1]),
-    uniforms: {},
     textures: new Map(),
+    maps: new Map(),
     lost: false,
   }
   if (!prepare(r)) return null
@@ -199,9 +347,25 @@ function inkRenderer() {
 }
 
 /** Whether realistic magnetic ink can be drawn here: the browser has WebGL */
-export const litInkAvailable = () => inkRenderer() !== null
+export const litInkAvailable = () => !!inkRenderer()?.ink
 
 const isPowerOfTwo = (n: number) => (n & (n - 1)) === 0
+
+/**
+ * The pixels a layer is drawn with, `size` up to the largest drawing; the canvas only grows, in steps, so layers of
+ * different sizes don't keep resizing it, and each draws in its bottom-left corner
+ */
+function drawingSize(r: Renderer, size: { width: number; height: number }) {
+  const { canvas } = r
+  const width = Math.max(1, Math.min(Math.round(size.width), r.maxDraw))
+  const height = Math.max(1, Math.min(Math.round(size.height), r.maxDraw))
+  if (canvas.width < width || canvas.height < height) {
+    const step = (n: number) => Math.min(r.maxDraw, Math.ceil(n / 256) * 256)
+    canvas.width = Math.max(canvas.width, step(width))
+    canvas.height = Math.max(canvas.height, step(height))
+  }
+  return { width, height }
+}
 
 /** A mask on the GPU, put there once; one bigger than the GPU takes is scaled down to fit first */
 function textureFor(r: Renderer, mask: MaskSource) {
@@ -261,20 +425,14 @@ export function drawLitInk(
   cell: number,
 ) {
   const r = inkRenderer()
-  if (!r || r.lost || !r.program) return false
+  const ink = r?.ink
+  if (!r || r.lost || !ink) return false
   const { gl, canvas } = r
-  const u = (name: (typeof UNIFORMS)[number]) => r.uniforms[name] ?? null
-  const width = Math.max(1, Math.min(Math.round(size.width), r.maxDraw))
-  const height = Math.max(1, Math.min(Math.round(size.height), r.maxDraw))
-  // The canvas only grows, in steps, so inks of different sizes don't keep resizing it; each draws in its bottom-left corner
-  if (canvas.width < width || canvas.height < height) {
-    const step = (n: number) => Math.min(r.maxDraw, Math.ceil(n / 256) * 256)
-    canvas.width = Math.max(canvas.width, step(width))
-    canvas.height = Math.max(canvas.height, step(height))
-  }
+  const u = (name: (typeof UNIFORMS)[number]) => ink.uniforms[name]
+  const { width, height } = drawingSize(r, size)
   const texture = textureFor(r, mask)
   if (!texture) return false
-  gl.useProgram(r.program)
+  gl.useProgram(ink.program)
   gl.viewport(0, 0, width, height)
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, texture)
@@ -316,5 +474,114 @@ export function paintLitInk(canvas: HTMLCanvasElement, mask: MaskSource, light: 
   ctx.globalCompositeOperation = 'copy'
   const drawn = drawLitInk(ctx, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mask, light, canvas, cell)
   if (drawn) painted.set(canvas, { mask, key })
+  return drawn
+}
+
+/** Whether Arc-en-Ciel's bands can be drawn here, sliding as the banknote tilts: the browser has WebGL */
+export const bandsAvailable = () => !!inkRenderer()?.bands
+
+/** An Arc-en-Ciel map on the GPU, put there once, its distances as 16 bits a texel (`texelAt` reads them back) */
+function mapFor(r: Renderer, field: BandField) {
+  const kept = r.maps.get(field)
+  if (kept) {
+    r.maps.delete(field)
+    r.maps.set(field, kept)
+    return kept
+  }
+  const { gl } = r
+  const { width, height, data, max } = field
+  if (width < 1 || height < 1 || width > r.maxTexture || height > r.maxTexture) return undefined
+  const bytes = new Uint8Array(width * height * 2)
+  const k = max > 0 ? 65535 / max : 0
+  for (let i = 0; i < data.length; i++) {
+    const v = Math.min(65535, Math.max(0, Math.round(data[i] * k)))
+    bytes[i * 2] = v >> 8
+    bytes[i * 2 + 1] = v & 255
+  }
+  const texture = gl.createTexture()
+  if (!texture) return undefined
+  gl.bindTexture(gl.TEXTURE_2D, texture)
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE_ALPHA, width, height, 0, gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, bytes)
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4)
+  nearest(gl)
+  r.maps.set(field, texture)
+  for (const [old, oldTexture] of r.maps) {
+    if (r.maps.size <= MAPS_KEPT) break
+    gl.deleteTexture(oldTexture)
+    r.maps.delete(old)
+  }
+  return texture
+}
+
+/**
+ * Draws Arc-en-Ciel as `look` has it through `mask` at `size` pixels onto `target` at `dest`. False when it can't (no
+ * WebGL, or the context is lost), having drawn nothing.
+ */
+export function drawBands(
+  target: Ctx,
+  dest: { x: number; y: number; width: number; height: number },
+  mask: MaskSource,
+  look: BandLook,
+  size: { width: number; height: number },
+) {
+  const r = inkRenderer()
+  const bands = r?.bands
+  if (!r || r.lost || !bands) return false
+  const { gl, canvas } = r
+  const u = (name: (typeof BAND_UNIFORMS)[number]) => bands.uniforms[name]
+  const { width, height } = drawingSize(r, size)
+  const texture = textureFor(r, mask)
+  const map = look.field ? mapFor(r, look.field) : r.noMap
+  if (!texture || !map) return false
+  gl.useProgram(bands.program)
+  gl.viewport(0, 0, width, height)
+  gl.activeTexture(gl.TEXTURE0)
+  gl.bindTexture(gl.TEXTURE_2D, texture)
+  gl.uniform1i(u('uMask'), 0)
+  gl.activeTexture(gl.TEXTURE1)
+  gl.bindTexture(gl.TEXTURE_2D, map)
+  gl.uniform1i(u('uMap'), 1)
+  gl.activeTexture(gl.TEXTURE0)
+  gl.uniform2f(u('uMapSize'), look.field?.width ?? 1, look.field?.height ?? 1)
+  gl.uniform1f(u('uMapMax'), look.field?.max ?? 0)
+  gl.uniform1i(u('uFrom'), look.from === 'map' ? 0 : look.from === 'point' ? 1 : 2)
+  gl.uniform2f(u('uBox'), ...look.box)
+  const spots = new Float32Array(MAX_SPOTS * 2)
+  look.spots.slice(0, MAX_SPOTS).forEach(([x, y], i) => spots.set([x, y], i * 2))
+  gl.uniform2fv(u('uSpots'), spots)
+  // Line's controls include one past each end
+  gl.uniform1i(u('uSpotCount'), look.from === 'line' ? look.spots.length - 2 : look.spots.length)
+  gl.uniform1f(u('uBand'), look.bandMm)
+  gl.uniform1f(u('uSlide'), look.slide)
+  const colours = new Float32Array(12)
+  look.colours.slice(0, 4).forEach((c, i) => colours.set(c, i * 3))
+  gl.uniform3fv(u('uColours'), colours)
+  gl.uniform1i(u('uColourCount'), Math.min(4, look.colours.length))
+  gl.uniform3f(u('uAverage'), ...averageRgb(look.colours))
+  gl.uniform1f(u('uPixel'), look.box[0] / width)
+  // Every pixel of it is drawn, clear ones too, so there is nothing to clear first
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+  target.drawImage(canvas, 0, canvas.height - height, width, height, dest.x, dest.y, dest.width, dest.height)
+  return true
+}
+
+/** What each Arc-en-Ciel canvas last showed, so a tilt that doesn't move its bands doesn't draw it again */
+const bandsPainted = new WeakMap<HTMLCanvasElement, { mask: MaskSource; field?: BandField; key: string }>()
+
+/**
+ * Draws Arc-en-Ciel into a canvas of its own, in place of what it showed, at the canvas's own size. Nothing is drawn when
+ * it would show the same again. False when it can't be drawn on the GPU (no WebGL).
+ */
+export function paintBands(canvas: HTMLCanvasElement, mask: MaskSource, look: BandLook) {
+  const { field, ...rest } = look
+  const key = `${canvas.width}×${canvas.height}|${JSON.stringify(rest)}`
+  const last = bandsPainted.get(canvas)
+  if (last?.mask === mask && last.field === field && last.key === key) return true
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return false
+  ctx.globalCompositeOperation = 'copy'
+  const drawn = drawBands(ctx, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mask, look, canvas)
+  if (drawn) bandsPainted.set(canvas, { mask, field, key })
   return drawn
 }

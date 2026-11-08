@@ -211,6 +211,45 @@ export interface MagneticInk {
   realistic?: boolean
 }
 
+/** A spot on a placed layer, as shares of its box: 0, 0 its top-left corner and 1, 1 its bottom-right. It may lie off the box */
+export interface BoxSpot {
+  x: number
+  y: number
+}
+
+/** Where Arc-en-Ciel's bands start: each shape's edge, holes in the shape, points or a line placed on the canvas */
+export type ArcFlow = 'edge' | 'holes' | 'point' | 'line'
+
+/**
+ * Oberthur's Arc-en-Ciel: an offset line screen in three or four colours, embossed blind in register with it, whose colour
+ * bands slide as the banknote tilts across its ridges (arcEnCiel.ts). The shape is its image read as magnetic ink's
+ * stencil is (`inkCoverage` in inkMask.ts). Placed by its top-left corner in mm from the banknote's top-left; its height
+ * follows the image's proportions. Its points and line are kept whatever the bands start from, so switching back finds
+ * them where they were.
+ */
+export interface ArcEnCiel {
+  /** Absent until an image is uploaded */
+  imageId?: string
+  xMm: number
+  yMm: number
+  widthMm: number
+  heightMm: number
+  /** Bands round the shape instead of in it */
+  invert?: boolean
+  /** Where the bands start */
+  flow: ArcFlow
+  /** Point's starts, one or more: their rings meet */
+  points: BoxSpot[]
+  /** Line's two ends, first and last, with any points that bend it between, in order along it */
+  line: BoxSpot[]
+  /** The bands' colours, #rrggbb, in order from where they start, three or four (ARC_COLOURS); they repeat */
+  colors: string[]
+  /** How wide one colour band is, mm */
+  bandMm: number
+  /** The tilt that slides the bands: up/down (level ridges) or side to side (upright ones) */
+  axis: 'y' | 'x'
+}
+
 /**
  * Lens settings a section keeps for itself while mixed angles is on: the same fields as the banknote's lens. Any
  * left out take their defaults, not the banknote's, so a section's lens never shifts when the shared one changes.
@@ -289,6 +328,8 @@ export interface Note {
   watermark?: Watermark
   /** The continuous design check for an uploaded design; absent while it is off */
   continuous?: ContinuousDesign
+  /** A sibling of the thread, drawn over the watermark and under magnetic ink; absent until one is added */
+  arcEnCiel?: ArcEnCiel
   /** A sibling of the thread and the watermark, drawn over the watermark and under the thread; absent until one is added */
   magneticInk?: MagneticInk
   /** The thread's sections; absent on banknotes from before patterns, which are one section with the banknote's lens */

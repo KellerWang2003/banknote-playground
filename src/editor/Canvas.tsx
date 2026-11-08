@@ -17,13 +17,15 @@ import { type Guide, snapBox } from '../lib/snap'
 import { updateNote } from '../lib/store'
 import type { Note } from '../lib/types'
 import { lengthIn, useLengthUnit } from '../lib/units'
+import { mmSpot, withPoint } from '../lib/arcEnCiel'
 import { isPlaced, type PlacedLayer } from '../lib/layers'
 import { type PlacedBox, moveBox } from '../lib/placed'
 import { type Quarter, ROTATE_SECONDS, noteBox, onItsSide, quarterOf, turnedCorner, unturn, unturnedPoint } from '../lib/rotate'
 import { setTilt, showsBack, springToFlat, useTilt, useTiltLoop } from '../tilt/tilt'
 import { EdgeMarks, NeighbourRing } from './ContinuousView'
 import { addImageFrames, type NoteRef } from './frameActions'
-import { placeLayer, type Layer } from './layerActions'
+import { ArcHandles } from './ArcHandles'
+import { placeLayer, type Layer, updateArcEnCiel } from './layerActions'
 import { PlacingBox } from './PlacingBox'
 import { spacePanned, useSpaceHand } from './spaceHand'
 import { UploadDesignButton } from './UploadDesignButton'
@@ -614,6 +616,7 @@ export function Canvas({
           const isSelected = note.id === selectedId
           const editingThis = isSelected && editingWindows
           const placingThis = isSelected && placing && note[placing] ? placing : undefined
+          const arc = note.arcEnCiel
           // Only what is picked is outlined, the banknote itself or one of its parts; what a click would pick is outlined
           // lightly, but not while Space is held, as a press then only pans
           const picked = isSelected ? layer : undefined
@@ -681,7 +684,15 @@ export function Canvas({
                     faceShiftMm={drift && (drift.x || drift.y) ? drift : undefined} />
                   {placingThis && (
                     <PlacingBox note={note} layer={placingThis} box={note[placingThis]!} scale={scale} mirror={back} quarter={quarter}
-                      onChange={(next) => placeLayer(ref, placingThis, next)} />
+                      onChange={(next) => placeLayer(ref, placingThis, next)}
+                      // Arc-en-Ciel's rings start from points: a double-click in its box adds one there
+                      onDoubleClick={placingThis === 'arcEnCiel' && arc?.flow === 'point'
+                        ? (at) => updateArcEnCiel(ref, (a) => withPoint(a, mmSpot([at.xMm - a.xMm, at.yMm - a.yMm], a)))
+                        : undefined} />
+                  )}
+                  {/* Where Arc-en-Ciel's bands start from points or a line, placed with handles over its box */}
+                  {placingThis === 'arcEnCiel' && arc && !back && (arc.flow === 'point' || arc.flow === 'line') && (
+                    <ArcHandles arc={arc} scale={scale} quarter={quarter} onChange={(next) => updateArcEnCiel(ref, () => next)} />
                   )}
                   {isSelected && editingWindows && note.thread.windows.enabled && (
                     <WindowEditor note={note} scale={scale} quarter={quarter} selectedId={selectedWindowId} onSelect={onWindowSelect}

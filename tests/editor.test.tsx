@@ -138,7 +138,7 @@ describe('username workspace editor', () => {
     expect(add()[1].textContent).toBe('Add security feature')
     await user.click(add()[1])
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/^Security thread/), expect.stringMatching(/^Watermark/), expect.stringMatching(/^Magnetic ink/)])
+      expect.stringMatching(/^Security thread/), expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
     await user.click(screen.getByRole('menuitem', { name: /^Security thread/ }))
     expect(project().notes[0].noThread).toBeUndefined()
     expect(screen.getByRole('tab', { name: 'Thread' }).getAttribute('aria-selected')).toBe('true')
@@ -1365,7 +1365,8 @@ describe('username workspace editor', () => {
     // The + lists every layer the banknote doesn't have yet; adding the ink selects it and shows its box to place, the
     // banknote laid flat and the tilt pad stepping aside, as for the watermark
     await user.click(addFeature())
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Magnetic ink/)])
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent))
+      .toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
     await user.click(screen.getByRole('menuitem', { name: /^Magnetic ink/ }))
     expect(ink()).toBeDefined()
     expect(tab()).toBe('Magnetic ink')
@@ -1455,13 +1456,16 @@ describe('username workspace editor', () => {
     await user.click(addFeature())
     await user.click(await screen.findByRole('menuitem', { name: /^Magnetic ink/ }))
     await user.click(addFeature())
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Watermark/)])
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/)])
     await user.click(screen.getByRole('menuitem', { name: /^Watermark/ }))
+    await user.click(addFeature())
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Arc-en-Ciel/)])
+    await user.click(screen.getByRole('menuitem', { name: /^Arc-en-Ciel/ }))
     expect(screen.queryAllByRole('button', { name: 'Add security feature' })).toHaveLength(0)
     // Listed under the thread in the order they draw, as tabs in the same order
     expect(within(screen.getByRole('list', { name: 'Layers of Demo banknote' })).getAllByRole('listitem').map((row) => row.textContent))
-      .toEqual(['Security thread', 'Watermark', 'Magnetic ink'])
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Banknote', 'Thread', 'Watermark', 'Magnetic ink'])
+      .toEqual(['Security thread', 'Watermark', 'Arc-en-Ciel', 'Magnetic ink'])
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Banknote', 'Thread', 'Watermark', 'Arc-en-Ciel', 'Magnetic ink'])
     const original = notes()[0].magneticInk
 
     await user.click(screen.getByRole('button', { name: 'Duplicate', exact: true }))

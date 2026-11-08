@@ -1,4 +1,4 @@
-import { Columns2, Droplet, Magnet, Plus } from 'lucide-react'
+import { Columns2, Droplet, Magnet, Plus, Rainbow } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -8,7 +8,7 @@ import { FEATURES, FEATURE_LINES, FEATURE_NAMES, hasFeature, type Feature } from
 import type { Note } from '../lib/types'
 
 /** Each feature's icon, in the Add menu and the Banknotes list, as on its tab in the right panel */
-export const FEATURE_ICONS: Record<Feature, ReactNode> = { thread: <Columns2 />, watermark: <Droplet />, magneticInk: <Magnet /> }
+export const FEATURE_ICONS: Record<Feature, ReactNode> = { thread: <Columns2 />, watermark: <Droplet />, arcEnCiel: <Rainbow />, magneticInk: <Magnet /> }
 
 /**
  * The one way to add a banknote's security features (Keller, 4 November): a + whose menu lists every feature the

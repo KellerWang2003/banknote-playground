@@ -3,6 +3,7 @@ import { fitContinuous } from './continuous'
 import { defaultPattern, migratePattern } from './pattern'
 import { DEFAULT_PLAYBACK, playbackSettings } from './playback'
 import { migrateWindows, threadLength } from './thread'
+import { fitArcEnCiel } from './arcEnCiel'
 import { fitMagneticInk } from './magneticInk'
 import type { Frame, Note, Project, TiltSettings } from './types'
 import { fitWatermark } from './watermark'
@@ -135,7 +136,7 @@ export function migrateProject(raw: unknown): Project {
       : []
   // Notes saved before the canvas had no position: lay them out in a row
   const placed: Note[] = []
-  for (const { watermark, continuous, magneticInk, back: savedBack, noThread, ...raw } of notes) {
+  for (const { watermark, continuous, arcEnCiel, magneticInk, back: savedBack, noThread, ...raw } of notes) {
     const check = fitContinuous(continuous)
     const back = fitBack(savedBack)
     // Older notes had no background mode; an uploaded face meant an image background
@@ -143,8 +144,9 @@ export function migrateProject(raw: unknown): Project {
       ...raw,
       // Without a thread only when saved so; every banknote from before has its thread
       ...(noThread === true ? { noThread } : {}),
-      // Only notes with a watermark or magnetic ink have one; a damaged one is put back on its banknote
+      // Only notes with a watermark, Arc-en-Ciel or magnetic ink have one; a damaged one is put back on its banknote
       ...(watermark && typeof watermark === 'object' ? { watermark: fitWatermark(watermark, raw) } : {}),
+      ...(arcEnCiel && typeof arcEnCiel === 'object' ? { arcEnCiel: fitArcEnCiel(arcEnCiel, raw) } : {}),
       ...(magneticInk && typeof magneticInk === 'object' ? { magneticInk: fitMagneticInk(magneticInk, raw) } : {}),
       // The continuous check is on only while saved, its tolerance kept in range
       ...(check ? { continuous: check } : {}),

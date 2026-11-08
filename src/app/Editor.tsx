@@ -18,7 +18,7 @@ import { TiltRail } from '../editor/TiltRail'
 import { useSettleArtwork } from '../editor/useSettleArtwork'
 import { addFeature, layerOf, removeFeature, removeLayer, type Layer } from '../editor/layerActions'
 import { pressSpace, releaseSpace, useSpaceHand } from '../editor/spaceHand'
-import { hasThread, isPlaced, type Feature, type PlacedLayer } from '../lib/layers'
+import { hasThread, isPlaced, onFront, type Feature, type PlacedLayer } from '../lib/layers'
 
 /** Keys typed into these, or pressed while a dialog or menu is open, are not shortcuts */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
@@ -53,15 +53,15 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   }
   const exitPlacing = () => setPlacingNoteId(undefined)
   /**
-   * Selects exactly what was picked: a banknote itself, or one of its layers; picking its watermark or magnetic ink places
-   * it. The thread and magnetic ink are only on the front, so picking either turns the banknotes back round to it
+   * Selects exactly what was picked: a banknote itself, or one of its layers; picking a placed layer places it. The thread,
+   * Arc-en-Ciel and magnetic ink are only on the front, so picking one turns the banknotes back round to it
    */
   const selectLayer = (noteId: string, next: Layer) => {
     if (noteId !== selectedId || next !== 'thread') exitWindows()
     setSelectedId(noteId)
     setLayer(next)
     setPlacingNoteId(isPlaced(next) ? noteId : undefined)
-    if (next === 'thread' || next === 'magneticInk') turnOver(false)
+    if (onFront(next)) turnOver(false)
   }
   /** Selects a banknote itself, or nothing */
   const selectNote = (noteId: string | undefined) => {
@@ -109,13 +109,13 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     }
   }, [playsOnOpen])
 
-  // Turned over, the banknotes show only their backs and watermarks: a thread or magnetic ink picked on the front leaves
-  // the banknote itself picked, and window editing ends
+  // Turned over, the banknotes show only their backs and watermarks: a thread, Arc-en-Ciel or magnetic ink picked on the
+  // front leaves the banknote itself picked, and window editing ends
   const flipped = useTilt((s) => s.flipped)
   useEffect(() => {
     if (!flipped) return
     exitWindows()
-    if (layer === 'thread' || layer === 'magneticInk') {
+    if (onFront(layer)) {
       setLayer('note')
       exitPlacing()
     }

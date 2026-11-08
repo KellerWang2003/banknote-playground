@@ -7,6 +7,7 @@ import { loadImageUrl } from './images'
 import { patternMix, playbackLens, playbackTilt, preparePattern, sectionSpans, shownLabel } from './pattern'
 import { SWEEP_SECONDS, playbackEase, playbackSettings } from './playback'
 import { type Relief, exportRelief } from './relief'
+import { type BandShape, bandLook, drawArcEnCiel, fromShape, loadBandShape } from './bandMap'
 import { type InkMask, exportInkMask } from './inkMask'
 import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
@@ -15,7 +16,7 @@ import { inkLight } from './realisticInk'
 import { copyStarts, imageBox } from './artwork'
 import { fitSections, threadLength } from './thread'
 import type { Quarter } from './rotate'
-import type { Frame, MagneticInk, Note } from './types'
+import type { ArcEnCiel, Frame, MagneticInk, Note } from './types'
 
 // Draws banknotes to a canvas exactly as NoteView shows them on the canvas, so the tilt can be exported
 
@@ -130,6 +131,8 @@ export interface NoteAssets {
   frames: Map<string, HTMLImageElement>
   /** The watermark worked out as light through thinner paper, through its levels, colour-dodged over the design (relief.ts) */
   relief?: Relief
+  /** Arc-en-Ciel's shape, the mask its bands are drawn through, and for bands from the shape its maps (bandMap.ts) */
+  arc?: { mask: InkMask; shape?: BandShape }
   /** Magnetic ink's shape, the mask its colours and bar are drawn through (inkMask.ts) */
   ink?: InkMask
 }
@@ -160,18 +163,20 @@ export function framePx(note: Note, frame: Frame, scale: number) {
 
 /**
  * A banknote's images, ready to draw at the full resolution they were uploaded at (Keller): the originals, never display
- * copies, and the watermark and magnetic ink read from the whole image, an SVG's at least as big as `scale` (px per mm)
- * draws it. For its back (`back`), only what shows there: the back's design and the watermark.
+ * copies, and the watermark, Arc-en-Ciel and magnetic ink read from the whole image, an SVG's at least as big as `scale`
+ * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark.
  */
 export async function loadNoteAssets(note: Note, scale = 0, back = false): Promise<NoteAssets> {
   const frames = new Map<string, HTMLImageElement>()
   const drawnPx = (box: { widthMm: number; heightMm: number }) => Math.max(box.widthMm, box.heightMm) * scale
   const { watermark } = note
   const magneticInk = back ? undefined : note.magneticInk
+  const arcEnCiel = back ? undefined : note.arcEnCiel
   const design = sideImageId(note, back ? 'back' : 'front')
-  const [face, relief, ink] = await Promise.all([
+  const [face, relief, arc, ink] = await Promise.all([
     design ? loadArtwork(design) : undefined,
     watermark?.imageId ? exportRelief({ imageId: watermark.imageId, invert: watermark.invert, levels: watermark.levels }, drawnPx(watermark)) : undefined,
+    arcEnCiel?.imageId ? loadArc(arcEnCiel, arcEnCiel.imageId, drawnPx(arcEnCiel)) : undefined,
     magneticInk?.imageId ? exportInkMask(magneticInk.imageId, magneticInk.invert, drawnPx(magneticInk)) : undefined,
     ...(back ? [] : note.frames).map(async (frame) => {
       if (frame.kind !== 'image' || !frame.imageId) return
@@ -179,7 +184,16 @@ export async function loadNoteAssets(note: Note, scale = 0, back = false): Promi
       if (img) frames.set(frame.id, img)
     }),
   ])
-  return { face, frames, relief, ink }
+  return { face, frames, relief, arc, ink }
+}
+
+/** Arc-en-Ciel's mask from the whole image, and the maps its bands start from, which need no more detail than the canvas's */
+async function loadArc(arc: ArcEnCiel, imageId: string, px: number): Promise<NoteAssets['arc']> {
+  const [mask, shape] = await Promise.all([
+    exportInkMask(imageId, arc.invert, px),
+    fromShape(arc) ? loadBandShape(imageId, arc.invert) : undefined,
+  ])
+  return mask && { mask, ...(shape ? { shape } : {}) }
 }
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -209,7 +223,7 @@ export interface FaceOptions {
 
 /** The flat note at `scale` px per mm, as NoteView draws it before it is turned in 3D */
 export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number, tiltAt: Tilt2 | number, options: FaceOptions) {
-  const { thread, frames, watermark, magneticInk } = note
+  const { thread, frames, watermark, arcEnCiel, magneticInk } = note
   const { x: angleX, y: angle } = asTilt(tiltAt)
   const mm = (value: number) => value * scale
   const width = mm(note.widthMm), height = mm(note.heightMm)
@@ -249,11 +263,12 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.globalCompositeOperation = 'source-over'
   }
   if (options.back) {
-    // Nothing else shows on the back: no magnetic ink, no thread
+    // Nothing else shows on the back: no Arc-en-Ciel, no magnetic ink, no thread
     drawShade(ctx, width, height, { x: angleX, y: angle }, options.perspective)
     ctx.restore()
     return
   }
+  if (arcEnCiel && assets.arc) drawArc(ctx, arcEnCiel, assets.arc, mm, { x: angleX, y: angle })
   if (magneticInk && assets.ink) {
     drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle }, { note, turn: options.perspective ? options.turn : 0, quarter: options.quarter, grain: options.grain })
   }
@@ -438,6 +453,17 @@ export function drawInk(
   lctx.imageSmoothingQuality = 'high'
   lctx.drawImage(mask.canvas, 0, 0, width, height)
   ctx.drawImage(layer, mm(ink.xMm), mm(ink.yMm), mm(ink.widthMm), mm(ink.heightMm))
+}
+
+/**
+ * Arc-en-Ciel as NoteView draws it, over the watermark and under magnetic ink: its bands slid as far as the tilt takes
+ * them, through its mask, on the canvas's renderer, or at rest where the browser has no WebGL
+ */
+export function drawArc(ctx: Ctx, arc: ArcEnCiel, assets: NonNullable<NoteAssets['arc']>, mm: (value: number) => number, tilt: Tilt2) {
+  const look = bandLook(arc, assets.shape, tilt)
+  if (!look) return
+  const size = { width: Math.max(1, Math.round(mm(arc.widthMm))), height: Math.max(1, Math.round(mm(arc.heightMm))) }
+  drawArcEnCiel(ctx, { x: mm(arc.xMm), y: mm(arc.yMm), width: mm(arc.widthMm), height: mm(arc.heightMm) }, assets.mask.canvas, look, size)
 }
 
 /** The frame-number pill NoteView shows in the middle of the thread when the # toggle is on */

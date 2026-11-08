@@ -2,11 +2,12 @@ import { beginHistoryGroup, endHistoryGroup } from '../lib/history'
 import { imageAspect, removeImage, storeImage } from '../lib/images'
 import { type Feature, type PlacedLayer, fitPlaced, hasThread, isPlaced, newPlaced, withPlaced } from '../lib/layers'
 import { withNewThread } from '../lib/notes'
+import { withArcImage } from '../lib/arcEnCiel'
 import { withInkImage } from '../lib/magneticInk'
 import type { PlacedBox } from '../lib/placed'
 import { findNote, updateNote } from '../lib/store'
 import { standIn } from '../lib/standIns'
-import type { MagneticInk, Note, Watermark } from '../lib/types'
+import type { ArcEnCiel, MagneticInk, Note, Watermark } from '../lib/types'
 import { fitWatermark, withWatermarkImage } from '../lib/watermark'
 import type { NoteRef } from './frameActions'
 
@@ -43,7 +44,7 @@ export function addLayer(ref: NoteRef, layer: PlacedLayer) {
       // Unless it went (undone) or got an image of its own meanwhile
       const added = findNote(projectId, noteId)?.[layer]
       if (!added || added.imageId) return
-      return layer === 'watermark' ? setWatermarkImage(ref, file) : setMagneticInkImage(ref, file)
+      return setLayerImage(ref, layer, file)
     })
     // Where it can't be drawn (an old browser, the tests), the layer starts empty, as it used to
     .catch(() => {})
@@ -68,6 +69,11 @@ export function placeLayer({ projectId, noteId }: NoteRef, layer: PlacedLayer, {
 /** Changes the watermark, kept on the banknote */
 export function updateWatermark({ projectId, noteId }: NoteRef, change: (watermark: Watermark, note: Note) => Watermark) {
   updateNote(projectId, noteId, (n) => (n.watermark ? { ...n, watermark: fitWatermark(change(n.watermark, n), n) } : n))
+}
+
+/** Changes Arc-en-Ciel, kept on the banknote */
+export function updateArcEnCiel({ projectId, noteId }: NoteRef, change: (arc: ArcEnCiel, note: Note) => ArcEnCiel) {
+  updateNote(projectId, noteId, (n) => (n.arcEnCiel ? { ...n, arcEnCiel: fitPlaced('arcEnCiel', change(n.arcEnCiel, n), n) } : n))
 }
 
 /** Changes the magnetic ink, kept on the banknote */
@@ -98,4 +104,22 @@ export async function setMagneticInkImage(ref: NoteRef, file: File | undefined) 
     updateMagneticInk(ref, ({ imageId: _removed, ...rest }) => rest)
   }
   if (old) await removeImage(old)
+}
+
+/** Uploads Arc-en-Ciel's image, whose shape takes the bands (its proportions set the height), or removes it */
+export async function setArcEnCielImage(ref: NoteRef, file: File | undefined) {
+  const old = findNote(ref.projectId, ref.noteId)?.arcEnCiel?.imageId
+  if (file) {
+    const [imageId, aspect] = await Promise.all([storeImage(file), imageAspect(file)])
+    updateArcEnCiel(ref, (arc, n) => withArcImage(arc, imageId, aspect, n))
+  } else {
+    updateArcEnCiel(ref, ({ imageId: _removed, ...rest }) => rest)
+  }
+  if (old) await removeImage(old)
+}
+
+/** Uploads a placed layer's image, or removes it */
+export function setLayerImage(ref: NoteRef, layer: PlacedLayer, file: File | undefined) {
+  if (layer === 'watermark') return setWatermarkImage(ref, file)
+  return layer === 'arcEnCiel' ? setArcEnCielImage(ref, file) : setMagneticInkImage(ref, file)
 }

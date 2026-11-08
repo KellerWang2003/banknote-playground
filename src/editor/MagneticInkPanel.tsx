@@ -8,9 +8,9 @@ import { LayerImage, PlaceFields } from './PlacedFields'
 
 /**
  * Right, under the Magnetic ink tab: the selected banknote's magnetic ink, SPARK Flow PRIME's look. One image, whose shape
- * takes the ink (whatever stands out from its background), or the ink goes round it with Invert. Its colour flat and
- * tilted away, the bar that rolls across it on one tilt and how wide, whether it is lit as metal (Realistic), and where it
- * sits. Removing it is beside the tabs.
+ * takes the ink (whatever stands out from its background), or the ink goes round it with Invert. Where it sits comes
+ * first, then the image, then its colour flat and tilted away, the bar that rolls across it on one tilt and how wide, and
+ * whether it is lit as metal (Realistic). Removing it is beside the tabs.
  */
 export function MagneticInkPanel({ note, ink, noteRef, onPlace }: {
   note: Note
@@ -24,6 +24,11 @@ export function MagneticInkPanel({ note, ink, noteRef, onPlace }: {
 
   return (
     <Group>
+      {/* Where it sits first, then its image, then its look, as every placed layer's panel reads (Keller, 8 November) */}
+      <Section nested>
+        <PlaceFields note={note} box={ink} name="Magnetic ink" onChange={change} />
+      </Section>
+
       <Section nested>
         <LayerImage imageId={ink.imageId}
           onUpload={async (file) => {
@@ -63,9 +68,6 @@ export function MagneticInkPanel({ note, ink, noteRef, onPlace }: {
           checked={ink.realistic === true} onChange={(on) => change((i) => ({ ...i, realistic: on }))} />
       </Section>
 
-      <Section nested>
-        <PlaceFields note={note} box={ink} name="Magnetic ink" onChange={change} />
-      </Section>
     </Group>
   )
 }

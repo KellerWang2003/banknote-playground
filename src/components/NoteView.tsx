@@ -13,6 +13,7 @@ import type { Frame, MagneticInk, Note } from '../lib/types'
 import { paintRelief, reliefPixels, useRelief } from '../lib/relief'
 import { useInkMask } from '../lib/inkMask'
 import { litInkAvailable, paintLitInk } from '../lib/inkRenderer'
+import { bandLook, fromShape, paintArcEnCiel, useBandShape } from '../lib/bandMap'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
 import { type Quarter, quarterOf } from '../lib/rotate'
@@ -263,9 +264,10 @@ type LiveState = { angle: number; angleX: number; light: number; turn: number; f
  * the note also turns in 3D, and `sheen` adds a highlight that travels along the thread. Its watermark, in the
  * note's own colours under the thread, is only a hint flat, comes out clearly as the note tilts, and shows flat
  * held to the light. Its magnetic ink, over the watermark and under the thread, shifts colour as the note turns away
- * and rolls its bright bar on one tilt, or with Realistic on is lit as metal flakes. Its back (`side`, or for a live
- * note the shared turn) shows the back's own background and the watermark through it, mirrored, and nothing else: no
- * thread, no magnetic ink.
+ * and rolls its bright bar on one tilt, or with Realistic on is lit as metal flakes. Its Arc-en-Ciel, under the ink, shows
+ * its colour bands sliding as the note tilts across its ridges. Its back (`side`, or for a live note the shared turn)
+ * shows the back's own background and the watermark through it, mirrored, and nothing else: no thread, no Arc-en-Ciel, no
+ * magnetic ink.
  */
 export function NoteView({
   note,
@@ -314,7 +316,7 @@ export function NoteView({
   /** The face a still note shows; a live one shows whichever the shared turn has come round to, turning over in 3D with `perspective` */
   side?: Side
 }) {
-  const { thread, frames, watermark, magneticInk } = note
+  const { thread, frames, watermark, arcEnCiel, magneticInk } = note
   const root = useRef<HTMLDivElement>(null)
   const mm = (value: number) => value * scale
   // Live notes re-render once as they come edge-on, where the face changes
@@ -352,6 +354,17 @@ export function NoteView({
       paintLitInk(canvas, inkMask.canvas, inkLight(magneticInk, note, tilt, perspectiveFor(note, 1), quarter), inkPx.cell)
     }
   }
+  // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) its distance maps;
+  // drawn into a canvas of its own in its box, as many pixels as it shows with, again only when its bands move
+  const arcMask = useInkMask(arcEnCiel, arcEnCiel && devicePx(Math.max(arcEnCiel.widthMm, arcEnCiel.heightMm) * scale))
+  const arcShape = useBandShape(arcEnCiel && fromShape(arcEnCiel) ? arcEnCiel : undefined)
+  const arcPx = arcEnCiel ? inkPixels(arcEnCiel.widthMm * scale, arcEnCiel.heightMm * scale, devicePx(1)) : undefined
+  const arcCanvas = useRef<HTMLCanvasElement>(null)
+  const paintArc = (tilt: Tilt2) => {
+    const canvas = arcCanvas.current
+    const look = canvas && arcEnCiel && bandLook(arcEnCiel, arcShape, tilt)
+    if (canvas && look && arcMask?.canvas) paintArcEnCiel(canvas, arcMask.canvas, look)
+  }
   const revealOf = (state: LiveState) => reveal ?? watermarkReveal(state.light, { x: state.angleX, y: state.angle })
 
   // Live: write the continuous parts straight onto the elements, after every render and on every tilt change
@@ -373,12 +386,16 @@ export function NoteView({
       // Realistic ink turns from the lamp as the banknote turns on screen, turning over included; it draws again only when
       // that changes, not with the light or the timeline
       if (realistic) paintInk({ x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }, quarterOf(state.quarterTurns ?? 0))
+      // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen
+      paintArc({ x: angleX, y: angle })
     }
     apply.current(useTilt.getState())
   })
-  // A still note's realistic ink, as at its own tilt
+  // A still note's realistic ink and Arc-en-Ciel, as at its own tilt
   useLayoutEffect(() => {
-    if (!live && realistic) paintInk({ x: angleX, y: angle }, 0)
+    if (live) return
+    if (realistic) paintInk({ x: angleX, y: angle }, 0)
+    paintArc({ x: angleX, y: angle })
   })
   useLayoutEffect(() => {
     if (!live) return
@@ -405,13 +422,17 @@ export function NoteView({
     ({ left: mm(box.xMm), top: mm(box.yMm), width: mm(box.widthMm), height: mm(box.heightMm) })
   // Seen from the back, the watermark lies the other way round, at the other side
   const watermarkBox = watermark && placed(back ? mirrored(watermark, note) : watermark)
+  const arcBox = arcEnCiel && placed(arcEnCiel)
+  // Its shape, or the maps its bands start from, still on their way: a shimmer in its box meanwhile
+  const arcLoading = arcEnCiel?.imageId !== undefined && (arcMask === undefined || (fromShape(arcEnCiel) && arcShape === undefined))
   const inkBox = magneticInk && placed(magneticInk)
   // The thread shows only on the front (Keller), and only once the banknote has one (Keller, 4 November: it is added
   // like any other feature)
   const threadShown = !back && hasThread(note)
   // The back has only the watermark to outline
   const boxOf = (target: 'thread' | PlacedLayer | undefined) =>
-    target === 'watermark' ? watermarkBox : back ? undefined : target === 'thread' ? (threadShown ? strip : undefined) : target === 'magneticInk' ? inkBox : undefined
+    target === 'watermark' ? watermarkBox : back ? undefined : target === 'thread' ? (threadShown ? strip : undefined)
+      : target === 'arcEnCiel' ? arcBox : target === 'magneticInk' ? inkBox : undefined
   const inkShape = inkMask && `url(${inkMask.url})`
   const art = <ThreadArt note={note} shown={shown} blends={blends} fill={fill} />
 
@@ -444,6 +465,17 @@ export function NoteView({
         <canvas ref={light} data-watermark={note.id} data-placed="watermark" width={lightWidth} height={lightHeight}
           className={cn('absolute', live && depth > 0 ? 'cursor-move' : 'pointer-events-none')}
           {...part('watermark', back ? { ...watermarkBox, mixBlendMode: 'color-dodge', transform: 'scaleX(-1)' } : { ...watermarkBox, mixBlendMode: 'color-dodge' })} />
+      )}
+
+      {!back && arcBox && arcLoading && <Loading style={arcBox} />}
+
+      {!back && arcBox && arcEnCiel?.imageId && !arcLoading && arcMask && arcPx && (
+        // Arc-en-Ciel, offset print over the design and the watermark, under magnetic ink and the thread: its colour bands
+        // drawn whole on the GPU through its shape's mask (inkRenderer.ts), sliding as the note tilts. Like the other placed
+        // layers it takes a press anywhere in its box, to drag it
+        <div data-arc-en-ciel={note.id} data-placed="arcEnCiel" className={cn('absolute', live ? 'cursor-move' : 'pointer-events-none')} style={arcBox}>
+          <canvas ref={arcCanvas} width={arcPx.width} height={arcPx.height} className="absolute inset-0 size-full" />
+        </div>
       )}
 
       {/* Magnetic ink's shape still being had or worked out: a shimmer in its box meanwhile */}
