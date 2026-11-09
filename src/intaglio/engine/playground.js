@@ -101,7 +101,7 @@ export function createPlayground(root, studio) {
   // Intaglio playground, waves: you upload an image without its fade. One opacity line fades
   // it out, and the engraved lines show that opacity by how far apart they are, until the
   // printed photo takes over. Every line is a copy of one wave you shape on the canvas. Straight waves run along a line you move and turn; circular waves go round
-  // a centre as rings with bumps. All geometry is in millimetres on the image (origin
+  // a centre as rings with bumps, circles or, stretched, ellipses. All geometry is in millimetres on the image (origin
   // top-left, x right, y down). Colour maths in linear light.
   // ===================================================================================
   const SMALL = (navigator.deviceMemory && navigator.deviceMemory <= 4) || /iPhone|iPad|Android/i.test(navigator.userAgent);
@@ -110,6 +110,7 @@ export function createPlayground(root, studio) {
     kind: 'straight',
     wx: 2, wy: 40.4, angle: 115,                      // straight: where the wave starts, and which way its line runs
     cx: 0, cy: 40.4, ring: 6, rot: 0, bumps: 10,      // circular: centre, first ring, where the first bump sits, bumps per ring
+    stretch: 1, stretchAngle: 0,                      // circular: how far the rings stretch into ellipses (1: circles), and which way
     amp: 1.0, len: 9, lean: 0, roundC: 0.364, roundT: 0.364,
     taper: false, farD: -40, farAmp: 0.3, farLen: 9,  // the wave can change across the lines, up to a far wave
     pitch: 0.25, floor: 0.03, sparse: 4,               // fine spacing at full opacity, thinnest line, widest spacing
@@ -129,8 +130,9 @@ export function createPlayground(root, studio) {
     { k: 'saw', name: 'Saw', lean: 0.9, roundC: 0, roundT: 0 },
   ];
   // built-in starting points set the waves and their spacing; image, colours and the photo hand-off stay
-  const WAVE_KEYS = ['kind', 'wx', 'wy', 'angle', 'cx', 'cy', 'ring', 'rot', 'bumps', 'amp', 'len', 'lean', 'roundC', 'roundT',
-    'taper', 'farD', 'farAmp', 'farLen', 'pitch', 'floor', 'sparse'];
+  const WAVE_KEYS = ['kind', 'wx', 'wy', 'angle', 'cx', 'cy', 'ring', 'rot', 'bumps', 'stretch', 'stretchAngle', 'amp', 'len', 'lean',
+    'roundC', 'roundT', 'taper', 'farD', 'farAmp', 'farLen', 'pitch', 'floor', 'sparse'];
+  const STRETCH_MIN = 0.2, STRETCH_MAX = 5;   // ellipses up to 5:1 either way
   const BUILTIN = { straight: { name: 'Straight waves' }, circular: { name: 'Circular waves' } };
   const X_KEYS = ['wx', 'cx', 'tax', 'tbx', 'edgeL', 'edgeR'], Y_KEYS = ['wy', 'cy', 'tay', 'tby', 'edgeT', 'edgeB'];
   // the taper's four edges: its handle on the canvas, its setting, its name in the panel
@@ -197,6 +199,43 @@ export function createPlayground(root, studio) {
   const crestT = c => 0.5 + 0.45 * clamp(c.lean, -1, 1);
   const leanFrom = t => r2((clamp(t, 0.05, 0.95) - 0.5) / 0.45);
   function waveAxes(c) { const a = rad(c.angle); return { d: [Math.cos(a), Math.sin(a)], n: [-Math.sin(a), Math.cos(a)] }; }
+  // Circular waves can stretch into ellipses: the rings and their bumps are laid out round the centre in their own frame
+  // (u the way they stretch, v across it) and the whole of it is stretched along u, so every ring is an ellipse of the same
+  // proportions and turns with the stretch. A ring's radius is measured across (along v): radius r reaches r × stretch
+  // along u. Stretch 1 at angle 0 is the circles as they always were, to the last bit.
+  // lin/to: a step or a point on the image in the rings' frame, unstretched; from/on: back onto the image; rho: the radius
+  // of the ring through a point; along: how far the ring runs on the image per radian of the frame's angle, at radius 1
+  function ringAxes(c) {
+    const ang = rad(c.stretchAngle), s = c.stretch, u = [Math.cos(ang), Math.sin(ang)], v = [-u[1], u[0]];
+    const lin = (dx, dy) => [(dx * u[0] + dy * u[1]) / s, dx * v[0] + dy * v[1]];
+    const to = (x, y) => lin(x - c.cx, y - c.cy);
+    const from = (a, b) => [c.cx + u[0] * a * s + v[0] * b, c.cy + u[1] * a * s + v[1] * b];
+    return { u, v, s, ang, lin, to, from,
+      rho: (x, y) => Math.hypot(...to(x, y)),
+      on: (r, th) => from(r * Math.cos(th), r * Math.sin(th)),
+      along: th => s === 1 ? 1 : Math.hypot(s * Math.sin(th), Math.cos(th)) };
+  }
+  // the smallest and largest radius of the rings on the image (the smallest is 0 with the centre on it)
+  function rhoRange(c) {
+    const R = ringAxes(c), cs = corners().map(([x, y]) => R.to(x, y));
+    const hi = Math.max(...cs.map(q => Math.hypot(q[0], q[1])));
+    let lo = 0;
+    if (c.stretch === 1) lo = Math.hypot(Math.max(-c.cx, 0, c.cx - imgW()), Math.max(-c.cy, 0, c.cy - imgH()));
+    else if (c.cx < 0 || c.cx > imgW() || c.cy < 0 || c.cy > imgH()) {   // the nearest edge of the image, in the rings' frame
+      lo = Math.min(...[[0, 1], [1, 3], [3, 2], [2, 0]].map(([i, j]) => distToSeg([0, 0], cs[i], cs[j])));
+    }
+    return [lo, hi];
+  }
+  // a new stretch keeps the opacity line's ends on the rings they were on, each sliding along its ray from the centre
+  function keepOpacityRings(c, c0) {
+    const R0 = ringAxes(c0), R1 = ringAxes(c);
+    for (const [kx, ky] of [['tax', 'tay'], ['tbx', 'tby']]) {
+      const dx = c0[kx] - c0.cx, dy = c0[ky] - c0.cy, d = Math.hypot(dx, dy);
+      if (d < 1e-9) continue;
+      const out = R0.rho(c0[kx], c0[ky]) / Math.hypot(...R1.lin(dx / d, dy / d));
+      c[kx] = r2(c.cx + dx / d * out); c[ky] = r2(c.cy + dy / d * out);
+    }
+  }
   // N fine lines per wide gap; the wide gap is a whole number of fine gaps, so the fine spacing is exact
   function eff(c) {
     const N = clamp(Math.round(c.sparse / c.pitch), 1, 512);
@@ -204,19 +243,21 @@ export function createPlayground(root, studio) {
   }
   // The opacity line from its start A to the photo end B, locked to the waves so every line keeps one opacity all
   // along it: straight waves run across the line (it points along their normal), circular waves fade outward from the
-  // centre (or inward), ring by ring. s = position along it: along the normal, or the distance from the centre.
-  // sStops: where each stop sits; sM: the last stop, after which the printed photo comes in; e: where s enters the image;
-  // at(s): the point of the line at s
+  // centre (or inward), ring by ring. s = position along it: along the normal, or the radius of the ring there (the
+  // distance from the centre, for circles). sStops: where each stop sits; sM: the last stop, after which the printed photo
+  // comes in; e: where s enters the image; at(s): the point of the line at s
   function trans(c) {
-    let ux, uy, sOf, C = null, sg = 1, ray = null;
+    let ux, uy, sOf, C = null, sg = 1, ray = null, ks = 1;
     if (isCircular(c)) {
+      const R = ringAxes(c);
       C = [c.cx, c.cy];
       const rA = Math.hypot(c.tax - C[0], c.tay - C[1]), rB = Math.hypot(c.tbx - C[0], c.tby - C[1]), rf = Math.max(rA, rB);
       const far = rB >= rA ? [c.tbx, c.tby] : [c.tax, c.tay];
       sg = rB >= rA ? 1 : -1;
       ray = rf > 1e-6 ? [(far[0] - C[0]) / rf, (far[1] - C[1]) / rf] : [1, 0];
+      if (c.stretch !== 1) ks = Math.hypot(...R.lin(ray[0], ray[1]));   // the rings' radius per mm out along the line
       ux = sg * ray[0]; uy = sg * ray[1];
-      sOf = (x, y) => sg * Math.hypot(x - C[0], y - C[1]);
+      sOf = (x, y) => sg * R.rho(x, y);
     } else {
       const { n } = waveAxes(c), k = (c.tbx - c.tax) * n[0] + (c.tby - c.tay) * n[1] >= 0 ? 1 : -1;
       ux = k * n[0]; uy = k * n[1];
@@ -225,10 +266,10 @@ export function createPlayground(root, studio) {
     const sA = sOf(c.tax, c.tay), L = Math.max(sOf(c.tbx, c.tby) - sA, 1e-6);
     let e;
     if (!C) e = Math.min(...corners().map(([x, y]) => sOf(x, y)));
-    else if (sg > 0) e = Math.hypot(Math.max(-C[0], 0, C[0] - imgW()), Math.max(-C[1], 0, C[1] - imgH()));
+    else if (sg > 0) e = rhoRange(c)[0];
     else e = Math.min(...corners().map(([x, y]) => sOf(x, y)));
     const sStops = c.stops.map(([t]) => sA + t * L);
-    const at = v => C ? [C[0] + ray[0] * sg * v, C[1] + ray[1] * sg * v] : [c.tax + ux * (v - sA), c.tay + uy * (v - sA)];
+    const at = v => C ? [C[0] + ray[0] * sg * v / ks, C[1] + ray[1] * sg * v / ks] : [c.tax + ux * (v - sA), c.tay + uy * (v - sA)];
     return { ux, uy, L, sA, sB: sA + L, sM: sStops[sStops.length - 1], sStops, e, sOf, at, radial: !!C, C, sg };
   }
   // Keep the opacity line locked to the waves. 'grad': straight waves turn (about where they start) to run across the
@@ -282,7 +323,7 @@ export function createPlayground(root, studio) {
       const ext = Math.max(...corners().map(([x, y]) => s * ((x - c.wx) * n[0] + (y - c.wy) * n[1])));
       c.farD = r1(s * Math.max(1, 0.6 * ext));
     } else {
-      const ext = Math.max(...corners().map(([x, y]) => Math.hypot(x - c.cx, y - c.cy)));
+      const ext = rhoRange(c)[1];
       c.farD = r1(Math.max(1, 0.6 * (ext - c.ring)));
     }
   }
@@ -392,7 +433,8 @@ export function createPlayground(root, studio) {
       const gu = -A * pd / L, gv = 1 - dA * py + A * pd * u * dL / (L * L);
       return { phi: v - A * py, g: [d[0] * gu + n[0] * gv, d[1] * gu + n[1] * gv], disp: [n[0] * A * py, n[1] * A * py], born: 1 };
     }
-    const qx = x - c.cx, qy = y - c.cy, r = Math.hypot(qx, qy) + 1e-6, er = [qx / r, qy / r], et = [-er[1], er[0]];
+    // circular: worked out in the rings' own frame (unstretched), then put back on the image
+    const R = ringAxes(c), [qx, qy] = R.to(x, y), r = Math.hypot(qx, qy) + 1e-6, er = [qx / r, qy / r], et = [-er[1], er[0]];
     const k = Math.max(1, Math.round(c.bumps)) / TAU;
     let A = c.amp, dA = 0;
     if (c.taper) {
@@ -402,7 +444,10 @@ export function createPlayground(root, studio) {
     }
     const [py, pd] = profAt((Math.atan2(qy, qx) - rad(c.rot)) * k, P);
     const phi = r - A * py, gr = 1 - dA * py, gt = -A * pd * k / r, sp = eff(c).sparse;
-    return { phi, g: [er[0] * gr + et[0] * gt, er[1] * gr + et[1] * gt], disp: [er[0] * A * py, er[1] * A * py], born: ss(c.ring - 0.6 * sp, c.ring - 0.25 * sp, phi) };
+    const gc = [er[0] * gr + et[0] * gt, er[1] * gr + et[1] * gt], dc = [er[0] * A * py, er[1] * A * py];
+    const { u, v, s } = R;   // the gradient eases off along the stretch, the wiggle stretches with it
+    return { phi, g: [u[0] * gc[0] / s + v[0] * gc[1], u[1] * gc[0] / s + v[1] * gc[1]],
+      disp: [u[0] * dc[0] * s + v[0] * dc[1], u[1] * dc[0] * s + v[1] * dc[1]], born: ss(c.ring - 0.6 * sp, c.ring - 0.25 * sp, phi) };
   }
   function sdRect(x, y) {
     const hx = imgW() / 2, hy = imgH() / 2;
@@ -426,8 +471,8 @@ export function createPlayground(root, studio) {
     return opacityAt(c, T.sOf(c.wx + n[0] * phi, c.wy + n[1] * phi), T);
   }
   function buildLut(c) {
-    const key = JSON.stringify([c.kind, c.wx, c.wy, c.angle, c.cx, c.cy, c.amp, c.farAmp, c.taper, c.ring, c.pitch, c.sparse,
-      c.stops, c.tax, c.tay, c.tbx, c.tby, imgW(), imgH()]);
+    const key = JSON.stringify([c.kind, c.wx, c.wy, c.angle, c.cx, c.cy, c.stretch, c.stretchAngle, c.amp, c.farAmp, c.taper, c.ring,
+      c.pitch, c.sparse, c.stops, c.tax, c.tay, c.tbx, c.tby, imgW(), imgH()]);
     if (key === lutKey && lutData) return;
     const E = eff(c), T = trans(c), am = Math.max(c.amp, c.taper ? c.farAmp : 0) + 1;
     let p0, p1;
@@ -435,8 +480,8 @@ export function createPlayground(root, studio) {
       const { n } = waveAxes(c), vs = corners().map(([x, y]) => (x - c.wx) * n[0] + (y - c.wy) * n[1]);
       p0 = Math.min(...vs) - am; p1 = Math.max(...vs) + am;
     } else {
-      const dx = Math.max(-c.cx, 0, c.cx - imgW()), dy = Math.max(-c.cy, 0, c.cy - imgH());
-      p0 = Math.hypot(dx, dy) - am; p1 = Math.max(...corners().map(([x, y]) => Math.hypot(x - c.cx, y - c.cy))) + am;
+      const [lo, hi] = rhoRange(c);
+      p0 = lo - am; p1 = hi + am;
     }
     const d = Math.max((p1 - p0) / (LUT_N - 1), 1e-4), g = new Float64Array(LUT_N);
     for (let i = 0; i < LUT_N; i++) g[i] = shareOf(opOfPhi(c, T, p0 + i * d), E.N);
@@ -481,6 +526,8 @@ export function createPlayground(root, studio) {
   uniform vec3 uP, uK;
   uniform vec2 uO, uD, uTDir;
   uniform float uTSign;                  // rings: which way the opacity runs (+1 outward)
+  uniform vec2 uSDir;                    // rings: the way they stretch into ellipses
+  uniform float uStretch;                // rings: how far (1: circles)
   uniform float uAmp, uLen, uBumps, uRot, uRing, uFarD, uFarAmp, uFarLen;
   uniform float uSparse, uFloor;
   uniform float uLut0, uLutD;
@@ -536,6 +583,10 @@ export function createPlayground(root, studio) {
     return 1.0;
   }
 
+  // rings: a point in the rings' own frame, unstretched (x the way they stretch, y across); its length is the radius of
+  // the ring through it
+  vec2 ringFrame(vec2 p) { vec2 q = p - uO; return vec2(dot(q, uSDir) / uStretch, dot(q, vec2(-uSDir.y, uSDir.x))); }
+
   struct Field { float phi; vec2 g; vec2 disp; float born; };
   // phi: which line a point is on (the same all along a line, in mm across the waves), g: its gradient per mm,
   // disp: how far the wave's wiggle has moved the point off its line's mean path, born: mask inside the first ring
@@ -558,9 +609,10 @@ export function createPlayground(root, studio) {
       F.g = uD * (-A * pr.y / L) + nn * (1.0 - dA * pr.x + A * pr.y * u * dL / (L * L));
       F.disp = nn * (A * pr.x);
       F.born = 1.0;
-    } else {                        // circular: rings around the centre, bumps running round each ring
-      float r = length(q) + 1e-6;
-      vec2 er = q / r, et = vec2(-er.y, er.x);
+    } else {                        // circular: rings around the centre, bumps running round each ring, in the rings' own frame
+      vec2 qc = ringFrame(p);
+      float r = length(qc) + 1e-6;
+      vec2 er = qc / r, et = vec2(-er.y, er.x);
       float k = uBumps / 6.2831853;
       float A = uAmp, dA = 0.0;
       if (uTaper) {
@@ -568,10 +620,12 @@ export function createPlayground(root, studio) {
         if (tt > 0.0 && tt < 1.0) dA = (uFarAmp - uAmp) / den;
         A = mix(uAmp, uFarAmp, clamp(tt, 0.0, 1.0));
       }
-      vec2 pr = prof((atan(q.y, q.x) - uRot) * k);
+      vec2 pr = prof((atan(qc.y, qc.x) - uRot) * k);
       F.phi = r - A * pr.x;
-      F.g = er * (1.0 - dA * pr.x) + et * (-A * pr.y * k / r);
-      F.disp = er * (A * pr.x);
+      vec2 gc = er * (1.0 - dA * pr.x) + et * (-A * pr.y * k / r), dc = er * (A * pr.x);
+      vec2 sv = vec2(-uSDir.y, uSDir.x);
+      F.g = uSDir * (gc.x / uStretch) + sv * gc.y;      // back on the image: the gradient eases off along the stretch,
+      F.disp = uSDir * (dc.x * uStretch) + sv * dc.y;   // and the wiggle stretches with it
       F.born = ss(uRing - 0.6 * uSparse, uRing - 0.25 * uSparse, F.phi);
     }
     return F;
@@ -604,11 +658,11 @@ export function createPlayground(root, studio) {
     if (a <= 0.0) { outColor = vec4(0.0); return; }
     if (uView == 3) { outColor = finish(T.rgb, a); return; }
     vec3 Ft = textureLod(uImg, uv, max(lod, log2(max(0.06 * uTexPpm, 1.0)))).rgb;   // ~0.06 mm softening for the tone
-    // s along the opacity line: across straight waves, or the distance from the rings' centre
-    float s = uKind == 1 ? uTSign * length(pc - uO) : dot(pc, uTDir);
+    // s along the opacity line: across straight waves, or the radius of the ring there (the distance from the centre, for circles)
+    float s = uKind == 1 ? uTSign * length(ringFrame(pc)) : dot(pc, uTDir);
     Field F0 = field(pc);
     vec2 pm = pc - F0.disp;                        // the same point on its line's mean path, so a wiggle keeps one opacity
-    float op = opacityAt(uKind == 1 ? uTSign * length(pm - uO) : dot(pm, uTDir));
+    float op = opacityAt(uKind == 1 ? uTSign * length(ringFrame(pm)) : dot(pm, uTDir));
     float fx = uFadeOn ? op : 1.0;                 // the image fades with the opacity, unless its fade is baked in
     vec3 Fe = uP + (T.rgb - uP) * fx, Fte = uP + (Ft - uP) * fx;
     vec3 dPK = uP - uK;
@@ -798,8 +852,8 @@ export function createPlayground(root, studio) {
     setI('uSpp', o.spp); setI('uView', o.view); setI('uPremul', o.premul ? 1 : 0);
     setU('uSize', img.widthMm, img.heightMm); setU('uTexPpm', img.ppm);
     setU('uP', ...linRgb(c.paper)); setU('uK', ...linRgb(c.ink));
-    if (isStraight(c)) { const { d } = waveAxes(c); setI('uKind', 0); setU('uO', c.wx, c.wy); setU('uD', d[0], d[1]); }
-    else { setI('uKind', 1); setU('uO', c.cx, c.cy); setU('uD', 1, 0); }
+    if (isStraight(c)) { const { d } = waveAxes(c); setI('uKind', 0); setU('uO', c.wx, c.wy); setU('uD', d[0], d[1]); setU('uSDir', 1, 0); setU('uStretch', 1); }
+    else { const R = ringAxes(c); setI('uKind', 1); setU('uO', c.cx, c.cy); setU('uD', 1, 0); setU('uSDir', R.u[0], R.u[1]); setU('uStretch', R.s); }
     setU('uAmp', c.amp); setU('uLen', c.len); setU('uBumps', Math.max(1, Math.round(c.bumps))); setU('uRot', rad(c.rot)); setU('uRing', c.ring);
     setI('uTaper', c.taper ? 1 : 0); setU('uFarD', farDist(c)); setU('uFarAmp', c.farAmp); setU('uFarLen', c.farLen);
     setU('uSparse', E.sparse); setU('uFloor', c.floor);
@@ -878,7 +932,11 @@ export function createPlayground(root, studio) {
   const fitImage = () => fit([0, 0, imgW(), imgH()]);
   function fitWave() {
     const c = cfg;
-    if (isCircular(c)) { const R = c.ring + c.amp + Math.max(3, 0.3 * c.ring); fit([c.cx - R, c.cy - R, c.cx + R, c.cy + R]); return; }
+    if (isCircular(c)) {   // the box round the ellipse a little past the first ring
+      const R = c.ring + c.amp + Math.max(3, 0.3 * c.ring), { u, v, s } = ringAxes(c);
+      const hx = R * Math.hypot(s * u[0], v[0]), hy = R * Math.hypot(s * u[1], v[1]);
+      fit([c.cx - hx, c.cy - hy, c.cx + hx, c.cy + hy]); return;
+    }
     const pts = geom().curves.wave;
     const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), m = Math.max(3, 0.5 * c.len);
     fit([Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m]);
@@ -906,6 +964,8 @@ export function createPlayground(root, studio) {
   // opacity line with its stops
   // ===================================================================================
   const MIN_OFF = 12, KNOB_OFF = 34;   // px: closest a curve handle sits to its point; rotate knob past the wave
+  // the radius the stretch knob reads its stretch against: the first ring's crest (at least 1 mm), which it sits past
+  const stretchBase = c => Math.max(c.ring + c.amp, 1);
   function sampleCurve(fn, n = 160) { const pts = []; for (let i = 0; i <= n; i++) pts.push(fn(i / n)); return pts; }
   function geom() {
     const c = cfg, ppm = view.ppm, Hd = {}, curves = {};
@@ -945,26 +1005,31 @@ export function createPlayground(root, studio) {
         Hd.T0f = { p: at(0, -Af, Lf, fd), t: 'dot', c: 'far' };
         curves.farwave = sampleCurve(t => at(t, Af * profAt(t, P)[0], Lf, fd));
       }
-    } else {
-      const C = [c.cx, c.cy], k = TAU / Math.max(1, Math.round(c.bumps)), r0 = rad(c.rot);
-      const at = (t, y, R) => { const th = r0 + t * k; return [C[0] + (R + y) * Math.cos(th), C[1] + (R + y) * Math.sin(th)]; };
+    } else {   // in the rings' frame, put on the image as an ellipse when stretched
+      const RA = ringAxes(c), C = [c.cx, c.cy], k = TAU / Math.max(1, Math.round(c.bumps)), r0 = rad(c.rot);
+      const at = (t, y, R) => RA.on(R + y, r0 + t * k);
       Hd.center = { p: C, t: 'center', c: 'wave' };
       Hd.T0 = { p: at(0, -A, c.ring), t: 'pt', c: 'wave' };
       Hd.K = { p: at(tc, A, c.ring), t: 'pt', c: 'wave' };
       Hd.T1 = { p: at(1, -A, c.ring), t: 'pt', c: 'wave' };
-      const RC = c.ring + A, RT = c.ring - A;
+      // arcs on screen, as long as the ring runs there: at the crest for the peaks' handles, at each trough for its own
+      const RC = c.ring + A, RT = c.ring - A, sC = RA.along(r0 + tc * k), s0 = RA.along(r0), s1 = RA.along(r0 + k);
       const dt = (r, w, R) => (MIN_OFF + r * (w - MIN_OFF)) / (R * k * ppm);
-      const wRc = tc * k * RC * ppm, wFc = (1 - tc) * k * RC * ppm, wRt = tc * k * RT * ppm, wFt = (1 - tc) * k * RT * ppm;
-      if (RC > 0 && wRc >= 50) Hd.hC0 = { p: at(tc - dt(c.roundC, wRc, RC), A, c.ring), t: 'dia', c: 'wave', stem: Hd.K.p };
-      if (RC > 0 && wFc >= 50) Hd.hC1 = { p: at(tc + dt(c.roundC, wFc, RC), A, c.ring), t: 'dia', c: 'wave', stem: Hd.K.p };
-      if (RT > 0 && wRt >= 50) Hd.hT0 = { p: at(dt(c.roundT, wRt, RT), -A, c.ring), t: 'dia', c: 'wave', stem: Hd.T0.p };
-      if (RT > 0 && wFt >= 50) Hd.hT1 = { p: at(1 - dt(c.roundT, wFt, RT), -A, c.ring), t: 'dia', c: 'wave', stem: Hd.T1.p };
+      const wRc = tc * k * RC * sC * ppm, wFc = (1 - tc) * k * RC * sC * ppm, wRt = tc * k * RT * s0 * ppm, wFt = (1 - tc) * k * RT * s1 * ppm;
+      if (RC > 0 && wRc >= 50) Hd.hC0 = { p: at(tc - dt(c.roundC, wRc, RC * sC), A, c.ring), t: 'dia', c: 'wave', stem: Hd.K.p };
+      if (RC > 0 && wFc >= 50) Hd.hC1 = { p: at(tc + dt(c.roundC, wFc, RC * sC), A, c.ring), t: 'dia', c: 'wave', stem: Hd.K.p };
+      if (RT > 0 && wRt >= 50) Hd.hT0 = { p: at(dt(c.roundT, wRt, RT * s0), -A, c.ring), t: 'dia', c: 'wave', stem: Hd.T0.p };
+      if (RT > 0 && wFt >= 50) Hd.hT1 = { p: at(1 - dt(c.roundT, wFt, RT * s1), -A, c.ring), t: 'dia', c: 'wave', stem: Hd.T1.p };
       curves.wave = sampleCurve(t => at(t, A * profAt(t, P)[0], c.ring));
       if (c.taper) {
         const Rf = c.ring + Math.abs(farDist(c)), Af = c.farAmp;
         Hd.K2 = { p: at(tc, Af, Rf), t: 'pt', c: 'far' };
         curves.farwave = sampleCurve(t => at(t, Af * profAt(t, P)[0], Rf));
       }
+      // the stretch: a knob past the wave, out the way the rings stretch, on a stem from the first ring; drag it out or in to
+      // stretch or squash the rings into ellipses, and round to turn them
+      const out = stretchBase(c) * RA.s + KNOB_OFF / ppm;
+      Hd.stretch = { p: [C[0] + RA.u[0] * out, C[1] + RA.u[1] * out], t: 'stretch', c: 'wave', stem: RA.on(c.ring, 0), dir: RA.ang };
     }
     // the opacity line: its start is the first stop, the other stops sit along it, the photo end is filled
     Hd.tA = { p: [c.tax, c.tay], t: 'sq', c: 'trans', o: c.stops[0][1] };
@@ -1004,10 +1069,11 @@ export function createPlayground(root, studio) {
         const { n } = waveAxes(c), v = (m[0] - c.wx) * n[0] + (m[1] - c.wy) * n[1];
         consider('line', Math.abs(v) * ppm);
         if (c.taper) consider('farLine', Math.abs(v - farDist(c)) * ppm);
-      } else {
-        const r = Math.hypot(m[0] - c.cx, m[1] - c.cy);
-        consider('ring', Math.abs(r - c.ring) * ppm);
-        if (c.taper) consider('farLine', Math.abs(r - c.ring - Math.abs(farDist(c))) * ppm);
+      } else {   // how far the ring is: the gap in radius over how fast the radius grows here (1 a mm, on a circle)
+        const RA = ringAxes(c), f = RA.to(m[0], m[1]), r = Math.hypot(f[0], f[1]);
+        const gr = c.stretch === 1 || r < 1e-9 ? 1 : Math.hypot(f[0] / (r * RA.s), f[1] / r);
+        consider('ring', Math.abs(r - c.ring) / gr * ppm);
+        if (c.taper) consider('farLine', Math.abs(r - c.ring - Math.abs(farDist(c))) / gr * ppm);
       }
     }
     return best;
@@ -1016,12 +1082,15 @@ export function createPlayground(root, studio) {
   function handleText(id) {
     const c = cfg, T = trans(c), mm = v => `${fmt(v, Math.abs(v) < 10 ? 2 : 1)} mm`, pct = v => `${Math.round(v * 100)}%`;
     const dir = T.radial ? '' : ` · <b>Direction</b> ${fmt(deg(Math.atan2(T.uy, T.ux)), 0)}°`;
+    // an ellipse's first ring: its radius across the stretch, then along it
+    const ring = c.stretch === 1 ? mm(c.ring) : `${mm(c.ring)} × ${mm(c.ring * c.stretch)}`;
     switch (id) {
       case 'line': return `<b>Wave starts at</b> x ${fmt(c.wx, 1)}, y ${fmt(c.wy, 1)} mm`;
-      case 'ring': return `<b>First ring</b> ${mm(c.ring)}`;
+      case 'ring': return `<b>First ring</b> ${ring}`;
       case 'center': return `<b>Center</b> x ${fmt(c.cx, 1)}, y ${fmt(c.cy, 1)} mm`;
       case 'knob': return `<b>Angle</b> ${fmt(c.angle, 1)}°`;
-      case 'T0': return isStraight(c) ? `<b>Wave starts at</b> x ${fmt(c.wx, 1)}, y ${fmt(c.wy, 1)} mm` : `<b>First ring</b> ${mm(c.ring)} · <b>Rotate</b> ${fmt(c.rot, 1)}°`;
+      case 'stretch': return `<b>Stretch</b> ${Math.round(c.stretch * 100)}% · <b>Angle</b> ${fmt(c.stretchAngle, 1)}°`;
+      case 'T0': return isStraight(c) ? `<b>Wave starts at</b> x ${fmt(c.wx, 1)}, y ${fmt(c.wy, 1)} mm` : `<b>First ring</b> ${ring} · <b>Rotate</b> ${fmt(c.rot, 1)}°`;
       case 'T1': return isStraight(c) ? `<b>Length</b> ${mm(c.len)}` : `<b>Bumps around</b> ${Math.round(c.bumps)}`;
       case 'K': return `<b>Height</b> ${mm(c.amp)} · <b>Lean</b> ${pct(c.lean)}`;
       case 'hC0': case 'hC1': return `<b>Round peaks</b> ${pct(c.roundC)}`;
@@ -1075,12 +1144,12 @@ export function createPlayground(root, studio) {
       c.stops = st.map((q, j) => j === i ? [t, q[1]] : q);
     } else if (id === 'trans') {
       if (!drag.moved) return;   // a click on the line adds a stop instead, when you let go
-      if (isCircular(c0)) {      // rings: the line turns about the centre and both ends move out or in together
-        const C = [c0.cx, c0.cy], ang = q => Math.atan2(q[1] - C[1], q[0] - C[0]), rr = q => Math.hypot(q[0] - C[0], q[1] - C[1]);
-        const T0 = trans(c0), a = Math.atan2(T0.sg * T0.uy, T0.sg * T0.ux) + ang(mr) - ang(drag.start), dr = rr(mr) - rr(drag.start);
+      if (isCircular(c0)) {      // rings: the line turns about the centre and both ends move out or in together, ring by ring
+        const RA = ringAxes(c0), ang = q => { const f = RA.to(q[0], q[1]); return Math.atan2(f[1], f[0]); }, rr = q => RA.rho(q[0], q[1]);
+        const T0 = trans(c0), w = RA.lin(T0.sg * T0.ux, T0.sg * T0.uy);
+        const a = Math.atan2(w[1], w[0]) + ang(mr) - ang(drag.start), dr = rr(mr) - rr(drag.start);
         const rA = Math.max(rr([c0.tax, c0.tay]) + dr, 0), rB = Math.max(rr([c0.tbx, c0.tby]) + dr, 0);
-        c.tax = r2(C[0] + rA * Math.cos(a)); c.tay = r2(C[1] + rA * Math.sin(a));
-        c.tbx = r2(C[0] + rB * Math.cos(a)); c.tby = r2(C[1] + rB * Math.sin(a));
+        [c.tax, c.tay] = RA.on(rA, a).map(r2); [c.tbx, c.tby] = RA.on(rB, a).map(r2);
         lockFit(c, 'grad');
       } else { c.tax = r2(c0.tax + dm[0]); c.tay = r2(c0.tay + dm[1]); c.tbx = r2(c0.tbx + dm[0]); c.tby = r2(c0.tby + dm[1]); }
     } else if (EDGE_OF[id]) {   // the taper: how far in from its edge the lines start to thin; near the edge it snaps to 0
@@ -1113,11 +1182,11 @@ export function createPlayground(root, studio) {
         case 'K2': c.farAmp = r2(clamp(v - farDist(c0), 0, 8)); break;
         case 'T1f': c.farLen = r2(clamp(u, 1, 60)); break;
       }
-    } else {
-      const C = [c0.cx, c0.cy], k = TAU / Math.max(1, Math.round(c0.bumps)), r0 = rad(c0.rot);
-      const r = Math.hypot(m[0] - C[0], m[1] - C[1]), th = Math.atan2(m[1] - C[1], m[0] - C[0]);
-      const rOf = p => Math.hypot(p[0] - C[0], p[1] - C[1]);
-      const RC = c0.ring + c0.amp, RT = c0.ring - c0.amp;
+    } else {   // in the rings' frame, so the handles follow the pointer on an ellipse too
+      const RA = ringAxes(c0), k = TAU / Math.max(1, Math.round(c0.bumps)), r0 = rad(c0.rot);
+      const f = RA.to(m[0], m[1]), r = Math.hypot(f[0], f[1]), th = Math.atan2(f[1], f[0]);
+      const rOf = p => RA.rho(p[0], p[1]);
+      const RC = (c0.ring + c0.amp) * RA.along(r0 + tc * k), RT0 = (c0.ring - c0.amp) * RA.along(r0), RT1 = (c0.ring - c0.amp) * RA.along(r0 + k);
       switch (id) {
         case 'center':   // the opacity line moves with the rings
           c.cx = r2(c0.cx + dm[0]); c.cy = r2(c0.cy + dm[1]);
@@ -1132,10 +1201,18 @@ export function createPlayground(root, studio) {
         case 'K': c.amp = r2(clamp(r - c0.ring, 0, 8)); c.lean = leanFrom(0.5 + wrapPi(th - (r0 + 0.5 * k)) / k); break;
         case 'hC0': c.roundC = roundFrom(-wrapPi(th - (r0 + tc * k)) * RC * ppm, tc * k * RC * ppm); break;
         case 'hC1': c.roundC = roundFrom(wrapPi(th - (r0 + tc * k)) * RC * ppm, (1 - tc) * k * RC * ppm); break;
-        case 'hT0': c.roundT = roundFrom(wrapPi(th - r0) * RT * ppm, tc * k * RT * ppm); break;
-        case 'hT1': c.roundT = roundFrom(-wrapPi(th - (r0 + k)) * RT * ppm, (1 - tc) * k * RT * ppm); break;
+        case 'hT0': c.roundT = roundFrom(wrapPi(th - r0) * RT0 * ppm, tc * k * RT0 * ppm); break;
+        case 'hT1': c.roundT = roundFrom(-wrapPi(th - (r0 + k)) * RT1 * ppm, (1 - tc) * k * RT1 * ppm); break;
         case 'farLine': c.farD = r1(clamp(Math.abs(farDist(c0)) + rOf(mr) - rOf(drag.start), 1, 1000)); break;
         case 'K2': c.farAmp = r2(clamp(r - (c0.ring + Math.abs(farDist(c0))), 0, 8)); break;
+        case 'stretch': {   // the knob stays as far past the wave as it was drawn: the rest is the stretch, and its way the stretch's
+          const dx = m[0] - c0.cx, dy = m[1] - c0.cy;
+          let s = clamp((Math.hypot(dx, dy) - KNOB_OFF / ppm) / stretchBase(c0), STRETCH_MIN, STRETCH_MAX);
+          if (Math.abs(s - 1) < 0.03) s = 1;   // back to circles without hunting for them
+          let a = deg(Math.atan2(dy, dx)); if (shift) a = Math.round(a / 15) * 15;
+          c.stretch = r2(s); c.stretchAngle = r1(wrap180(a));
+          keepOpacityRings(c, c0); lockFit(c, 'grad'); break;
+        }
       }
     }
     changed(id);
@@ -1292,30 +1369,39 @@ export function createPlayground(root, studio) {
       ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); if (bold) ctx.stroke();
       ctx.globalAlpha = alpha; ctx.setLineDash(dash); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
     };
-    const circle = (C, r, color, dash, width, alpha, bold) => {
+    // a ring of radius r round the centre (circular waves): a circle, or an ellipse when they're stretched
+    const ringAt = (r, color, dash, width, alpha, bold) => {
       if (r <= 0) return;
-      const [x, y] = toPx(C[0], C[1]), R = r * view.ppm;
-      // only the arc that crosses the screen (a long dashed circle is slow to draw)
-      const nx = clamp(x, vis.x0, vis.x1), ny = clamp(y, vis.y0, vis.y1), dNear = Math.hypot(x - nx, y - ny);
-      const cs = [[vis.x0, vis.y0], [vis.x1, vis.y0], [vis.x0, vis.y1], [vis.x1, vis.y1]];
-      if (R < dNear || R > Math.max(...cs.map(([qx, qy]) => Math.hypot(qx - x, qy - y)))) return;
+      const RA = ringAxes(c), [x, y] = toPx(c.cx, c.cy);
+      // only the arc that crosses the screen (a long dashed ring is slow to draw), worked out in the rings' frame
+      const cs = [[vis.x0, vis.y0], [vis.x1, vis.y0], [vis.x1, vis.y1], [vis.x0, vis.y1]].map(([sx, sy]) => RA.to(...toMm(sx, sy)));
+      let near = null, dNear = 0;
+      if (x < vis.x0 || x > vis.x1 || y < vis.y0 || y > vis.y1) {   // the centre is off screen: the nearest point of the screen
+        dNear = Infinity;
+        cs.forEach((a, i) => {
+          const b = cs[(i + 1) % 4], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+          const t = l2 > 0 ? clamp(-(a[0] * dx + a[1] * dy) / l2, 0, 1) : 0, q = [a[0] + t * dx, a[1] + t * dy], d = Math.hypot(q[0], q[1]);
+          if (d < dNear) { dNear = d; near = q; }
+        });
+      }
+      if (r < dNear || r > Math.max(...cs.map(q => Math.hypot(q[0], q[1])))) return;
       let a0 = 0, a1 = TAU;
-      if (dNear > 0) {
-        const mid = Math.atan2(ny - y, nx - x);
+      if (near) {
+        const mid = Math.atan2(near[1], near[0]);
         let lo = 0, hi = 0;
-        for (const [qx, qy] of cs) { const d = wrapPi(Math.atan2(qy - y, qx - x) - mid); lo = Math.min(lo, d); hi = Math.max(hi, d); }
+        for (const q of cs) { const d = wrapPi(Math.atan2(q[1], q[0]) - mid); lo = Math.min(lo, d); hi = Math.max(hi, d); }
         a0 = mid + lo; a1 = mid + hi;
       }
-      ctx.beginPath(); ctx.arc(x, y, R, a0, a1);
+      ctx.beginPath(); ctx.ellipse(x, y, r * RA.s * view.ppm, r * view.ppm, RA.ang, a0, a1);
       if (bold) { ctx.globalAlpha = alpha * 0.9; ctx.setLineDash([]); ctx.strokeStyle = surface; ctx.lineWidth = width + 2; ctx.stroke(); }
       ctx.globalAlpha = alpha; ctx.setLineDash(dash); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
     };
     const T = trans(c), perp = [-T.uy, T.ux];
     const hot = (...ids) => ids.includes(active) || (focus && ids.some(i => focus.includes(i)));
-    // a dashed line across the image through each stop and through the photo end (a circle, for rings)
+    // a dashed line across the image through each stop and through the photo end (a ring, for rings)
     for (const id of ['tA', ...c.stops.slice(1).map((_, i) => 'st' + (i + 1)), 'tB']) {
       const q = G.H[id].p, bold = hot(id) || id === selKey;
-      if (T.radial) circle(T.C, Math.hypot(q[0] - T.C[0], q[1] - T.C[1]), col.trans, [3, 4], 1.1, 0.7 * al(id), bold);
+      if (T.radial) ringAt(ringAxes(c).rho(q[0], q[1]), col.trans, [3, 4], 1.1, 0.7 * al(id), bold);
       else infLine(q, perp, col.trans, [3, 4], 1.1, 0.7 * al(id), bold);
     }
     // where the taper starts, while you point at, drag or edit it
@@ -1329,9 +1415,8 @@ export function createPlayground(root, studio) {
       if (c.taper) infLine(add(Wp, n, farDist(c)), d, col.far, [7, 5], 1.3, al('farLine'), hot('farLine'));
       infLine(Wp, d, col.wave, [7, 5], 1.3, 0.85 * al('line'), hot('line'));
     } else {
-      const C = [c.cx, c.cy];
-      if (c.taper) circle(C, c.ring + Math.abs(farDist(c)), col.far, [7, 5], 1.3, al('farLine'), hot('farLine'));
-      circle(C, c.ring, col.wave, [7, 5], 1.3, 0.85 * al('ring'), hot('ring'));
+      if (c.taper) ringAt(c.ring + Math.abs(farDist(c)), col.far, [7, 5], 1.3, al('farLine'), hot('farLine'));
+      ringAt(c.ring, col.wave, [7, 5], 1.3, 0.85 * al('ring'), hot('ring'));
     }
     ctx.restore();
     // --- the highlighted waves, with a halo so they read over the engraving ---
@@ -1370,6 +1455,16 @@ export function createPlayground(root, studio) {
         ctx.beginPath(); ctx.arc(x, y, 4, -0.15 * Math.PI, 1.3 * Math.PI); ctx.stroke();
         const ax = x + 4 * Math.cos(-0.15 * Math.PI), ay = y + 4 * Math.sin(-0.15 * Math.PI);
         ctx.beginPath(); ctx.moveTo(ax - 3.2, ay - 1.6); ctx.lineTo(ax + 0.4, ay + 0.2); ctx.lineTo(ax + 0.6, ay - 3.6); ctx.stroke();
+      } else if (h.t === 'stretch') {   // the stretch: a knob with a two-headed arrow along the way the rings stretch
+        ring(on ? 9.5 : 8.5, on ? color : surface, 1.8);
+        const ux = Math.cos(h.dir), uy = Math.sin(h.dir), L = 4.4, hd = 2.4;
+        ctx.strokeStyle = on ? surface : color; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x - ux * L, y - uy * L); ctx.lineTo(x + ux * L, y + uy * L);
+        for (const sg of [1, -1]) {
+          const tx = x + sg * ux * L, ty = y + sg * uy * L, bx = tx - sg * ux * hd, by = ty - sg * uy * hd;
+          ctx.moveTo(bx - uy * hd, by + ux * hd); ctx.lineTo(tx, ty); ctx.lineTo(bx + uy * hd, by - ux * hd);
+        }
+        ctx.stroke();
       } else if (h.t === 'center') {
         ring(on ? 8 : 7, on ? color : surface, 1.8);
         ctx.strokeStyle = on ? surface : color; ctx.lineWidth = 1.5;
@@ -1454,6 +1549,13 @@ export function createPlayground(root, studio) {
     c.tbx = r2(q[0]); c.tby = r2(q[1]);
     c.stops = c.stops.map((q, j) => j ? [tRound((T.sStops[j] - T.sA) / L), q[1]] : q);
   }
+  // the panel's Stretch: the rings take the new stretch, and the opacity line keeps its rings
+  function setStretch(s, a) {
+    const c = cfg, c0 = { ...c };
+    c.stretch = r2(clamp(s, STRETCH_MIN, STRETCH_MAX)); c.stretchAngle = r1(wrap180(a));
+    keepOpacityRings(c, c0); lockFit(c, 'grad');
+    changed('stretch');
+  }
   // point the line along v (degrees), turning it about its last stop and keeping its length
   function setDirection(c, v) {
     const tm = c.stops[c.stops.length - 1][0], L = Math.max(Math.hypot(c.tbx - c.tax, c.tby - c.tay), 1);
@@ -1482,6 +1584,7 @@ export function createPlayground(root, studio) {
       { k: 'angle', label: 'Angle', min: -180, max: 180, step: 0.5, unit: '°', show: isStraight, handles: ['knob', 'line', 'trans'],
         set: (c, v) => { c.angle = v; lockFit(c, 'wave'); } },
       { k: 'ring', label: 'First ring', min: 0, max: 400, maxFn: () => Math.min(80, extent()), step: 0.1, unit: 'mm', show: isCircular, handles: ['T0', 'ring', 'wave'] },
+      { k: 'stretch', type: 'stretch', label: 'Stretch', show: isCircular, handles: ['stretch', 'ring', 'wave'] },
       { k: 'rot', label: 'Rotate', min: -180, max: 180, step: 0.5, unit: '°', show: isCircular, handles: ['T0', 'wave'] },
       { k: 'wpos', type: 'xy', label: 'Wave starts at', keys: ['wx', 'wy'], show: isStraight, handles: ['line', 'T0'] },
       { k: 'cpos', type: 'xy', label: 'Center', keys: ['cx', 'cy'], show: isCircular, handles: ['center'],
@@ -1526,6 +1629,7 @@ export function createPlayground(root, studio) {
       }
     }
     c.bumps = Math.round(c.bumps);
+    c.stretch = clamp(c.stretch, STRETCH_MIN, STRETCH_MAX); c.stretchAngle = wrap180(c.stretchAngle);   // older settings: circles
     for (const [, key] of EDGES) c[key] = clamp(c[key], 0, 1000);
     c.stops = cleanStops(o.stops, o.tm);
     if (Math.abs(c.farD) < 1) c.farD = c.farD < 0 ? -1 : 1;
@@ -1679,6 +1783,19 @@ export function createPlayground(root, studio) {
       row.append(el('div', { class: 'row-top' }, el('span', { class: 'lbl', text: r.label }),
         el('span', { class: 'xy' }, el('span', { text: 'x' }), el('span', { class: 'val' }, ix), el('span', { text: 'y' }), el('span', { class: 'val' }, iy), el('span', { class: 'unit', text: 'mm' }))));
       update = () => { if (document.activeElement !== ix) ix.value = fmt(cfg[kx], 1); if (document.activeElement !== iy) iy.value = fmt(cfg[ky], 1); };
+    } else if (r.type === 'stretch') {   // circular: how far the rings stretch into ellipses, and which way
+      const mk = (label, step, unit, onSet) => {
+        const inp = el('input', { type: 'number', step, 'aria-label': `${r.label} ${label}` });
+        inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (isFinite(v)) onSet(v); });
+        return [inp, el('span', { class: 'val' }, inp, el('span', { class: 'unit', text: unit }))];
+      };
+      const [pct, pctBox] = mk('amount', '1', '%', v => setStretch(v / 100, cfg.stretchAngle));
+      const [ang, angBox] = mk('angle', '0.5', '°', v => setStretch(cfg.stretch, v));
+      row.append(el('div', { class: 'row-top' }, el('span', { class: 'lbl', text: r.label }), el('span', { class: 'xy' }, pctBox, angBox)));
+      update = () => {
+        if (document.activeElement !== pct) pct.value = String(Math.round(cfg.stretch * 100));
+        if (document.activeElement !== ang) ang.value = fmt(cfg.stretchAngle, 1);
+      };
     } else if (r.type === 'edges') {   // the taper: one width per edge of the image
       const cells = EDGES.map(([, key, name]) => {
         const inp = el('input', { type: 'number', min: '0', step: '0.5', 'aria-label': `${r.label} ${name.toLowerCase()}` });
