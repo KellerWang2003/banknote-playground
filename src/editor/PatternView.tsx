@@ -67,7 +67,7 @@ function fitView(box: { width: number; height: number }, repeatMm: number, width
  * The middle repeat is the one edited; the two either side copy it (Keller). A drag around the thread pans; a drag on
  * it, on any of its repeats, tilts it, and only then does the thread turn in perspective: the timeline, the pad and
  * playback change frames with it lying flat (Keller). A click on it picks the section under it. On the middle repeat the current frame's image (`frame`, the timeline's) drags straight away, and once picked
- * its corners resize it (`ImagePlacer`); the selected section's edges resize it (snapping to 0.5 mm along and twelfths
+ * its corners and sides resize it (`ImagePlacer`); the selected section's edges resize it (snapping to 0.5 mm along and twelfths
  * across), and a double-click on empty thread fills that gap. Beside the middle repeat, the repeat and the thread's
  * thickness to read and edit. Scrolling or a middle-button drag also pans, and pinching or ⌘/Ctrl-scrolling zooms. The
  * view fills its parent, behind the floating panels, as the canvas does; the thread fits and centres in `room`

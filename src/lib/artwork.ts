@@ -1,4 +1,5 @@
 import { REPEAT_LIMITS, isFull, patternOf, setRepeat } from './pattern'
+import type { Handle } from './placed'
 import type { Frame, ImagePlace, Note, Project, ThreadPattern, ThreadSettings } from './types'
 
 /** How long an image is along the thread when it spans `acrossMm` of the thread's thickness, upright on the banknote */
@@ -36,15 +37,23 @@ export function placeOf(upright: UprightBox, thicknessMm: number, direction: Thr
 /** To the image step, without float noise */
 export const snapImage = (mm: number) => Math.round(Math.round(mm / IMAGE_STEP) * IMAGE_STEP * 1000) / 1000
 
-/** The box resized from one corner, the opposite corner staying put and the image keeping its proportions (`aspect`, height ÷ width) */
-export function dragImageCorner(box: UprightBox, corner: 'nw' | 'ne' | 'sw' | 'se', dx: number, dy: number, aspect: number): UprightBox {
-  const east = corner[1] === 'e', south = corner[0] === 's'
-  // Whichever way the corner is pulled further sets the size
-  const fromX = box.width + (east ? dx : -dx), fromY = (box.height + (south ? dy : -dy)) / aspect
-  const pulled = Math.abs(fromX - box.width) >= Math.abs(fromY - box.width) ? fromX : fromY
+/**
+ * The box resized from a corner or a side, the image keeping its proportions (`aspect`, height ÷ width) and what lies
+ * across from it staying put: the opposite corner, or the opposite side with the box centred along it (Keller,
+ * 9 November: a drag on the border should resize it as a corner does)
+ */
+export function dragImageHandle(box: UprightBox, handle: Handle, dx: number, dy: number, aspect: number): UprightBox {
+  const sx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0
+  const sy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0
+  // A side is pulled the way it faces; whichever way a corner is pulled further sets the size
+  const fromX = box.width + sx * dx, fromY = (box.height + sy * dy) / aspect
+  const pulled = !sy ? fromX : !sx ? fromY : Math.abs(fromX - box.width) >= Math.abs(fromY - box.width) ? fromX : fromY
   const width = Math.max(IMAGE_STEP, snapImage(pulled))
   const height = width * aspect
-  return { width, height, x: east ? box.x : box.x + box.width - width, y: south ? box.y : box.y + box.height - height }
+  // From the side that stays put, or about the middle, to the thousandth as the steps are
+  const start = (at: number, size: number, next: number, s: number) =>
+    s > 0 ? at : s < 0 ? at + size - next : Math.round((at + (size - next) / 2) * 1000) / 1000
+  return { width, height, x: start(box.x, box.width, width, sx), y: start(box.y, box.height, height, sy) }
 }
 
 /** An image's box in one repeat, mm: its near end along the repeat, its near edge across the thread, and its size both ways */

@@ -1,11 +1,13 @@
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { IMAGE_STEP, dragImageCorner, snapImage as snap, type UprightBox } from '../lib/artwork'
+import { IMAGE_STEP, dragImageHandle, snapImage as snap, type UprightBox } from '../lib/artwork'
+import type { Corner, Handle, Side } from '../lib/placed'
+import { SIDE_ZONE_PX } from './PlacingBox'
 
-type Corner = 'nw' | 'ne' | 'sw' | 'se'
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se']
 const CORNER_NAMES: Record<Corner, string> = { nw: 'top-left', ne: 'top-right', sw: 'bottom-left', se: 'bottom-right' }
+const SIDES: Side[] = ['n', 'e', 's', 'w']
 const NUDGE: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
 
 /** A point on the thread, upright mm from the strip's top-left corner */
@@ -13,9 +15,10 @@ export type ThreadPoint = { x: number; y: number }
 
 /**
  * The current frame's image on the magnified thread, handled directly: a drag moves it, a click picks it, and once
- * picked it shows the watermark's box, whose corners resize it with its proportions kept and whose arrow keys nudge it,
- * in 0.1 mm steps. Every copy follows, one repeat apart. `box` is the image in the repeat being edited, upright, mm
- * from the strip's corner; `others` are the shifts to its copies either side, outlined while it is picked.
+ * picked it shows the watermark's box, whose corners and sides (anywhere along its border) resize it with its
+ * proportions kept and whose arrow keys nudge it, in 0.1 mm steps. Every copy follows, one repeat apart. `box` is the
+ * image in the repeat being edited, upright, mm from the strip's corner; `others` are the shifts to its copies either
+ * side, outlined while it is picked.
  */
 export function ImagePlacer({ box, others, aspect, scale, picked, onPick, pointAt, onChange, onDone }: {
   box: UprightBox
@@ -31,7 +34,7 @@ export function ImagePlacer({ box, others, aspect, scale, picked, onPick, pointA
   /** A move or resize has ended */
   onDone: () => void
 }) {
-  const gesture = useRef<{ mode: Corner | 'move'; start: ThreadPoint; original: UprightBox } | null>(null)
+  const gesture = useRef<{ mode: Handle | 'move'; start: ThreadPoint; original: UprightBox } | null>(null)
   const finish = () => {
     if (!gesture.current) return
     gesture.current = null
@@ -63,8 +66,9 @@ export function ImagePlacer({ box, others, aspect, scale, picked, onPick, pointA
           event.currentTarget.focus({ preventScroll: true })
           event.currentTarget.setPointerCapture(event.pointerId)
           onPick()
-          const corner = (event.target as HTMLElement).closest<HTMLElement>('[data-corner]')?.dataset.corner as Corner | undefined
-          gesture.current = { mode: corner ?? 'move', start: pointAt(event), original: box }
+          const grip = (event.target as HTMLElement).closest<HTMLElement>('[data-corner], [data-side]')
+          const handle = (grip?.dataset.corner ?? grip?.dataset.side) as Handle | undefined
+          gesture.current = { mode: handle ?? 'move', start: pointAt(event), original: box }
         }}
         onPointerMove={(event) => {
           const g = gesture.current
@@ -76,7 +80,7 @@ export function ImagePlacer({ box, others, aspect, scale, picked, onPick, pointA
           const dx = p.x - g.start.x, dy = p.y - g.start.y
           const next = g.mode === 'move'
             ? { ...g.original, x: snap(g.original.x + dx), y: snap(g.original.y + dy) }
-            : dragImageCorner(g.original, g.mode, dx, dy, aspect)
+            : dragImageHandle(g.original, g.mode, dx, dy, aspect)
           if (next.x !== box.x || next.y !== box.y || next.width !== box.width) onChange(next)
         }}
         onPointerUp={(event) => {
@@ -95,6 +99,23 @@ export function ImagePlacer({ box, others, aspect, scale, picked, onPick, pointA
           onChange({ ...box, x: snap(box.x + by[0] * step), y: snap(box.y + by[1] * step) })
         }}
       >
+        {picked && SIDES.map((side) => {
+          // Along the whole side, over its border, as on the canvas's placing box: a press there resizes it from that side
+          const level = side === 'n' || side === 's'
+          const inside = Math.min(SIDE_ZONE_PX, ((level ? box.height : box.width) * scale) / 4)
+          return (
+            <span
+              key={`side-${side}`}
+              aria-hidden="true"
+              data-side={side}
+              className={cn('absolute', level ? 'cursor-ns-resize' : 'cursor-ew-resize')}
+              style={{
+                ...(level ? { left: 0, right: 0, height: SIDE_ZONE_PX + inside } : { top: 0, bottom: 0, width: SIDE_ZONE_PX + inside }),
+                [{ n: 'top', e: 'right', s: 'bottom', w: 'left' }[side]]: -SIDE_ZONE_PX,
+              }}
+            />
+          )
+        })}
         {picked && CORNERS.map((corner) => (
           <Button
             key={corner}

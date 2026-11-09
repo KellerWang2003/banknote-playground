@@ -178,20 +178,31 @@ export const maxBoxWidth = (box: PlacedBox, note: Size) => {
 }
 
 export type Corner = 'nw' | 'ne' | 'sw' | 'se'
-
-/** Which way a corner lies from the box's middle along its own sides: right (1) or left (−1), down (1) or up (−1) */
-const cornerSigns = (corner: Corner) => ({ sx: corner === 'ne' || corner === 'se' ? 1 : -1, sy: corner === 'sw' || corner === 'se' ? 1 : -1 })
+/** One of a box's sides, by the way it faces before it turned: its top, right, bottom or left */
+export type Side = 'n' | 'e' | 's' | 'w'
+/** Where a drag can resize a box from: one of its corners, or anywhere along one of its sides */
+export type Handle = Corner | Side
 
 /**
- * A turned box at a new width, its proportions kept and the corner across from `corner` staying where it shows on the
- * banknote: from there it grows along its own sides. No bigger than the banknote; kept ON_NOTE on it as every box is
+ * Which way a corner, or the middle of a side, lies from the box's middle along its own sides: right (1), left (−1) or
+ * neither (0), and down (1), up (−1) or neither
  */
-function turnedTo<T extends PlacedBox>(box: T, corner: Corner, widthMm: number, note: Size): T {
+const handleSigns = (handle: Handle): { sx: -1 | 0 | 1; sy: -1 | 0 | 1 } => ({
+  sx: handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0,
+  sy: handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0,
+})
+
+/**
+ * A turned box at a new width, its proportions kept and what lies across from `handle` staying where it shows on the
+ * banknote, the opposite corner or the middle of the opposite side: from there it grows along its own sides. No bigger
+ * than the banknote; kept ON_NOTE on it as every box is
+ */
+function turnedTo<T extends PlacedBox>(box: T, handle: Handle, widthMm: number, note: Size): T {
   const aspect = boxAspect(box)
   const width = clamp(widthMm, PLACE_MIN_MM, Math.max(PLACE_MIN_MM, Math.min(note.widthMm, note.heightMm / aspect)))
   const height = width * aspect
-  const { sx, sy } = cornerSigns(corner)
-  // The corner that stays put, where it shows, then the new middle half the new size on from it along the box's sides
+  const { sx, sy } = handleSigns(handle)
+  // What stays put, where it shows, then the new middle half the new size on from it along the box's sides
   const stay = outOfBox(box, (-sx * box.widthMm) / 2, (-sy * box.heightMm) / 2)
   const on = outOfBox(box, (sx * width) / 2, (sy * height) / 2)
   const cx = box.xMm + box.widthMm / 2 + stay.x + on.x
@@ -210,31 +221,39 @@ export function resizeBox<T extends PlacedBox>(box: T, widthMm: number, note: Si
 }
 
 /**
- * Drags a corner by (dx, dy) mm, keeping the proportions and the opposite corner where it was. The direction that
- * moved more sets the size, which snaps to PLACE_STEP and stops at the banknote's size, or where less than ON_NOTE of
- * the box would stay on it. On a turned box the drag runs along its own sides, and the opposite corner stays where it
- * shows on the banknote.
+ * Drags a corner or a side by (dx, dy) mm, keeping the proportions and what lies across from it where it was: the
+ * opposite corner, or the opposite side with the box's middle staying where it was along it (Keller, 9 November: a drag
+ * on the box's border should resize it as a corner does). From a corner the direction that moved more sets the size,
+ * from a side the way it faces. The size snaps to PLACE_STEP and stops at the banknote's size, or where less than
+ * ON_NOTE of the box would stay on it. On a turned box the drag runs along its own sides, and what stays put stays where
+ * it shows on the banknote.
  */
-export function dragBoxCorner<T extends PlacedBox>(box: T, corner: Corner, dx: number, dy: number, note: Size): T {
+export function dragBoxHandle<T extends PlacedBox>(box: T, handle: Handle, dx: number, dy: number, note: Size): T {
   const aspect = boxAspect(box)
-  const { sx, sy } = cornerSigns(corner)
-  if (rotationOf(box)) {
-    const along = intoBox(box, dx, dy)
+  const { sx, sy } = handleSigns(handle)
+  // The width a pull (along the box's own sides) asks for: the way a side faces, or whichever way a corner went further
+  const wanted = (along: { x: number; y: number }) => {
     const byX = box.widthMm + sx * along.x
     const byY = (box.heightMm + sy * along.y) / aspect
-    return turnedTo(box, corner, snap(Math.abs(byX - box.widthMm) >= Math.abs(byY - box.widthMm) ? byX : byY), note)
+    return !sy ? byX : !sx ? byY : Math.abs(byX - box.widthMm) >= Math.abs(byY - box.widthMm) ? byX : byY
   }
-  // The corner that stays put
-  const fx = sx > 0 ? box.xMm : box.xMm + box.widthMm
-  const fy = sy > 0 ? box.yMm : box.yMm + box.heightMm
-  const byX = box.widthMm + sx * dx
-  const byY = (box.heightMm + sy * dy) / aspect
-  const wanted = Math.abs(byX - box.widthMm) >= Math.abs(byY - box.widthMm) ? byX : byY
-  const room = Math.min(note.widthMm, note.heightMm / aspect, growRoom(fx, note.widthMm, sx > 0 ? 1 : -1), growRoom(fy, note.heightMm, sy > 0 ? 1 : -1) / aspect)
-  const widthMm = clamp(snap(wanted), Math.min(PLACE_MIN_MM, room), Math.max(PLACE_MIN_MM, room))
+  if (rotationOf(box)) return turnedTo(box, handle, snap(wanted(intoBox(box, dx, dy))), note)
+  // What stays put each way: the side across from the handle, or the middle where the handle has no side that way
+  const fixed = (start: number, size: number, s: number) => (s > 0 ? start : s < 0 ? start + size : start + size / 2)
+  const fx = fixed(box.xMm, box.widthMm, sx)
+  const fy = fixed(box.yMm, box.heightMm, sy)
+  const room = Math.min(note.widthMm, note.heightMm / aspect,
+    sx ? growRoom(fx, note.widthMm, sx) : Infinity, sy ? growRoom(fy, note.heightMm, sy) / aspect : Infinity)
+  const widthMm = clamp(snap(wanted({ x: dx, y: dy })), Math.min(PLACE_MIN_MM, room), Math.max(PLACE_MIN_MM, room))
   const heightMm = widthMm * aspect
-  return refit(box, { widthMm, heightMm, xMm: snap(sx > 0 ? fx : fx - widthMm), yMm: snap(sy > 0 ? fy : fy - heightMm) }, note)
+  // Back to the top-left from there: snapped from a side that stays put, as drags are, and about the middle kept exactly
+  const from = (at: number, size: number, s: number) => (s > 0 ? snap(at) : s < 0 ? snap(at - size) : neat(at - size / 2))
+  return refit(box, { widthMm, heightMm, xMm: from(fx, widthMm, sx), yMm: from(fy, heightMm, sy) }, note)
 }
+
+/** Drags a corner by (dx, dy) mm, the opposite corner staying put: `dragBoxHandle` from a corner */
+export const dragBoxCorner = <T extends PlacedBox>(box: T, corner: Corner, dx: number, dy: number, note: Size): T =>
+  dragBoxHandle(box, corner, dx, dy, note)
 
 /** Moves a box by (dx, dy) mm from where it was, snapped and kept ON_NOTE on the banknote */
 export const moveBox = <T extends PlacedBox>(box: T, dx: number, dy: number, note: Size): T =>
