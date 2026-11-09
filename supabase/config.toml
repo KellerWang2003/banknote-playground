@@ -7,3 +7,10 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/thread-workspace/deno.json"
 entrypoint = "./functions/thread-workspace/index.ts"
+
+# Intaglio Studio (/intaglio): its own projects, presets and images, by the same usernames.
+[functions.intaglio-workspace]
+enabled = true
+verify_jwt = false
+import_map = "./functions/intaglio-workspace/deno.json"
+entrypoint = "./functions/intaglio-workspace/index.ts"

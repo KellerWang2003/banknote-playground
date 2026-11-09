@@ -8,6 +8,7 @@ This version uses **username workspaces** without accounts, email, or passwords.
 - Database: `public.thread_playground_projects`, indexed by workspace and update time.
 - Artwork bucket: `thread-playground-artwork`, maximum 25 MB per image; PNG, JPEG, SVG, and WebP.
 - Edge Function: `thread-workspace`.
+- Intaglio Studio (`/intaglio`) has its own table, bucket and function next to these, by the same usernames: see [INTAGLIO.md](INTAGLIO.md).
 
 The database holds each editor project as JSONB plus a UUID revision and deletion timestamp. The function validates the workspace and IDs, scopes every read/update to that workspace, and reads/uploads artwork only in its corresponding folder. Direct browser access to the table and bucket is denied. The function accepts the project's frontend publishable key, with no user JWT. Its service-role credentials exist only in the Supabase runtime.
 
