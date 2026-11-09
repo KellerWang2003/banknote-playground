@@ -16,7 +16,7 @@ import { type PlacedBox, type Size, rotationOf } from './placed'
 import { inkLight } from './realisticInk'
 import { copyStarts, imageBox } from './artwork'
 import { fitSections, threadLength } from './thread'
-import type { Quarter } from './rotate'
+import { onItsSide, type Quarter } from './rotate'
 import type { ArcEnCiel, Frame, MagneticInk, Note } from './types'
 
 // Draws banknotes to a canvas exactly as NoteView shows them on the canvas, so the tilt can be exported
@@ -691,6 +691,67 @@ export function drawExportFrame(
     drawTilted(ctx, face, 0, 0, view, perspective)
     ctx.restore()
   }
+}
+
+/** The least a still image is drawn at, px per mm: 300 dpi, print quality, for a side without a design or with a small one */
+export const IMAGE_MIN_PX_PER_MM = 300 / 25.4
+/** Longest side of a still image, px: as big as browsers reliably make a canvas */
+export const MAX_IMAGE_PX = 16384
+
+/**
+ * Px per mm a still image of a banknote is drawn at, full resolution (Keller, 9 November): its design pixel for pixel as it
+ * covers the banknote (`design`, the image's own size as uploaded), never under print quality (IMAGE_MIN_PX_PER_MM, which
+ * a side without a design gets) and within MAX_IMAGE_PX
+ */
+export function imageScale(note: Size, design?: { width: number; height: number }) {
+  const own = design && design.width > 0 && design.height > 0 ? Math.min(design.width / note.widthMm, design.height / note.heightMm) : 0
+  return Math.min(Math.max(own, IMAGE_MIN_PX_PER_MM), MAX_IMAGE_PX / Math.max(note.widthMm, note.heightMm))
+}
+
+/** A still image's size in px at `scale` px per mm: the banknote's own, on its side when the canvas shows it so (`quarter`) */
+export function imageSize(note: Size, scale: number, quarter: Quarter = 0) {
+  const width = Math.max(1, Math.round(note.widthMm * scale))
+  const height = Math.max(1, Math.round(note.heightMm * scale))
+  return onItsSide(quarter) ? { width: height, height: width } : { width, height }
+}
+
+const artworkSizes = new Map<string, Promise<{ width: number; height: number } | undefined>>()
+
+/** The pixels an uploaded image has, read from the image itself, once a session (an id always holds the same image) */
+export function artworkSize(id: string) {
+  let size = artworkSizes.get(id)
+  if (!size) {
+    size = loadArtwork(id).then((image) => (image && image.naturalWidth > 0 ? { width: image.naturalWidth, height: image.naturalHeight } : undefined))
+    // One that couldn't be had is asked for again next time
+    size.then((read) => { if (!read) artworkSizes.delete(id) }, () => artworkSizes.delete(id))
+    artworkSizes.set(id, size)
+  }
+  return size
+}
+
+/** What a still image follows from the canvas, as a video does: the sheen, Realistic, #, the side shown, the rotation, the pattern's offset */
+export type StillOptions = Pick<FaceOptions, 'sheen' | 'realistic' | 'frameNumbers' | 'back' | 'quarter' | 'offsetMm'>
+
+/**
+ * A still image of one banknote (Keller, 9 November): the banknote flat and face on, filling the image at `scale` px per mm
+ * (`imageSize`), turned as the canvas shows it (`quarter`), with only its security features as seen at `tilt`: the
+ * thread's frames and sheen, Arc-en-Ciel's bands and magnetic ink, lit as the canvas lights them with Realistic. The
+ * banknote itself never turns or shades, and its watermark shows as held to the light, whatever the tilt.
+ */
+export function drawStill(ctx: Ctx, note: Note, assets: NoteAssets, scale: number, tilt: Tilt2, options: StillOptions) {
+  const { width, height } = imageSize(note, scale)
+  const quarter = options.quarter ?? 0
+  ctx.save()
+  ctx.imageSmoothingQuality = 'high'
+  // Turned clockwise, as the canvas turns it, the banknote still filling the image
+  if (quarter === 1) ctx.translate(height, 0)
+  else if (quarter === 2) ctx.translate(width, height)
+  else if (quarter === 3) ctx.translate(0, width)
+  if (quarter) ctx.rotate((quarter * Math.PI) / 2)
+  // Realistic magnetic ink's grain as a video frame as big would have it: a cell a px up to 1920 px along its long side
+  const grain = Math.max(1, Math.round(Math.max(width, height) / 1920))
+  drawFace(ctx, note, assets, scale, tilt, { ...options, perspective: false, reveal: 1, grain })
+  ctx.restore()
 }
 
 /** Largest output side; hardware video encoders commonly stop at 4K */

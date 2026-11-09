@@ -1,9 +1,13 @@
 import { zipSync } from 'fflate'
 import { GIFEncoder, applyPalette, quantize } from 'gifenc'
 import { BufferTarget, CanvasSource, Mp4OutputFormat, Output, QUALITY_HIGH, WebMOutputFormat, getFirstEncodableVideoCodec } from 'mediabunny'
-import type { Side } from './back'
+import { sideImageId, type Side } from './back'
+import type { Tilt2 } from './lens'
 import type { Quarter } from './rotate'
-import { drawExportFrame, exportGroups, exportLayout, loadNoteAssets, playbackLights, playbackTilts, playbackTurns, playbackViews, scaleForHeight, turnsOver, type SideAssets } from './exportRender'
+import {
+  artworkSize, drawExportFrame, drawStill, exportGroups, exportLayout, imageScale, imageSize, loadNoteAssets, playbackLights, playbackTilts, playbackTurns,
+  playbackViews, scaleForHeight, turnsOver, type SideAssets,
+} from './exportRender'
 import type { Note } from './types'
 
 export type ExportFormat = 'mp4' | 'gif'
@@ -130,6 +134,11 @@ export async function exportTilt(projectName: string, options: ExportOptions, on
     const { blob, extension } = await renderFile(group, assets, options, () => onProgress(++done / total), signal)
     files.push({ name: `${safeName(projectName)} - ${groups.length > 1 || notes.length === 1 ? safeName(group[0].name) : 'Banknotes'}.${extension}`, blob })
   }
+  return bundle(projectName, files)
+}
+
+/** One file as it is, or several in a zip */
+async function bundle(projectName: string, files: { name: string; blob: Blob }[]) {
   if (files.length === 1) return files[0]
   // Banknotes can share a name; number repeats so no file in the zip replaces another
   const used = new Map<string, number>()
@@ -138,9 +147,65 @@ export async function exportTilt(projectName: string, options: ExportOptions, on
     used.set(file.name, count)
     if (count > 1) file.name = file.name.replace(/(\.\w+)$/, ` ${count}$1`)
   }
-  // Video and GIF are already compressed, so store them as they are
+  // Video, GIF and PNG are already compressed, so store them as they are
   const entries = Object.fromEntries(await Promise.all(files.map(async (f) => [f.name, [new Uint8Array(await f.blob.arrayBuffer()), { level: 0 }] as const])))
   return { name: `${safeName(projectName)} - Banknotes.zip`, blob: new Blob([zipSync(entries) as Uint8Array<ArrayBuffer>], { type: 'application/zip' }) }
+}
+
+/** A still image export (Keller, 9 November): each banknote flat at full resolution, its security features as seen at `tilt` */
+export interface ImageOptions {
+  notes: Note[]
+  /** The tilt the security features are seen at; the banknotes themselves lie flat */
+  tilt: Tilt2
+  sheen: boolean
+  /** Magnetic ink lit as metal and Arc-en-Ciel drawn as embossed ridges, as Realistic shows them on the canvas */
+  realistic?: boolean
+  /** Draws the visible frame's number on each thread, as the # toggle does on the canvas */
+  frameNumbers?: boolean
+  /** Every banknote's back, as the canvas shows them turned over */
+  back?: boolean
+  /** Every banknote rotated this many quarter turns clockwise, as the canvas shows them (Rotate left and right) */
+  quarter?: Quarter
+  /** Where each banknote's thread pattern starts along its thread (mm, by banknote id), as the canvas previews it */
+  offsets?: Record<string, number>
+}
+
+/** The tilt in an image's name, in the tilt store's words (positive tilts up, and right), nothing when flat */
+export function tiltName({ x, y }: Tilt2) {
+  const parts = [
+    ...(Math.round(y) ? [`${Math.abs(Math.round(y))}° ${y > 0 ? 'up' : 'down'}`] : []),
+    ...(Math.round(x) ? [`${Math.abs(Math.round(x))}° ${x > 0 ? 'right' : 'left'}`] : []),
+  ]
+  return parts.length > 0 ? ` (${parts.join(', ')})` : ''
+}
+
+/**
+ * Draws and encodes a PNG of every banknote, each at its own full resolution (`imageScale`), reporting progress from 0
+ * to 1. Resolves with the file to download: the image, or a zip of them for several banknotes.
+ */
+export async function exportImages(projectName: string, options: ImageOptions, onProgress: (progress: number) => void, signal: AbortSignal) {
+  const { notes } = options
+  const side: Side = options.back ? 'back' : 'front'
+  const files: { name: string; blob: Blob }[] = []
+  for (const [i, note] of notes.entries()) {
+    signal.throwIfAborted()
+    const design = sideImageId(note, side)
+    const scale = imageScale(note, design ? await artworkSize(design) : undefined)
+    const assets = await loadNoteAssets(note, scale, options.back)
+    signal.throwIfAborted()
+    onProgress((i + 0.5) / notes.length)
+    const size = imageSize(note, scale, options.quarter)
+    const canvas = new OffscreenCanvas(size.width, size.height)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('This browser cannot draw an image this big.')
+    drawStill(ctx, note, assets, scale, options.tilt, {
+      sheen: options.sheen, realistic: options.realistic, frameNumbers: options.frameNumbers, back: options.back, quarter: options.quarter, offsetMm: options.offsets?.[note.id],
+    })
+    const blob = await canvas.convertToBlob({ type: 'image/png' })
+    files.push({ name: `${safeName(projectName)} - ${safeName(note.name)}${tiltName(options.tilt)}.png`, blob })
+    onProgress((i + 1) / notes.length)
+  }
+  return bundle(projectName, files)
 }
 
 export function downloadFile(file: { name: string; blob: Blob }) {
