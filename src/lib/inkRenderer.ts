@@ -561,6 +561,20 @@ function drawingSize(r: Renderer, size: { width: number; height: number }) {
   return { width, height }
 }
 
+/**
+ * Readies the canvas for a drawing `width` × `height` pixels in its bottom-left corner, clearing all of it first. The canvas
+ * only grows, so a larger drawing made earlier would still be past this one's top and right, and copying a drawing out
+ * takes in a little of the pixels just past its edges (scaled or off the pixel grid, as an export is, and on some GPUs even
+ * at 1:1): an earlier drawing there showed as a faint line along the top and right of Arc-en-Ciel's box at several zooms
+ * (Keller, 9 November; his image's own edges are clear). A GPU clears the lot in next to no time.
+ */
+function drawIn(r: Renderer, width: number, height: number) {
+  const { gl } = r
+  gl.viewport(0, 0, width, height)
+  gl.clearColor(0, 0, 0, 0)
+  gl.clear(gl.COLOR_BUFFER_BIT)
+}
+
 /** A mask on the GPU, put there once; one bigger than the GPU takes is scaled down to fit first */
 function textureFor(r: Renderer, mask: MaskSource) {
   const kept = r.textures.get(mask)
@@ -627,7 +641,7 @@ export function drawLitInk(
   const texture = textureFor(r, mask)
   if (!texture) return false
   gl.useProgram(ink.program)
-  gl.viewport(0, 0, width, height)
+  drawIn(r, width, height)
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, texture)
   gl.uniform1i(u('uMask'), 0)
@@ -646,7 +660,7 @@ export function drawLitInk(
   gl.uniform3f(u('uFlat'), ...light.flat)
   gl.uniform2f(u('uTilted'), ...light.tilted)
   gl.uniform1f(u('uHue'), light.hue)
-  // Every pixel of it is drawn, clear ones too, so there is nothing to clear first
+  // Every pixel of it is drawn, clear ones too
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   target.drawImage(canvas, 0, canvas.height - height, width, height, dest.x, dest.y, dest.width, dest.height)
   return true
@@ -733,7 +747,7 @@ export function drawBands(
   const emboss = embossed ? mapFor(r, embossed) : r.noMap
   if (!texture || !map || !emboss) return false
   gl.useProgram(bands.program)
-  gl.viewport(0, 0, width, height)
+  drawIn(r, width, height)
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, texture)
   gl.uniform1i(u('uMask'), 0)
@@ -775,7 +789,7 @@ export function drawBands(
   gl.uniform3f(u('uLamp'), ...(lit?.lamp ?? [0, 0, 1]))
   gl.uniform3f(u('uHalf'), ...(lit?.half ?? [0, 0, 1]))
   gl.uniform4f(u('uMeans'), ...(lit?.means ?? [1, 0, 1, 0]))
-  // Every pixel of it is drawn, clear ones too, so there is nothing to clear first
+  // Every pixel of it is drawn, clear ones too
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   target.drawImage(canvas, 0, canvas.height - height, width, height, dest.x, dest.y, dest.width, dest.height)
   return true

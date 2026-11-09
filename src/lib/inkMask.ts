@@ -32,27 +32,8 @@ export function inkCoverage(data: Uint8ClampedArray, width: number, height: numb
   } else {
     out = standingOut(data, n, paper, false)
   }
-  dropEdgeLines(out, width, height)
   if (invert) for (let p = 0; p < n; p++) out[p] = 255 - out[p]
   return out
-}
-
-/**
- * A faint line along an image's edge, as exports can leave (a row or column of half-covered pixels), would print as a line
- * along the layer's box (Keller's disc, 9 November): each pixel on the edge takes no more ink than the one just inside it,
- * so a shape running off the edge keeps its ink there and a line only on the edge goes
- */
-function dropEdgeLines(out: Uint8ClampedArray, width: number, height: number) {
-  if (width < 3 || height < 3) return
-  const last = (height - 1) * width
-  for (let x = 0; x < width; x++) {
-    out[x] = Math.min(out[x], out[width + x])
-    out[last + x] = Math.min(out[last + x], out[last - width + x])
-  }
-  for (let y = 0, row = 0; y < height; y++, row += width) {
-    out[row] = Math.min(out[row], out[row + 1])
-    out[row + width - 1] = Math.min(out[row + width - 1], out[row + width - 2])
-  }
 }
 
 /** Brightness steps the main colour of a cutout is counted in, so a big image needs no sorting */
