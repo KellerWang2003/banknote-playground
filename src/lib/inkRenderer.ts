@@ -299,7 +299,12 @@ vec3 printed(vec3 c, float thin) {
 void main() {
   // Where on the box, as the drawing reaches uOutset mm past it all round for the white edge
   vec2 uv = (vUv * (uBox + 2.0 * uOutset) - uOutset) / uBox;
-  float m = uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0 ? texture2D(uMask, uv).a : 0.0;
+  // The shape's mask, looked up for every pixel and left out past the box. The GPU shades pixels in 2 x 2 blocks and picks
+  // how blurred a version of the mask to read (its mipmap) from how far apart a block's lookups are; looked up only inside
+  // the box, a block over the drawing's top or right edge (an odd number of pixels across) leaves that undefined, and on
+  // Keller's Mac it read a blurred one there, a line along the box at some zooms (9 November)
+  vec2 inBox = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+  float m = texture2D(uMask, clamp(uv, 0.0, 1.0)).a * inBox.x * inBox.y;
   // How far inside the white edge, uOutset round the shape, up to a pixel
   float e = 0.0;
   if (uEmbossMax > 0.0) {
@@ -564,9 +569,8 @@ function drawingSize(r: Renderer, size: { width: number; height: number }) {
 /**
  * Readies the canvas for a drawing `width` × `height` pixels in its bottom-left corner, clearing all of it first. The canvas
  * only grows, so a larger drawing made earlier would still be past this one's top and right, and copying a drawing out
- * takes in a little of the pixels just past its edges (scaled or off the pixel grid, as an export is, and on some GPUs even
- * at 1:1): an earlier drawing there showed as a faint line along the top and right of Arc-en-Ciel's box at several zooms
- * (Keller, 9 November; his image's own edges are clear). A GPU clears the lot in next to no time.
+ * scaled or off the pixel grid, as an export does, takes in a little of the pixels just past its edges. A GPU clears the
+ * lot in next to no time.
  */
 function drawIn(r: Renderer, width: number, height: number) {
   const { gl } = r
