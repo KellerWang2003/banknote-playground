@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ARC_BAND, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
-  bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeLight, sampleCurve,
-  srgbBytes, withArcImage, withBend, withLineMoved, withPoint, withSpot, withoutSpot,
+  ARC_BAND, ARC_EMBOSS_MM, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
+  bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeAcross, ridgeAngle,
+  ridgeLight, sampleCurve, srgbBytes, withArcImage, withBend, withLineMoved, withPoint, withSpot, withoutSpot,
 } from '../src/lib/arcEnCiel'
-import { bandDistance, bandLook, bandPixels, convexHull, embossField, needsShape, shapeMaps, squaredDistances } from '../src/lib/bandMap'
+import { bandDistance, bandLook, bandPixels, boxIn, embossOutset, needsShape, outlineField, shapeMaps, squaredDistances } from '../src/lib/bandMap'
 import { LAMP_HEIGHT_DEG } from '../src/lib/realisticInk'
 import { onFront } from '../src/lib/layers'
 import { newMagneticInk } from '../src/lib/magneticInk'
@@ -43,14 +43,14 @@ describe('Arc-en-Ciel settings', () => {
     expect(portrait.yMm + portrait.heightMm / 2).toBeLessThan(75)
   })
 
-  it('repairs a damaged save: colours, flow, axis, band width, points and the line, and drops what it doesn’t know', () => {
+  it('repairs a damaged save: colours, flow, angle, band width, points and the line, and drops what it doesn’t know', () => {
     const damaged = {
-      ...arc(), imageId: 'shape', invert: 'yes', flow: 'spiral', axis: 'z', bandMm: 99, colors: ['#ff0000', 'red', '#00ff00'],
+      ...arc(), imageId: 'shape', invert: 'yes', flow: 'spiral', angleDeg: 'steep', bandMm: 99, colors: ['#ff0000', 'red', '#00ff00'],
       points: [{ x: 5, y: -3 }, { x: 'a' }], line: [{ x: 0.5, y: 0.5 }], extra: true,
     } as unknown as ArcEnCiel
     const fitted = fitArcEnCiel(damaged, note)
     expect(fitted).toEqual({
-      imageId: 'shape', xMm: 10, yMm: 10, widthMm: 20, heightMm: 10, flow: 'edge', axis: 'y', bandMm: ARC_BAND.max,
+      imageId: 'shape', xMm: 10, yMm: 10, widthMm: 20, heightMm: 10, flow: 'edge', angleDeg: 0, bandMm: ARC_BAND.max,
       // Two good colours, and the defaults' third for the missing one
       colors: ['#ff0000', '#00ff00', DEFAULT_ARC.colors[2]],
       // Points kept within a box's size of it; a line needs both its ends
@@ -59,6 +59,36 @@ describe('Arc-en-Ciel settings', () => {
     expect(fitArcEnCiel({ ...arc(), colors: ['#111111', '#222222', '#333333', '#444444', '#555555'], invert: true }, note))
       .toMatchObject({ colors: ['#111111', '#222222', '#333333', '#444444'], invert: true })
     expect(fitArcEnCiel({ ...arc(), bandMm: Number.NaN }, note).bandMm).toBe(DEFAULT_ARC.bandMm)
+    // Ridges half a turn round are the same ridges
+    expect(fitArcEnCiel({ ...arc(), angleDeg: 100 }, note).angleDeg).toBe(-80)
+    expect(fitArcEnCiel({ ...arc(), angleDeg: -260 }, note).angleDeg).toBe(-80)
+    expect(fitArcEnCiel({ ...arc(), angleDeg: 37.5 }, note).angleDeg).toBe(37.5)
+  })
+
+  it('reads a save from before the angle, whose Moves on was ↕ or ↔, as level or upright ridges sliding the same way', () => {
+    const { angleDeg: _, ...old } = arc()
+    expect(fitArcEnCiel({ ...old, axis: 'y' } as unknown as ArcEnCiel, note).angleDeg).toBe(0)
+    expect(fitArcEnCiel({ ...old, axis: 'x' } as unknown as ArcEnCiel, note).angleDeg).toBe(-90)
+    expect(fitArcEnCiel({ ...old, axis: 'x' } as unknown as ArcEnCiel, note)).not.toHaveProperty('axis')
+    expect(fitArcEnCiel(old as unknown as ArcEnCiel, note).angleDeg).toBe(0)
+  })
+
+  it('keeps the ridges’ angle within ±90°, and counts across them down the banknote', () => {
+    expect(ridgeAngle(0)).toBe(0)
+    expect(ridgeAngle(90)).toBe(90)
+    expect(ridgeAngle(-90)).toBe(-90)
+    expect(ridgeAngle(91)).toBe(-89)
+    expect(ridgeAngle(180)).toBe(0)
+    expect(ridgeAngle(-181)).toBe(-1)
+    expect(ridgeAngle(Number.NaN)).toBe(DEFAULT_ARC.angleDeg)
+    expect(Object.is(ridgeAngle(-180), -0)).toBe(false)
+    expect(ridgeAcross({ angleDeg: 0 })).toEqual([0, 1])
+    expect(ridgeAcross({ angleDeg: 90 })).toEqual([1, 0])
+    expect(ridgeAcross({ angleDeg: -90 })).toEqual([-1, 0])
+    const [x, y] = ridgeAcross({ angleDeg: 30 })
+    // Rising to the right, so across them runs down and to the right
+    expect(x).toBeCloseTo(0.5)
+    expect(y).toBeCloseTo(Math.sqrt(3) / 2)
   })
 
   it('keeps its width and middle when an image sets its proportions', () => {
@@ -78,11 +108,24 @@ describe('Arc-en-Ciel settings', () => {
 
 describe('Arc-en-Ciel’s bands', () => {
   it('slide half a band each way over 20° across the ridges, and not at all along them', () => {
-    expect(bandSlide({ axis: 'y' }, { x: 0, y: 0 })).toBe(0)
-    expect(bandSlide({ axis: 'y' }, { x: 15, y: ARC_SLIDE_DEG })).toBe(ARC_SLIDE_BANDS)
-    expect(bandSlide({ axis: 'y' }, { x: 0, y: -ARC_SLIDE_DEG / 2 })).toBe(-ARC_SLIDE_BANDS / 2)
-    expect(bandSlide({ axis: 'y' }, { x: 0, y: 60 })).toBe(ARC_SLIDE_BANDS)
-    expect(bandSlide({ axis: 'x' }, { x: -40, y: 10 })).toBe(-ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 0 })).toBe(0)
+    expect(bandSlide({ angleDeg: 0 }, { x: 15, y: ARC_SLIDE_DEG })).toBe(ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: -ARC_SLIDE_DEG / 2 })).toBeCloseTo(-ARC_SLIDE_BANDS / 2, 9)
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 60 })).toBe(ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: 0 }, { x: 25, y: 0 })).toBe(0)
+    expect(bandSlide({ angleDeg: -90 }, { x: -40, y: 10 })).toBe(-ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: -90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(ARC_SLIDE_BANDS / 2, 9)
+    expect(bandSlide({ angleDeg: 90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(-ARC_SLIDE_BANDS / 2, 9)
+  })
+
+  it('slide on the tilt across ridges at any angle, and not on the tilt along them', () => {
+    // Ridges rising to the right at 30°: the eye moving down and right across them, or up and right along them
+    expect(bandSlide({ angleDeg: 30 }, { x: -12.5, y: 21.65 })).toBe(ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: 30 }, { x: 5, y: -8.66 })).toBeCloseTo(-ARC_SLIDE_BANDS / 2, 2)
+    expect(Math.abs(bandSlide({ angleDeg: 30 }, { x: -8.66, y: -5 }))).toBeLessThan(0.01)
+    // The same tilt slides ridges at −30° by as much as level ones would by the up/down tilt alone, less
+    expect(Math.abs(bandSlide({ angleDeg: -30 }, { x: 0, y: 10 }))).toBeLessThan(Math.abs(bandSlide({ angleDeg: 0 }, { x: 0, y: 10 })))
+    expect(bandSlide({ angleDeg: -30 }, { x: 0, y: 10 })).toBeGreaterThan(0)
   })
 
   it('run through the colours in order and repeat, blending into the next only at the end of each band', () => {
@@ -116,7 +159,8 @@ describe('Arc-en-Ciel’s bands', () => {
   it('start from the shape’s edge inward, and from holes in it, each pixel by the edge nearest it', () => {
     const solid = shapeMaps(grid(['#########', '#########', '#########', '#########', '#########', '#########', '#########', '#########', '#########']).coverage, 9, 9)
     expect(solid.holes).toBeUndefined()
-    // Beyond the image is paper: the middle pixel is 4½ pixels in from the image's edge, half a box width
+    // Beyond the image is paper: the middle pixel is 4½ pixels in from the image's edge, half a box width (so near an edge
+    // the rings aren't rounded)
     expect(solid.edge.data[4 * 9 + 4]).toBeCloseTo(0.5)
     expect(solid.edge.data[0]).toBeCloseTo(0.5 / 9)
     const ring = grid([
@@ -139,6 +183,29 @@ describe('Arc-en-Ciel’s bands', () => {
     // Inside the ring, from whichever edge is nearest
     expect(maps.edge.data[4 * 9 + 2]).toBeCloseTo(0.5 / 9)
     expect(maps.edge.data[4 * 9 + 4]).toBe(0)
+  })
+
+  it('round off deeper in: exact along a straight edge, rounder into a corner and with no flat top in a narrow stretch', () => {
+    const width = 96, height = 64
+    const block = shapeMaps(new Uint8ClampedArray(width * height).fill(255), width, height).edge
+    const px = (x: number, y: number) => block.data[y * width + x] * width
+    // Down the middle of the long side, from the top edge: as far as it is, and deeper each step in
+    for (let y = 0; y < 14; y++) expect(px(48, y) / (y + 0.5)).toBeCloseTo(1, 1)
+    for (let y = 1; y < 32; y++) expect(px(48, y)).toBeGreaterThanOrEqual(px(48, y - 1))
+    // Into the corner, 11½ pixels from both sides: the ring there rounds the corner off, so it is less deep
+    expect(px(11, 11) / 11.5).toBeLessThan(0.93)
+    expect(px(11, 11) / 11.5).toBeGreaterThan(0.75)
+    // Near the edge the rings follow it, corner and all
+    expect(px(1, 1)).toBeCloseTo(1.5, 1)
+    // A strip 12 pixels across: its middle keeps most of its depth, and the rings rise to it
+    const strip = new Uint8ClampedArray(width * height)
+    strip.fill(255, 26 * width, 38 * width)
+    const narrow = shapeMaps(strip, width, height).edge
+    const middle = narrow.data[31 * width + 48] * width
+    expect(middle).toBeLessThan(5.5)
+    expect(middle).toBeGreaterThan(0.8 * 5.5)
+    expect(narrow.data[30 * width + 48]).toBeLessThan(narrow.data[31 * width + 48])
+    expect(narrow.data[10 * width + 48]).toBe(0)
   })
 
   it('count paper the shape closes round only at its corners as a hole', () => {
@@ -244,7 +311,7 @@ describe('Arc-en-Ciel, Realistic', () => {
     // Tilting along the ridges changes nothing; upright ones go by the side to side tilt, the right side turning away
     // showing the slopes facing left
     expect(arcLight(arc(), { x: 15, y: 0 }).share).toBeCloseTo(0)
-    const upright = arc({ axis: 'x' })
+    const upright = arc({ angleDeg: -90 })
     expect(arcLight(upright, { x: 0, y: 0 }).across).toEqual([-1, 0])
     expect(arcLight(upright, { x: ARC_SLIDE_DEG, y: 0 }).share).toBeCloseTo(1)
     expect(arcLight(upright, { x: 0, y: 12 }).share).toBeCloseTo(0)
@@ -295,7 +362,7 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(Math.min(...flat.means)).toBeGreaterThanOrEqual(0)
   })
 
-  it('embosses the paper inside a rubber band round the shape, its bays and holes too, and nothing outside', () => {
+  it('embosses an outline round the shape, as far from it all round, reaching past the image', () => {
     const bitten = grid([
       '..........',
       '..######..',
@@ -307,56 +374,37 @@ describe('Arc-en-Ciel, Realistic', () => {
       '..######..',
       '..........',
     ])
-    const { emboss } = shapeMaps(bitten.coverage, bitten.width, bitten.height)
-    // In pixels from the hull's nearest side, worked out from its sides
-    const at = (x: number, y: number) => emboss!.data[y * bitten.width + x] * bitten.width
-    expect(at(6, 4)).toBeCloseTo(2.5)
-    expect(at(8, 4)).toBeCloseTo(0.5)
-    expect(at(9, 4)).toBe(0)
-    expect(at(0, 0)).toBe(0)
-    // The rubber band cuts across the corner
-    expect(at(1, 1)).toBeCloseTo(0)
-    const solid = embossField(new Uint8ClampedArray(81).fill(255), 9, 9)!
-    expect(solid.data[4 * 9 + 4]).toBeCloseTo(0.5)
-    expect(solid.max).toBeCloseTo(0.5)
-    expect(embossField(new Uint8ClampedArray(81), 9, 9)).toBeUndefined()
+    const outline = outlineField(bitten.coverage, bitten.width, bitten.height)!
+    // A seventh of the image's longest side past it all round, rounded up
+    expect(outline.pad).toBe(2)
+    expect([outline.width, outline.height]).toEqual([14, 13])
+    expect(shapeMaps(bitten.coverage, bitten.width, bitten.height).emboss).toEqual(outline)
+    // In pixels from the shape's nearest edge, from each pixel's middle: 0 in it, the bay too as far as it is from it
+    const at = (x: number, y: number) => outline.data[(y + 2) * outline.width + x + 2] * bitten.width
+    expect(at(3, 3)).toBe(0)
+    expect(at(6, 3)).toBeCloseTo(0.5)
+    expect(at(8, 4)).toBeCloseTo(1.5)
+    expect(at(0, 0)).toBeCloseTo(Math.sqrt(5) - 0.5)
+    // Past the image too
+    expect(at(-2, 4)).toBeCloseTo(2.5)
+    expect(outlineField(new Uint8ClampedArray(81), 9, 9)).toBeUndefined()
     expect(shapeMaps(new Uint8ClampedArray(81), 9, 9).emboss).toBeUndefined()
-    expect(convexHull([[0, 0], [2, 0], [1, 0], [2, 2], [0, 2], [1, 1]])).toEqual([[0, 0], [2, 0], [2, 2], [0, 2]])
   })
 
-  it('works out the embossed area exactly however big the shape, as the nearest of the hull’s sides', () => {
-    const width = 61, height = 47
-    const coverage = new Uint8ClampedArray(width * height)
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const inDisc = Math.hypot(x + 0.5 - 28, y + 0.5 - 23) < 19
-        const bite = Math.hypot(x + 0.5 - 44, y + 0.5 - 23) < 9
-        const blob = Math.hypot(x + 0.5 - 54, y + 0.5 - 8) < 4
-        coverage[y * width + x] = (inDisc && !bite) || blob ? 255 : 0
-      }
-    }
-    const field = embossField(coverage, width, height)!
-    const corners: [number, number][] = []
-    for (let y = 0; y < height; y++) {
-      const row = [...coverage.slice(y * width, (y + 1) * width)]
-      const first = row.findIndex((c) => c >= 128)
-      if (first >= 0) corners.push([first, y], [first, y + 1], [row.findLastIndex((c) => c >= 128) + 1, y], [row.findLastIndex((c) => c >= 128) + 1, y + 1])
-    }
-    const hull = convexHull(corners)
-    const area = hull.reduce((sum, a, i) => sum + a[0] * hull[(i + 1) % hull.length][1] - hull[(i + 1) % hull.length][0] * a[1], 0)
-    let worst = 0
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let nearest = Infinity
-        hull.forEach((a, i) => {
-          const b = hull[(i + 1) % hull.length]
-          const length = Math.hypot(b[0] - a[0], b[1] - a[1])
-          nearest = Math.min(nearest, (((a[1] - b[1]) * (x + 0.5 - a[0]) + (b[0] - a[0]) * (y + 0.5 - a[1])) / length) * Math.sign(area))
-        })
-        worst = Math.max(worst, Math.abs(Math.max(0, nearest) / width - field.data[y * width + x]))
-      }
-    }
-    expect(worst).toBeLessThan(1e-6)
+  it('reaches past its box all round by the outline’s width, or as far as the outline’s map does on a small box', () => {
+    const outline = outlineField(new Uint8ClampedArray(100 * 100).fill(255), 100, 100)!
+    // 15 of the map's 100 pixels past it, as far as 2.25 mm on a box 15 mm across
+    expect(embossOutset({ widthMm: 15, heightMm: 15 }, outline)).toBe(ARC_EMBOSS_MM)
+    expect(embossOutset({ widthMm: 4, heightMm: 4 }, outline)).toBeCloseTo(0.6)
+    expect(embossOutset({ widthMm: 15, heightMm: 15 }, undefined)).toBe(0)
+    expect(embossOutset({ widthMm: 15, heightMm: 15 }, { width: 1, height: 1, data: new Float32Array(1), max: 0 })).toBe(0)
+    const shape = { key: 'k', edge: outline, emboss: outline }
+    const look = bandLook(arc({ widthMm: 15, heightMm: 15 }), shape, { x: 0, y: 0 }, arcLight(arc(), { x: 0, y: 0 }))!
+    expect(look.outset).toBe(ARC_EMBOSS_MM)
+    expect(bandLook(arc({ widthMm: 15, heightMm: 15 }), shape, { x: 0, y: 0 })).not.toHaveProperty('outset')
+    // The box within a drawing of it that reaches past it: 1 mm of the 17 each way
+    expect(boxIn({ x: 0, y: 0, width: 170, height: 170 }, look)).toEqual({ x: 10, y: 10, width: 150, height: 150 })
+    expect(boxIn({ x: 5, y: 5, width: 150, height: 150 }, { ...look, outset: undefined })).toEqual({ x: 5, y: 5, width: 150, height: 150 })
   })
 
   it('is drawn as lit ridges instead of sliding, with its shape’s embossed area once worked out', () => {
@@ -364,7 +412,7 @@ describe('Arc-en-Ciel, Realistic', () => {
     const light = arcLight(arc(), { x: 0, y: 10 })
     expect(bandLook(arc(), shape, { x: 0, y: 10 }, light)).toMatchObject({ field: shape.edge, slide: 0, lit: light, emboss: shape.emboss })
     expect(bandLook(arc(), shape, { x: 0, y: 10 })).not.toHaveProperty('lit')
-    // Point and Line are drawn at once, the embossed area joining them when it is ready
+    // Point and Line are drawn at once, the embossed outline joining them when it is ready
     const pointed = bandLook(arc({ flow: 'point' }), undefined, { x: 0, y: 10 }, light)!
     expect(pointed).toMatchObject({ from: 'point', lit: light })
     expect(pointed).not.toHaveProperty('emboss')

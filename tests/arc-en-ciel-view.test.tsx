@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NoteView } from '../src/components/NoteView'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import { ArcEnCielPanel } from '../src/editor/ArcEnCielPanel'
-import { ArcHandles } from '../src/editor/ArcHandles'
+import { ArcHandles, RidgeDial } from '../src/editor/ArcHandles'
 import { ColourList } from '../src/editor/ColourList'
 import { PlacingBox } from '../src/editor/PlacingBox'
 import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
@@ -73,8 +73,10 @@ const plain = () => createNote({ name: 'Live', x: 0, y: 0, widthMm: 150, heightM
 const arcOf = (change: Partial<ArcEnCiel> = {}): ArcEnCiel => ({ ...newArcEnCiel(plain()), imageId: 'disc', xMm: 10, yMm: 10, widthMm: 30, heightMm: 20, ...change })
 const withArc = (change: Partial<ArcEnCiel> = {}): Note & { arcEnCiel: ArcEnCiel } => ({ ...plain(), arcEnCiel: arcOf(change) })
 const lastPaint = () => held.painted.at(-1)!
+const RAD = Math.PI / 180
 const solid: BandShape = { key: 'disc|', edge: { width: 1, height: 1, data: new Float32Array(1), max: 0 } }
-const embossed: BandShape = { ...solid, emboss: { width: 1, height: 1, data: new Float32Array([0.2]), max: 0.2 } }
+// Its outline's map reaching a pixel past an image a pixel across: as far as the box is wide, so the outline reaches 1 mm past it
+const embossed: BandShape = { ...solid, emboss: { width: 3, height: 3, data: new Float32Array(9).fill(0.2), max: 0.2, pad: 1 } }
 
 describe("a NoteView's Arc-en-Ciel", () => {
   it('draws its bands into a canvas of its own in its box, as many pixels as it shows with, and slides them as it tilts', () => {
@@ -123,10 +125,16 @@ describe("a NoteView's Arc-en-Ciel", () => {
       renders++
       return <NoteView note={note} scale={2} live perspective />
     }
-    render(<Counted />)
-    // Its shape's maps are read for the area it embosses, though Point needs none
+    const { container } = render(<Counted />)
+    // Its shape's maps are read for the outline it embosses, though Point needs none
     expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }, arcLight(note.arcEnCiel, { x: 0, y: 0 })))
-    expect(lastPaint().look).toMatchObject({ emboss: embossed.emboss })
+    expect(lastPaint().look).toMatchObject({ emboss: embossed.emboss, outset: 1 })
+    // Its canvas reaches 1 mm past its box all round for the outline, as many pixels as that shows with, and takes no press
+    // of its own: its box does
+    const canvas = container.querySelector<HTMLElement>('[data-arc-en-ciel] canvas')! as HTMLCanvasElement
+    expect([canvas.style.left, canvas.style.top, canvas.style.width, canvas.style.height]).toEqual(['-2px', '-2px', '64px', '44px'])
+    expect([canvas.width, canvas.height]).toEqual([64, 44])
+    expect(canvas.classList.contains('pointer-events-none')).toBe(true)
     const before = renders
     act(() => setTilt({ angle: 10 }))
     expect(lastPaint().look).toMatchObject({ slide: 0, lit: arcLight(note.arcEnCiel, { x: 0, y: 10 }) })
@@ -151,7 +159,7 @@ describe("a NoteView's Arc-en-Ciel", () => {
     expect(container.querySelector('[data-arc-en-ciel], [data-loading]')).toBeNull()
     rerender(<NoteView note={withArc({ flow: 'point' })} scale={1} side="back" />)
     expect(container.querySelector('[data-arc-en-ciel]')).toBeNull()
-    rerender(<NoteView note={withArc({ flow: 'point', axis: 'x' })} scale={1} angle={3} angleX={-ARC_SLIDE_DEG} />)
+    rerender(<NoteView note={withArc({ flow: 'point', angleDeg: -90 })} scale={1} angle={3} angleX={-ARC_SLIDE_DEG} />)
     expect(lastPaint().look).toMatchObject({ slide: -ARC_SLIDE_BANDS })
   })
 })
@@ -226,6 +234,68 @@ describe('the handles where the bands start', () => {
     expect(withBend(arc, { x: 0.25, y: 0.3 }).index).toBe(1)
   })
 
+  it('turn the ridges with a dial over the box, a knob towards each end, in whole degrees and steps of 15° with Shift', () => {
+    const onTurn = vi.fn()
+    const arc = arcOf({ flow: 'edge', xMm: 10, yMm: 10, widthMm: 30, heightMm: 20, angleDeg: 0 })
+    // Not a press on the box, which would move it
+    const outer = vi.fn()
+    const { container, rerender } = render(<div onPointerDown={outer}><RidgeDial arc={arc} scale={2} onTurn={onTurn} /></div>)
+    // Level ridges: a line across the middle of the box, edge to edge, its knobs 0.42 of the box's height either side
+    const line = container.querySelector('[data-ridge-line]')!
+    expect(['x1', 'y1', 'x2', 'y2'].map((name) => Number(line.getAttribute(name)))).toEqual([20, 40, 80, 40])
+    const [right, left] = screen.getAllByRole('button', { name: 'Turn the ridges' })
+    const at = (knob: HTMLElement) => [Number.parseFloat(knob.style.left), Number.parseFloat(knob.style.top)]
+    expect(at(right)[0]).toBeCloseTo(50 + 16.8)
+    expect(at(left)[0]).toBeCloseTo(50 - 16.8)
+    fireEvent.pointerDown(right, { ...press, clientX: 66.8, clientY: 40 })
+    expect(outer).not.toHaveBeenCalled()
+    // Round the middle to up and right: rising to the right at 45°; with Shift, to the nearest 15°
+    fireEvent.pointerMove(right, { clientX: 60, clientY: 30, buttons: 1 })
+    expect(onTurn).toHaveBeenLastCalledWith(45)
+    fireEvent.pointerMove(right, { clientX: 50 + 20 * Math.cos(53 * RAD), clientY: 40 - 20 * Math.sin(53 * RAD), buttons: 1, shiftKey: true })
+    expect(onTurn).toHaveBeenLastCalledWith(60)
+    // On past upright, the same ridges as those at −80°
+    fireEvent.pointerMove(right, { clientX: 50 + 20 * Math.cos(100 * RAD), clientY: 40 - 20 * Math.sin(100 * RAD), buttons: 1 })
+    expect(onTurn).toHaveBeenLastCalledWith(-80)
+    fireEvent.pointerUp(right)
+    // The other knob points the other way round
+    fireEvent.pointerDown(left, { ...press, clientX: 33.2, clientY: 40 })
+    fireEvent.pointerMove(left, { clientX: 40, clientY: 50, buttons: 1 })
+    expect(onTurn).toHaveBeenLastCalledWith(45)
+    fireEvent.pointerUp(left)
+    // A cancelled drag puts the ridges back
+    fireEvent.pointerDown(right, { ...press, clientX: 66.8, clientY: 40 })
+    fireEvent.pointerMove(right, { clientX: 60, clientY: 30, buttons: 1 })
+    fireEvent.pointerCancel(right)
+    expect(onTurn).toHaveBeenLastCalledWith(0)
+    // Arrow keys turn them a degree, 15° with Shift, on past upright too
+    fireEvent.keyDown(right, { key: 'ArrowUp' })
+    expect(onTurn).toHaveBeenLastCalledWith(1)
+    fireEvent.keyDown(right, { key: 'ArrowLeft', shiftKey: true })
+    expect(onTurn).toHaveBeenLastCalledWith(-15)
+    rerender(<div onPointerDown={outer}><RidgeDial arc={{ ...arc, angleDeg: 87 }} scale={2} onTurn={onTurn} /></div>)
+    fireEvent.keyDown(right, { key: 'ArrowRight', shiftKey: true })
+    expect(onTurn).toHaveBeenLastCalledWith(90)
+    rerender(<div onPointerDown={outer}><RidgeDial arc={{ ...arc, angleDeg: 90 }} scale={2} onTurn={onTurn} /></div>)
+    fireEvent.keyDown(right, { key: 'ArrowUp' })
+    expect(onTurn).toHaveBeenLastCalledWith(-89)
+    // Upright: the line runs top to bottom of the box, its knob turned across it
+    expect(['x1', 'y1', 'x2', 'y2'].map((name) => Math.round(Number(container.querySelector('[data-ridge-line]')!.getAttribute(name))))).toEqual([50, 60, 50, 20])
+    expect(right.style.transform).toContain('rotate(-90deg)')
+  })
+
+  it('turn the ridges the way the pointer goes on screen on a rotated banknote', () => {
+    const onTurn = vi.fn()
+    const arc = arcOf({ flow: 'point', xMm: 10, yMm: 10, widthMm: 30, heightMm: 20, angleDeg: 0 })
+    render(<RidgeDial arc={arc} scale={2} quarter={1} onTurn={onTurn} />)
+    const [right] = screen.getAllByRole('button', { name: 'Turn the ridges' })
+    // Turned a quarter clockwise, the knob at the banknote's right shows below its middle
+    fireEvent.pointerDown(right, { ...press, clientX: -40, clientY: 66.8 })
+    // Right of that on screen is towards the banknote's top: the ridges rise to the right on it
+    fireEvent.pointerMove(right, { clientX: -30, clientY: 60, buttons: 1 })
+    expect(onTurn).toHaveBeenLastCalledWith(45)
+  })
+
   it('add a point where the placing box is double-clicked, away from its corners', () => {
     const onDoubleClick = vi.fn()
     const note = withArc()
@@ -287,7 +357,7 @@ describe('the Arc-en-Ciel panel', () => {
     held.shape = solid
     show()
     const text = document.body.textContent!
-    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Moves on', 'Realistic'].map((words) => text.indexOf(words))
+    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle', 'Realistic'].map((words) => text.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
   })
@@ -315,6 +385,15 @@ describe('the Arc-en-Ciel panel', () => {
     expect(panel.arc!.colors.slice(0, 3)).toEqual(DEFAULT_ARC.colors)
     again()
     expect(add().hasAttribute('disabled')).toBe(true)
+  })
+
+  it('sets the ridges’ angle in degrees, from −90° to 90°', () => {
+    show({ flow: 'point' })
+    const field = within(screen.getByTitle(/The ridges' angle/)).getByRole('spinbutton')
+    fireEvent.change(field, { target: { value: '30' } })
+    expect(panel.arc!.angleDeg).toBe(30)
+    fireEvent.change(field, { target: { value: '-90' } })
+    expect(panel.arc!.angleDeg).toBe(-90)
   })
 
   it('ends with Realistic, saved only when on', async () => {

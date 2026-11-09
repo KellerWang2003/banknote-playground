@@ -13,7 +13,7 @@ import type { Frame, MagneticInk, Note } from '../lib/types'
 import { paintRelief, reliefPixels, useRelief } from '../lib/relief'
 import { useInkMask } from '../lib/inkMask'
 import { bandsAvailable, litInkAvailable, paintLitInk } from '../lib/inkRenderer'
-import { bandLook, fromShape, needsShape, paintArcEnCiel, useBandShape } from '../lib/bandMap'
+import { bandLook, embossOutset, fromShape, needsShape, paintArcEnCiel, useBandShape } from '../lib/bandMap'
 import { arcLight } from '../lib/arcEnCiel'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
@@ -356,12 +356,16 @@ export function NoteView({
     }
   }
   // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) or Realistic's
-  // embossed area its maps; drawn into a canvas of its own in its box, as many pixels as it shows with, again only when its
-  // bands move, or with Realistic on its ridges turn from the lamp (where the browser can draw them: WebGL)
+  // embossed outline its maps; drawn into a canvas of its own in its box, as many pixels as it shows with, again only when
+  // its bands move, or with Realistic on its ridges turn from the lamp (where the browser can draw them: WebGL), the canvas
+  // then reaching past the box all round for the outline
   const arcMask = useInkMask(arcEnCiel, arcEnCiel && devicePx(Math.max(arcEnCiel.widthMm, arcEnCiel.heightMm) * scale))
   const arcShape = useBandShape(arcEnCiel && needsShape(arcEnCiel) ? arcEnCiel : undefined)
   const arcLit = arcEnCiel?.realistic === true && bandsAvailable()
-  const arcPx = arcEnCiel ? inkPixels(arcEnCiel.widthMm * scale, arcEnCiel.heightMm * scale, devicePx(1)) : undefined
+  const arcOutset = arcEnCiel && arcLit ? embossOutset(arcEnCiel, arcShape?.emboss) : 0
+  const arcPx = arcEnCiel
+    ? inkPixels((arcEnCiel.widthMm + 2 * arcOutset) * scale, (arcEnCiel.heightMm + 2 * arcOutset) * scale, devicePx(1))
+    : undefined
   const arcCanvas = useRef<HTMLCanvasElement>(null)
   const paintArc = (tilt: Tilt2, view: Tilt2, quarter: Quarter) => {
     const canvas = arcCanvas.current
@@ -480,7 +484,8 @@ export function NoteView({
         // drawn whole on the GPU through its shape's mask (inkRenderer.ts), sliding as the note tilts. Like the other placed
         // layers it takes a press anywhere in its box, to drag it
         <div data-arc-en-ciel={note.id} data-placed="arcEnCiel" className={cn('absolute', live ? 'cursor-move' : 'pointer-events-none')} style={arcBox}>
-          <canvas ref={arcCanvas} width={arcPx.width} height={arcPx.height} className="absolute inset-0 size-full" />
+          <canvas ref={arcCanvas} width={arcPx.width} height={arcPx.height} className="pointer-events-none absolute"
+            style={{ left: -mm(arcOutset), top: -mm(arcOutset), width: mm(arcEnCiel.widthMm + 2 * arcOutset), height: mm(arcEnCiel.heightMm + 2 * arcOutset) }} />
         </div>
       )}
 

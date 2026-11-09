@@ -246,11 +246,16 @@ export interface ArcEnCiel {
   colors: string[]
   /** How wide one colour band is, mm */
   bandMm: number
-  /** The tilt that slides the bands: up/down (level ridges) or side to side (upright ones) */
-  axis: 'y' | 'x'
   /**
-   * Drawn as embossed ridges lit by magnetic ink's lamp (arcEnCiel.ts): two colours to a ridge, the slopes facing the eye
-   * winning as it tilts, and the paper round the print embossed too. Saved only when on
+   * The ridges' angle from the banknote's horizontal, degrees, −90 to 90, rising to the right as it grows: the tilt across
+   * them slides the bands, so level ridges (0) answer tipping the top away, upright ones (90) turning a side away, and any
+   * between both (Keller, 9 November, in place of Moves on's ↕ or ↔)
+   */
+  angleDeg: number
+  /**
+   * Drawn as embossed ridges lit by magnetic ink's lamp (arcEnCiel.ts), printed as Oberthur's is: every ridge carries all
+   * the colours as fine lines, so flat the design nearly hides and tilting brings it out, and the paper round the print is
+   * embossed too. Saved only when on
    */
   realistic?: boolean
 }

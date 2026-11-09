@@ -478,8 +478,11 @@ export function drawArc(
   const light = arc.realistic && lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter) : undefined
   const look = bandLook(arc, assets.shape, tilt, light)
   if (!look) return
-  const size = { width: Math.max(1, Math.round(mm(arc.widthMm))), height: Math.max(1, Math.round(mm(arc.heightMm))) }
-  drawArcEnCiel(ctx, { x: mm(arc.xMm), y: mm(arc.yMm), width: mm(arc.widthMm), height: mm(arc.heightMm) }, assets.mask.canvas, look, size)
+  // Realistic's embossed outline reaches past the box all round
+  const o = look.outset ?? 0
+  const dest = { x: mm(arc.xMm - o), y: mm(arc.yMm - o), width: mm(arc.widthMm + 2 * o), height: mm(arc.heightMm + 2 * o) }
+  const size = { width: Math.max(1, Math.round(dest.width)), height: Math.max(1, Math.round(dest.height)) }
+  drawArcEnCiel(ctx, dest, assets.mask.canvas, look, size)
 }
 
 /** The frame-number pill NoteView shows in the middle of the thread when the # toggle is on */

@@ -24,7 +24,7 @@ import { type Quarter, ROTATE_SECONDS, noteBox, onItsSide, quarterOf, turnedCorn
 import { setTilt, showsBack, springToFlat, useTilt, useTiltLoop } from '../tilt/tilt'
 import { EdgeMarks, NeighbourRing } from './ContinuousView'
 import { addImageFrames, type NoteRef } from './frameActions'
-import { ArcHandles } from './ArcHandles'
+import { ArcHandles, RidgeDial } from './ArcHandles'
 import { placeLayer, type Layer, updateArcEnCiel } from './layerActions'
 import { PlacingBox } from './PlacingBox'
 import { spacePanned, useSpaceHand } from './spaceHand'
@@ -690,7 +690,11 @@ export function Canvas({
                         ? (at) => updateArcEnCiel(ref, (a) => withPoint(a, mmSpot([at.xMm - a.xMm, at.yMm - a.yMm], a)))
                         : undefined} />
                   )}
-                  {/* Where Arc-en-Ciel's bands start from points or a line, placed with handles over its box */}
+                  {/* Arc-en-Ciel's ridges, turned with a dial over its box, and where its bands start from points or a line,
+                      placed with handles over it */}
+                  {placingThis === 'arcEnCiel' && arc && !back && (
+                    <RidgeDial arc={arc} scale={scale} quarter={quarter} onTurn={(angleDeg) => updateArcEnCiel(ref, (a) => ({ ...a, angleDeg }))} />
+                  )}
                   {placingThis === 'arcEnCiel' && arc && !back && (arc.flow === 'point' || arc.flow === 'line') && (
                     <ArcHandles arc={arc} scale={scale} quarter={quarter} onChange={(next) => updateArcEnCiel(ref, () => next)} />
                   )}

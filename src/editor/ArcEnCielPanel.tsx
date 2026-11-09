@@ -1,7 +1,7 @@
-import { MoveHorizontal, MoveVertical, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Group, IconButton, Labeled, LengthField, Section, Segmented, SwitchField } from '../components/controls'
-import { ARC_BAND, ARC_COLOURS, DEFAULT_ARC } from '../lib/arcEnCiel'
+import { Group, IconButton, Labeled, LengthField, ScrubField, Section, SwitchField } from '../components/controls'
+import { ARC_ANGLE, ARC_BAND, ARC_COLOURS, DEFAULT_ARC, ridgeAngle } from '../lib/arcEnCiel'
 import { useBandShape } from '../lib/bandMap'
 import { beginHistoryGroup, endHistoryGroup } from '../lib/history'
 import type { ArcEnCiel, ArcFlow, Note } from '../lib/types'
@@ -46,9 +46,9 @@ function FlowPicker({ value, holes, onChange }: { value: ArcFlow; holes: boolean
 /**
  * Right, under the Arc-en-Ciel tab: the selected banknote's Arc-en-Ciel, in the order Keller asked for (8 November): where
  * it sits, then its image, whose shape takes the bands (whatever stands out from its background), or the bands go round it
- * with Invert, then the bands: where they start, their colours in order, how wide each is, and the tilt that slides them,
- * and last Realistic, which draws the embossed ridges themselves in the lamp's light. Points and Line are placed on the
- * canvas (ArcHandles.tsx). Removing it is beside the tabs.
+ * with Invert, then the bands: where they start, their colours in order, how wide each is, and the ridges' angle, the tilt
+ * across them sliding the bands, and last Realistic, which draws the embossed ridges themselves in the lamp's light. Points,
+ * Line and the ridges' angle are placed on the canvas too (ArcHandles.tsx). Removing it is beside the tabs.
  */
 export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
   note: Note
@@ -105,16 +105,12 @@ export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
             <LengthField label="B" title="How wide one colour band is" value={arc.bandMm} min={ARC_BAND.min} max={ARC_BAND.max} step={ARC_BAND.step}
               onChange={(bandMm) => change((a) => ({ ...a, bandMm }))} />
           </Labeled>
-          <Labeled label="Moves on">
-            <Segmented value={arc.axis}
-              options={[
-                { value: 'y', label: <MoveVertical className="size-3.5" aria-label="Up/down" /> },
-                { value: 'x', label: <MoveHorizontal className="size-3.5" aria-label="Side to side" /> },
-              ]}
-              onChange={(axis) => change((a) => ({ ...a, axis }))} />
+          <Labeled label="Ridge angle">
+            <ScrubField label="∠" title="The ridges' angle from the banknote's horizontal: tilting across them slides the bands" value={arc.angleDeg}
+              min={ARC_ANGLE.min} max={ARC_ANGLE.max} unit="°" onChange={(angleDeg) => change((a) => ({ ...a, angleDeg: ridgeAngle(angleDeg) }))} />
           </Labeled>
         </div>
-        <SwitchField label="Realistic" title="Drawn as embossed ridges in the lamp's light: two colours to a ridge, and the slopes facing you win"
+        <SwitchField label="Realistic" title="Drawn as embossed ridges in the lamp's light, each printed with every colour: flat hides the design, tilting brings it out"
           checked={arc.realistic === true} onChange={(on) => change((a) => ({ ...a, realistic: on }))} />
       </Section>
     </Group>

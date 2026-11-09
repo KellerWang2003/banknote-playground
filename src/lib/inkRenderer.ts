@@ -1,6 +1,6 @@
 import {
-  ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_MEAN_LIGHT, ARC_PAPER, ARC_POINTS, ARC_PRINT, ARC_RIDGE_FADE, ARC_RIDGE_MM, ARC_RIDGE_SAMPLES,
-  ARC_RIDGE_SLOPE_DEG, ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
+  ARC_EMBOSS_MM, ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_MEAN_LIGHT, ARC_PAPER, ARC_POINTS, ARC_PRINT, ARC_RIDGE_FADE, ARC_RIDGE_MM,
+  ARC_RIDGE_SAMPLES, ARC_RIDGE_SLOPE_DEG, ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
 } from './arcEnCiel'
 import type { BandField, BandLook } from './bandMap'
 import {
@@ -115,9 +115,10 @@ const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
 // Every pixel of Arc-en-Ciel's box: how far it is from where the bands start (from the map, the nearest point, or Line),
 // slid along by the tilt, gives its place among the bands and so its colour, through the shape's mask. The same sums as
 // bandMap.ts's, which draws it without the GPU. With Realistic on (uLit), the ridges instead: each spot across a ridge on
-// the slope the eye sees there, in the colour printed where it sees the paper, lit by the lamp, and the paper embossed
-// round the shape lit the same way over whatever is printed beneath (arcEnCiel.ts's `arcLight` and `ARC_PRINT`). The
-// print's finest unevenness needs high precision, and is left out without it
+// the slope the eye sees there, in the line of colour printed where it sees the paper (every ridge carries them all, as
+// Oberthur's brochure shows), lit by the lamp, and the paper embossed round the shape lit the same way over whatever is
+// printed beneath (arcEnCiel.ts's `arcLight` and `ARC_PRINT`). The print's finest unevenness needs high precision, and is
+// left out without it
 const RAD = Math.PI / 180
 const [PAPER_R, PAPER_G, PAPER_B] = ARC_PAPER.map(glsl)
 const BANDS_FRAGMENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -146,6 +147,8 @@ uniform int uLit;
 uniform sampler2D uEmboss;
 uniform vec2 uEmbossSize;
 uniform float uEmbossMax;
+uniform float uEmbossPad;
+uniform float uOutset;
 uniform float uRidge;
 uniform vec2 uAcross;
 uniform float uShare;
@@ -228,6 +231,38 @@ vec3 colourAt(float i) {
   return uColours[3];
 }
 vec3 nextColour(float i) { return colourAt(i + 1.0 < float(uColourCount) ? i + 1.0 : 0.0); }
+vec3 prevColour(float i) { return colourAt(i > 0.5 ? i - 1.0 : float(uColourCount) - 1.0); }
+// Realistic's print, as Oberthur's brochure shows it: line \`floor(t)\` of the colours, in order and round again, each
+// line's edges spread into its neighbours' over \`soft\` of a line
+vec3 screenAt(float t, float soft) {
+  float n = float(uColourCount);
+  float f = t - n * floor(t / n);
+  float i = min(floor(f), n - 1.0);
+  float x = f - i;
+  float up = 0.5 * smoothstep(1.0 - soft, 1.0, x);
+  float down = 0.5 - 0.5 * smoothstep(0.0, soft, x);
+  return colourAt(i) * (1.0 - up - down) + nextColour(i) * up + prevColour(i) * down;
+}
+// The lines' colours from line 0 to \`t\`, added up
+vec3 screenSum(float t) {
+  float n = float(uColourCount);
+  float rounds = floor(t / n);
+  float f = t - n * rounds;
+  vec3 all = vec3(0.0);
+  vec3 part = vec3(0.0);
+  for (int j = 0; j < 4; j++) {
+    if (j >= uColourCount) break;
+    all += uColours[j];
+    part += uColours[j] * clamp(f - float(j), 0.0, 1.0);
+  }
+  return rounds * all + part;
+}
+// The lines' average colour from line \`start\`, \`count\` lines on
+vec3 screenMean(float start, float count) {
+  float n = float(uColourCount);
+  float a = start - n * floor(start / n);
+  return (screenSum(a + count) - screenSum(a)) / count;
+}
 // Which band a spot that many bands from where they start falls in, and how far it has blended into the next
 float bandAt(float phase, out float blend) {
   float n = float(uColourCount);
@@ -268,16 +303,23 @@ vec2 paperAt(float light, float sheen) {
 }
 
 void main() {
-  float m = texture2D(uMask, vUv).a;
-  // How far inside the embossed area, up to a pixel
-  float e = uLit == 1 ? clamp(fieldAt(uEmboss, uEmbossSize, uEmbossMax, vUv) * uBox.x / uPixel, 0.0, 1.0) : 0.0;
+  // Where on the box, as the drawing reaches uOutset mm past it all round for the embossed outline
+  vec2 uv = (vUv * (uBox + 2.0 * uOutset) - uOutset) / uBox;
+  float m = uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0 ? texture2D(uMask, uv).a : 0.0;
+  // How far inside the embossed outline, ARC_EMBOSS_MM round the shape, up to a pixel
+  float e = 0.0;
+  if (uLit == 1 && uEmbossMax > 0.0) {
+    vec2 inner = uEmbossSize - 2.0 * uEmbossPad;
+    float apart = fieldAt(uEmboss, uEmbossSize, uEmbossMax, (uv * inner + uEmbossPad) / uEmbossSize) * uBox.x;
+    e = clamp((${glsl(ARC_EMBOSS_MM)} - apart) / uPixel, 0.0, 1.0);
+  }
   if (m < 0.002 && e < 0.002) { gl_FragColor = vec4(0.0); return; }
-  vec2 p = vUv * uBox;
+  vec2 p = uv * uBox;
   float d = 0.0;
   // Point's and Line's unit step on through the bands
   vec2 away = vec2(0.0);
   if (m >= 0.002) {
-    if (uFrom == 0) d = fieldAt(uMap, uMapSize, uMapMax, vUv) * uBox.x;
+    if (uFrom == 0) d = fieldAt(uMap, uMapSize, uMapMax, uv) * uBox.x;
     else if (uFrom == 1) d = pointsAt(p, away);
     else d = lineAt(p, away);
   }
@@ -300,15 +342,11 @@ void main() {
     + ${glsl(ARC_PRINT.ragged.mm)} / uRidge * FINE_NOISE * showing(${glsl(ARC_PRINT.ragged.scale)}) * paperNoise(p, ${glsl(ARC_PRINT.ragged.scale)}, 7.0);
   float thin = ${glsl(ARC_PRINT.uneven.amount)} * (0.5 + 0.35 * paperNoise(p, ${glsl(ARC_PRINT.uneven.scales[0])}, 8.0)
     + 0.15 * FINE_NOISE * showing(${glsl(ARC_PRINT.uneven.scales[1])}) * paperNoise(p, ${glsl(ARC_PRINT.uneven.scales[1])}, 9.0));
-  // Each ridge: the slope facing away from uAcross carries the band half a band on, the other the band half a band back,
-  // each colour running into the next through its blend
+  // Every ridge carries all the colours as fine lines, one each, in order across it, the design moving them on a line for
+  // every band it moves on; each line spreads a little into the next
+  float inks = float(uColourCount);
   float phase = d / uBand;
-  float riseBlend;
-  float fallBlend;
-  float rise = bandAt(phase + 0.5, riseBlend);
-  float fall = bandAt(phase - 0.5, fallBlend);
-  vec3 riseColour = mix(printed(mix(colourAt(rise), nextColour(rise), riseBlend), thin), uAverage, blur);
-  vec3 fallColour = mix(printed(mix(colourAt(fall), nextColour(fall), fallBlend), thin), uAverage, blur);
+  float soft = ${glsl(ARC_PRINT.spread)} * inks / uRidge;
   // How much of each ridge the first slope shows on screen, and how wide a pixel is, in ridges
   float c = 0.5 - 0.5 * uShare;
   float w = uPixel / uRidge;
@@ -317,7 +355,7 @@ void main() {
   float rate = dot(away, uAcross);
   if (uFrom == 0) {
     vec2 h = 0.25 * uRidge * uAcross / uBox;
-    rate = (fieldAt(uMap, uMapSize, uMapMax, vUv + h) - fieldAt(uMap, uMapSize, uMapMax, vUv - h)) * uBox.x / (0.5 * uRidge);
+    rate = (fieldAt(uMap, uMapSize, uMapMax, uv + h) - fieldAt(uMap, uMapSize, uMapMax, uv - h)) * uBox.x / (0.5 * uRidge);
   }
   rate = clamp(rate, -1.0, 1.0);
   float fine = smoothstep(${glsl(ARC_RIDGE_FADE.from)}, ${glsl(ARC_RIDGE_FADE.to)}, w);
@@ -342,18 +380,10 @@ void main() {
       float shade = (${glsl(ARC_LIGHT.room)} + ${glsl(ARC_LIGHT.lamp)} * lamp) / ${glsl(ARC_MEAN_LIGHT)}
         * (1.0 - ${glsl(ARC_GROOVE.dark)} * exp(-groove * groove));
       float sheen = ${glsl(ARC_SHEEN.strength)} * pow(max(dot(n, uHalf), 0.0), ${glsl(ARC_SHEEN.power)});
-      // The print where this spot sees the paper: which slope's colours by where on the ridge the print lands, a little out
-      // of register, the two spreading into each other where they meet
+      // The print where this spot sees the paper: the line there, by where on the ridge the print lands, a little out of
+      // register, and where the design has moved the lines to
       float here = (d + rate * (s + at - q) * uRidge) / uBand;
-      float onBlend;
-      float on = bandAt(here + 0.5, onBlend);
-      float backBlend;
-      float back = bandAt(here - 0.5, backBlend);
-      float v = fract(at - misprint);
-      float meet = smoothstep(0.0, ${glsl(ARC_PRINT.spread)}, min(min(v, abs(v - 0.5)), 1.0 - v) * uRidge);
-      float onShare = v < 0.5 ? 0.5 + 0.5 * meet : 0.5 - 0.5 * meet;
-      vec3 colour = mix(mix(colourAt(back), nextColour(back), backBlend), mix(colourAt(on), nextColour(on), onBlend), onShare);
-      colour = mix(printed(colour, thin), uAverage, blur);
+      vec3 colour = mix(printed(screenAt(inks * fract(at - misprint) + here, soft), thin), uAverage, blur);
       float light = shade * (1.0 - sheen);
       ink += colour * light + sheen;
       // Paper is drawn over what is beneath it, so it can darken it but not light it past itself
@@ -362,11 +392,14 @@ void main() {
     ink /= ${glsl(ARC_RIDGE_SAMPLES)};
     paper /= ${glsl(ARC_RIDGE_SAMPLES)};
   }
-  // Ridges too fine to tell apart: each slope's average light over as much of each ridge as it shows, in its own colour
-  // but for the share the print's misregister gives the other one
-  float off = min(2.0 * abs(misprint), 1.0);
-  vec3 inkMean = c * (mix(riseColour, fallColour, off) * uMeans.x + uMeans.y)
-    + (1.0 - c) * (mix(fallColour, riseColour, off) * uMeans.z + uMeans.w);
+  // Ridges too fine to tell apart: each slope's average light over as much of each ridge as it shows, in the average of the
+  // lines printed on it, half of them, as many more or fewer as the design moves on across half a ridge
+  float k = rate * uRidge / uBand;
+  float lines = max(0.5 * (inks + k), 0.05);
+  float start = phase - inks * misprint - 0.25 * k;
+  vec3 firstMean = mix(printed(screenMean(start, lines), thin), uAverage, blur);
+  vec3 secondMean = mix(printed(screenMean(start + 0.5 * inks, lines), thin), uAverage, blur);
+  vec3 inkMean = c * (firstMean * uMeans.x + uMeans.y) + (1.0 - c) * (secondMean * uMeans.z + uMeans.w);
   vec2 paperMean = paperAt(min(c * uMeans.x + (1.0 - c) * uMeans.z, 1.0), c * uMeans.y + (1.0 - c) * uMeans.w);
   ink = mix(ink, inkMean, fine);
   paper = mix(paper, paperMean, fine);
@@ -377,7 +410,7 @@ void main() {
 
 const BAND_UNIFORMS = [
   'uMask', 'uMap', 'uMapSize', 'uMapMax', 'uFrom', 'uBox', 'uSpots', 'uSpotCount', 'uBand', 'uSlide', 'uColours', 'uColourCount', 'uAverage', 'uPixel',
-  'uLit', 'uEmboss', 'uEmbossSize', 'uEmbossMax', 'uRidge', 'uAcross', 'uShare', 'uLamp', 'uHalf', 'uMeans',
+  'uLit', 'uEmboss', 'uEmbossSize', 'uEmbossMax', 'uEmbossPad', 'uOutset', 'uRidge', 'uAcross', 'uShare', 'uLamp', 'uHalf', 'uMeans',
 ] as const
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext
@@ -731,11 +764,15 @@ export function drawBands(
   gl.uniform3fv(u('uColours'), colours)
   gl.uniform1i(u('uColourCount'), Math.min(4, look.colours.length))
   gl.uniform3f(u('uAverage'), ...averageRgb(look.colours))
-  gl.uniform1f(u('uPixel'), look.box[0] / width)
-  // Realistic: the ridges in the lamp's light, and the area embossed round the shape
+  // The drawing reaches past the box all round for the embossed outline
+  const outset = embossed ? look.outset ?? 0 : 0
+  gl.uniform1f(u('uOutset'), outset)
+  gl.uniform1f(u('uPixel'), (look.box[0] + 2 * outset) / width)
+  // Realistic: the ridges in the lamp's light, and the outline embossed round the shape
   gl.uniform1i(u('uLit'), lit ? 1 : 0)
   gl.uniform2f(u('uEmbossSize'), embossed?.width ?? 1, embossed?.height ?? 1)
   gl.uniform1f(u('uEmbossMax'), embossed?.max ?? 0)
+  gl.uniform1f(u('uEmbossPad'), embossed?.pad ?? 0)
   gl.uniform1f(u('uRidge'), ARC_RIDGE_MM)
   gl.uniform2f(u('uAcross'), ...(lit?.across ?? [0, 1]))
   gl.uniform1f(u('uShare'), lit?.share ?? 0)

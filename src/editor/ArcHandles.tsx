@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { type ArcHandle, type MmPoint, canRemove, curvePoints, mmSpot, spotMm, withBend, withLineMoved, withSpot, withoutSpot } from '../lib/arcEnCiel'
+import { type ArcHandle, type MmPoint, canRemove, curvePoints, mmSpot, ridgeAngle, spotMm, withBend, withLineMoved, withSpot, withoutSpot } from '../lib/arcEnCiel'
 import { PLACE_STEP } from '../lib/placed'
 import { type Quarter, unturn, unturnedPoint } from '../lib/rotate'
 import type { ArcEnCiel, BoxSpot } from '../lib/types'
@@ -183,6 +183,123 @@ export function ArcHandles({ arc, scale, quarter = 0, onChange }: {
           />
         )
       })}
+    </div>
+  )
+}
+
+/** Arrow keys turn the ridges a degree, fifteen with Shift, as does a drag on a knob with Shift held */
+const TURN: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }
+const TURN_SNAP = 15
+
+/** The angle, degrees, of a point (dx, dy) px from the middle, on screen's y down: 0 to the right, 90 straight up */
+const angleTo = (dx: number, dy: number) => (Math.atan2(-dy, dx) * 180) / Math.PI
+
+/** A drag on a knob: the ridges' angle it started from, and how far round from it the pointer was then */
+type Turn = { from: number; offset: number }
+
+/**
+ * Canvas-only handle for the ridges' angle (Keller, 9 November: an angle in place of Moves on's up/down or side to side),
+ * over Arc-en-Ciel's placing box while it is placed, whatever its bands start from: a dashed line through the middle of
+ * the box along the ridges, with a knob towards each end. Drag either knob round the middle to turn the ridges, in whole
+ * degrees, or steps of 15° with Shift held; with a knob picked, arrow keys turn them a degree at a time (15° with Shift).
+ * Ridges half a turn round are the same ridges, so the angle stays within ±90° (`ridgeAngle`) and the knob carries on
+ * past upright. On a rotated banknote it turns with it and still follows the pointer on screen.
+ */
+export function RidgeDial({ arc, scale, quarter = 0, onTurn }: {
+  arc: ArcEnCiel
+  scale: number
+  quarter?: Quarter
+  onTurn: (angleDeg: number) => void
+}) {
+  const turn = useRef<Turn | null>(null)
+  const width = arc.widthMm * scale
+  const height = arc.heightMm * scale
+  const middle = { x: arc.xMm * scale + width / 2, y: arc.yMm * scale + height / 2 }
+  const a = (arc.angleDeg * Math.PI) / 180
+  // Along the ridges on screen, y down
+  const along = { x: Math.cos(a), y: -Math.sin(a) }
+  // Edge to edge of the box, and the knobs inside it whatever the angle
+  const reach = Math.min(along.x ? width / 2 / Math.abs(along.x) : Infinity, along.y ? height / 2 / Math.abs(along.y) : Infinity)
+  const knob = 0.42 * Math.min(width, height)
+
+  /** Where the pointer is round the middle, degrees */
+  const pointerAngle = (event: React.PointerEvent<HTMLElement>) => {
+    const banknote = event.currentTarget.closest('[data-ridge-dial]')
+    if (!banknote) return undefined
+    const at = unturnedPoint(event.clientX, event.clientY, banknote.getBoundingClientRect(), quarter)
+    const dx = at.x - middle.x
+    const dy = at.y - middle.y
+    return Math.hypot(dx, dy) < 1 ? undefined : angleTo(dx, dy)
+  }
+  const turnTo = (deg: number, snap: number) => onTurn(ridgeAngle(Math.round(deg / snap) * snap))
+  const finish = (event: React.PointerEvent, cancel = false) => {
+    const t = turn.current
+    if (!t) return
+    event.stopPropagation()
+    turn.current = null
+    if (cancel) onTurn(t.from)
+  }
+
+  return (
+    <div data-placed="arcEnCiel" data-ridge-dial="" className="pointer-events-none absolute inset-0">
+      <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
+        {[{ stroke: 'white', strokeWidth: 3, opacity: 0.7 }, { className: 'stroke-fuchsia-500', strokeWidth: 1.25, strokeDasharray: '5 4' }].map((look, i) => (
+          <line key={i} data-ridge-line={i ? '' : undefined} x1={middle.x - along.x * reach} y1={middle.y - along.y * reach}
+            x2={middle.x + along.x * reach} y2={middle.y + along.y * reach} strokeLinecap="round" {...look} />
+        ))}
+      </svg>
+      {[1, -1].map((end) => (
+        <button
+          key={end}
+          type="button"
+          data-ridge-knob={end > 0 ? 'right' : 'left'}
+          aria-label="Turn the ridges"
+          className="pointer-events-auto absolute z-20 h-3.5 w-2 touch-none cursor-grab rounded-full border-2 border-background bg-fuchsia-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500/50"
+          style={{
+            left: middle.x + along.x * knob * end,
+            top: middle.y + along.y * knob * end,
+            // Across the line, as a slider's thumb sits across its track
+            transform: `translate(-50%, -50%) rotate(${-arc.angleDeg}deg)`,
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            // Not a press on the box, which would move it
+            event.stopPropagation()
+            event.preventDefault()
+            event.currentTarget.focus({ preventScroll: true })
+            const at = pointerAngle(event)
+            if (at === undefined) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            // From the knob pressed, as the far one points the other way
+            turn.current = { from: arc.angleDeg, offset: at - (arc.angleDeg + (end > 0 ? 0 : 180)) }
+          }}
+          onPointerMove={(event) => {
+            const t = turn.current
+            if (!t) return
+            event.stopPropagation()
+            // A release that never reached us: stop following the pointer
+            if (event.buttons === 0) {
+              turn.current = null
+              return
+            }
+            const at = pointerAngle(event)
+            if (at !== undefined) turnTo(at - t.offset - (end > 0 ? 0 : 180), event.shiftKey ? TURN_SNAP : 1)
+          }}
+          onPointerUp={(event) => finish(event)}
+          onPointerCancel={(event) => finish(event, true)}
+          onLostPointerCapture={() => { turn.current = null }}
+          onKeyDown={(event) => {
+            const by = TURN[event.key]
+            if (!by) return
+            event.preventDefault()
+            event.stopPropagation()
+            const step = event.shiftKey ? TURN_SNAP : 1
+            // With Shift, on to the next step of 15° the way pressed
+            const next = event.shiftKey ? (by > 0 ? Math.floor(arc.angleDeg / step) + 1 : Math.ceil(arc.angleDeg / step) - 1) * step : arc.angleDeg + by
+            onTurn(ridgeAngle(next))
+          }}
+        />
+      ))}
     </div>
   )
 }
