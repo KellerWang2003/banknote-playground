@@ -433,7 +433,7 @@ describe('the Arc-en-Ciel panel', () => {
     again()
     const colour = within(screen.getByTitle('The edge\'s colour'))
     expect((colour.getByRole('textbox') as HTMLInputElement).value).toBe('#E5E5E5')
-    fireEvent.change(colour.getByLabelText('Pick colour'), { target: { value: '#c8a24a' } })
+    fireEvent.change(colour.getByRole('textbox'), { target: { value: '#c8a24a' } })
     expect(panel.arc!.edgeColor).toBe('#c8a24a')
     again()
     expect((within(screen.getByTitle('The edge\'s colour')).getByRole('textbox') as HTMLInputElement).value).toBe('#c8a24a')

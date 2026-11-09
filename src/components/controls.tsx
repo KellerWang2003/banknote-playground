@@ -20,6 +20,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { LENGTH_UNITS, formatLength, lengthField, setLengthUnit, useLengthUnit, type LengthUnit } from '../lib/units'
+import { ColorPicker } from './ColorPicker'
 
 // Playground-specific compositions of the shadcn primitives in components/ui
 
@@ -595,18 +596,12 @@ export function CheckboxField({ label, checked, onChange }: { label: ReactNode; 
   )
 }
 
+/** A colour as its hex, typed, with its swatch before it, which opens the app's own picker (`ColorPicker`) */
 export function ColorField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null)
   return (
     <div className="relative min-w-0">
-      <input
-        type="color"
-        aria-label="Pick colour"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        // Outlined faintly, so a white colour still shows on the field's white fill
-        className="absolute top-1/2 left-1.5 size-5 -translate-y-1/2 cursor-pointer rounded-[max(0px,calc(var(--radius)-6px))] border-0 bg-transparent p-0 ring-1 ring-foreground/10 [&::-webkit-color-swatch]:rounded-[inherit] [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
-      />
+      <ColorPicker value={value} onChange={onChange} className="absolute top-1/2 left-1.5 -translate-y-1/2" />
       <Input
         className="h-8 bg-background/90 pl-8 uppercase tabular-nums"
         value={draft ?? value}
