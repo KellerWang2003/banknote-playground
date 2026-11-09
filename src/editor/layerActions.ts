@@ -73,11 +73,14 @@ export async function removeLayer({ projectId, noteId }: NoteRef, layer: PlacedL
   if (old) await removeImage(old)
 }
 
-/** Moves or resizes a layer's box on its banknote, kept on it (the canvas's drags and the placing box); only its box changes */
-export function placeLayer({ projectId, noteId }: NoteRef, layer: PlacedLayer, { xMm, yMm, widthMm, heightMm }: PlacedBox) {
+/**
+ * Moves, resizes or rotates a layer's box on its banknote, kept on it (the canvas's drags and the placing box); only its
+ * box changes. A box that doesn't say how it is rotated keeps the rotation the layer has
+ */
+export function placeLayer({ projectId, noteId }: NoteRef, layer: PlacedLayer, { xMm, yMm, widthMm, heightMm, rotationDeg }: PlacedBox) {
   updateNote(projectId, noteId, (n) => {
     const old = n[layer]
-    return old ? withPlaced(n, layer, fitPlaced(layer, { ...old, xMm, yMm, widthMm, heightMm }, n)) : n
+    return old ? withPlaced(n, layer, fitPlaced(layer, { ...old, xMm, yMm, widthMm, heightMm, rotationDeg: rotationDeg ?? old.rotationDeg }, n)) : n
   })
 }
 

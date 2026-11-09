@@ -2,8 +2,8 @@ import { PAPER } from './back'
 import { clamp } from './frames'
 import { keptName } from './layerName'
 import type { Tilt2 } from './lens'
-import { type Size, fitBox, newBox, withBoxAspect } from './placed'
-import { LAMP_HEIGHT_DEG, tiltMatrix } from './realisticInk'
+import { type Size, fitBox, newBox, rotationOf, withBoxAspect } from './placed'
+import { LAMP_HEIGHT_DEG, tiltMatrix, withBoxRotation } from './realisticInk'
 import { type Quarter, unturn } from './rotate'
 import type { ArcEnCiel, ArcFlow, BoxSpot } from './types'
 
@@ -137,10 +137,10 @@ export const withArcImage = (arc: ArcEnCiel, imageId: string, aspect: number | u
  * How far the bands have slid at a tilt, in bands: none flat, up to ARC_SLIDE_BANDS by ARC_SLIDE_DEG across the ridges,
  * away from where the bands start as the tilt moves the eye across them (`ridgeAcross`: under level ridges as the top
  * tips away, under upright ones at −90° as the right side turns away), back towards it the other way. Tilting along the
- * ridges changes nothing.
+ * ridges changes nothing. Rotated on its banknote, its ridges turn with it, so they lie at their angle plus its rotation.
  */
-export function bandSlide(arc: Pick<ArcEnCiel, 'angleDeg'>, tilt: Tilt2) {
-  const [x, y] = ridgeAcross(arc)
+export function bandSlide(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt: Tilt2) {
+  const [x, y] = ridgeAcross({ angleDeg: arc.angleDeg + rotationOf(arc) })
   // The tilt across the ridges, degrees: the eye moves left on the banknote as its right side turns away, and down it as
   // the top tips away, so level ridges go by the up/down tilt alone and upright ones by the side to side, as Moves on did
   const across = -tilt.x * x + tilt.y * y
@@ -310,11 +310,13 @@ const MEAN_SAMPLES = 64
 /**
  * How to draw Arc-en-Ciel's ridges with its banknote turned through `tilt` (turning over included) and rotated `quarter`
  * quarter turns on screen: how much of each ridge each slope shows, seen from straight in front, and where the lamp is, as
- * they lie on the banknote. The lamp stays where it is as the banknote is rotated, as magnetic ink's does (`inkLight`).
+ * they lie on the banknote, or on Arc-en-Ciel's own box once that is rotated on the banknote (its ridges turn with it).
+ * The lamp stays where it is as the banknote is rotated, as magnetic ink's does (`inkLight`).
  */
-export function arcLight(arc: Pick<ArcEnCiel, 'angleDeg'>, tilt: Tilt2, quarter: Quarter = 0): ArcLight {
-  const m = tiltMatrix(tilt)
-  // From the room onto the banknote: rotated back first, then turned back
+export function arcLight(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt: Tilt2, quarter: Quarter = 0): ArcLight {
+  // The banknote's turn, after the box's own rotation on it
+  const m = withBoxRotation(tiltMatrix(tilt), arc)
+  // From the room onto the banknote, then the box: rotated back first, then turned back
   const onNote = ([x, y, z]: Vec3): Vec3 => {
     const on = unturn(x, y, quarter)
     const v: Vec3 = [on.x, on.y, z]

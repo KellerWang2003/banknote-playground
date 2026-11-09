@@ -17,6 +17,7 @@ import { bandLook, embossOutset, fromShape, needsShape, paintArcEnCiel, useBandS
 import { arcLight } from '../lib/arcEnCiel'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
+import { type PlacedBox, boxTurn } from '../lib/placed'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { hasThread, type PlacedLayer } from '../lib/layers'
 import { framesTiltOf, showsBack, useTilt } from '../tilt/tilt'
@@ -144,8 +145,8 @@ const SHADE_MAX = TILT_LIMIT / SHADE_DEG
 
 type TiltPart = 'shade-up' | 'shade-down' | 'shade-left' | 'shade-right' | 'sheen' | 'blend' | 'watermark' | 'ink-shift' | 'ink-bar'
 
-/** The bar's look on magnetic ink */
-type InkBar = Pick<MagneticInk, 'barAxis' | 'barWidth'>
+/** The bar's look on magnetic ink, and how the ink is rotated on the banknote, which turns the tilt it rolls on */
+type InkBar = Pick<MagneticInk, 'barAxis' | 'barWidth' | 'rotationDeg'>
 
 /**
  * Everything about a tilt that changes continuously: the 3D turn, the light and shade overlays' opacity,
@@ -348,8 +349,8 @@ export function NoteView({
   }, [relief, lightWidth, lightHeight])
   const depth = watermark?.depth ?? 0
   const inkMask = useInkMask(magneticInk, magneticInk && devicePx(Math.max(magneticInk.widthMm, magneticInk.heightMm) * scale))
-  // Only its bar's look changes how it tilts
-  const inkBar: InkBar | undefined = magneticInk && { barAxis: magneticInk.barAxis, barWidth: magneticInk.barWidth }
+  // Only its bar's look, and its rotation on the banknote, change how it tilts
+  const inkBar: InkBar | undefined = magneticInk && { barAxis: magneticInk.barAxis, barWidth: magneticInk.barWidth, rotationDeg: magneticInk.rotationDeg }
   // Realistic, it is lit as metal into a canvas of its own, as many pixels as it shows with, where the browser can (WebGL);
   // elsewhere it keeps its flat look
   const inkLit = realistic && magneticInk !== undefined && litInkAvailable()
@@ -434,9 +435,11 @@ export function NoteView({
   const blends = live ? undefined : blendsAt(note, angle, angleX)
   const still = blends && tiltStyle(angle, angleX, blends[0] ?? 0, depth, revealOf({ angle, angleX, light: 0, turn: 0, frameTilts: {} }), inkBar)
   const part = (name: TiltPart, style: CSSProperties = {}) => ({ 'data-tilt': name, style: { ...style, ...still?.parts[name] } })
-  const placed = (box: { xMm: number; yMm: number; widthMm: number; heightMm: number }): CSSProperties =>
-    ({ left: mm(box.xMm), top: mm(box.yMm), width: mm(box.widthMm), height: mm(box.heightMm) })
-  // Seen from the back, the watermark lies the other way round, at the other side
+  // Its box, turned about its middle as far as it is rotated on the banknote: what it draws turns with it, and takes a
+  // press only within it as it shows
+  const placed = (box: PlacedBox): CSSProperties =>
+    ({ left: mm(box.xMm), top: mm(box.yMm), width: mm(box.widthMm), height: mm(box.heightMm), transform: boxTurn(box) })
+  // Seen from the back, the watermark lies the other way round, at the other side, turned the other way
   const watermarkBox = watermark && placed(back ? mirrored(watermark, note) : watermark)
   const arcBox = arcEnCiel && placed(arcEnCiel)
   // Its shape, or the maps its bands start from, still on their way: a shimmer in its box meanwhile
@@ -480,7 +483,9 @@ export function NoteView({
         // light stays painted: from the back it is the other way round
         <canvas ref={light} data-watermark={note.id} data-placed="watermark" width={lightWidth} height={lightHeight}
           className={cn('absolute', live && depth > 0 ? 'cursor-move' : 'pointer-events-none')}
-          {...part('watermark', back ? { ...watermarkBox, mixBlendMode: 'color-dodge', transform: 'scaleX(-1)' } : { ...watermarkBox, mixBlendMode: 'color-dodge' })} />
+          {...part('watermark', back
+            ? { ...watermarkBox, mixBlendMode: 'color-dodge', transform: [watermarkBox.transform, 'scaleX(-1)'].filter(Boolean).join(' ') }
+            : { ...watermarkBox, mixBlendMode: 'color-dodge' })} />
       )}
 
       {!back && arcBox && arcLoading && <Loading style={arcBox} />}

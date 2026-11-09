@@ -154,6 +154,8 @@ export interface Watermark {
   yMm: number
   widthMm: number
   heightMm: number
+  /** Degrees it is turned about its middle, counterclockwise (placed.ts); absent upright */
+  rotationDeg?: number
   /** How strongly the paper's thickness shows at its clearest (tilted or held to the light), 0 to 1 */
   depth: number
   /** The dark parts of the image are the thinner paper instead of the light ones */
@@ -200,6 +202,8 @@ export interface MagneticInk {
   yMm: number
   widthMm: number
   heightMm: number
+  /** Degrees it is turned about its middle, counterclockwise (placed.ts), its bar turning with it; absent upright */
+  rotationDeg?: number
   /** Ink round the shape instead of in it */
   invert?: boolean
   /** The ink's colour seen flat, #rrggbb */
@@ -237,6 +241,8 @@ export interface ArcEnCiel {
   yMm: number
   widthMm: number
   heightMm: number
+  /** Degrees it is turned about its middle, counterclockwise (placed.ts), its ridges turning with it; absent upright */
+  rotationDeg?: number
   /** Bands round the shape instead of in it */
   invert?: boolean
   /** Where the bands start */

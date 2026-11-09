@@ -1,7 +1,7 @@
 import { clamp } from './frames'
 import type { Tilt2 } from './lens'
 import { INK_ROLL_DEG } from './magneticInk'
-import type { Size } from './placed'
+import { type PlacedBox, type Size, intoBox, outOfBox, rotationOf } from './placed'
 import { type Quarter, unturn } from './rotate'
 import type { MagneticInk } from './types'
 
@@ -76,11 +76,11 @@ export const lampLobe = (barWidth: number) => (barWidth * flakeEdge(barWidth)) /
  * the ink wherever it sits (flat, towards the top, the lamp hanging above; in the middle with the top tipped back by half
  * LAMP_HEIGHT_DEG), and as bright as in the banknote's middle. Square-on flakes would face the eye only nearer the
  * banknote's middle, resting the bar off towards it, and off to its side would mirror the lamp past the eye, leaving the
- * bar only its glow.
+ * bar only its glow. Ink rotated on its banknote is set along its own sides, as its bar turns with it.
  */
-export function flakeRest(ink: Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'barAxis'>, note: Size, eye: number): [number, number] {
-  const x = ink.xMm + ink.widthMm / 2 - note.widthMm / 2
-  const y = ink.yMm + ink.heightMm / 2 - note.heightMm / 2
+export function flakeRest(ink: Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'barAxis' | 'rotationDeg'>, note: Size, eye: number): [number, number] {
+  // Where its middle is from the banknote's, along the ink's own sides
+  const { x, y } = intoBox(ink, ink.xMm + ink.widthMm / 2 - note.widthMm / 2, ink.yMm + ink.heightMm / 2 - note.heightMm / 2)
   const [along, across] = ink.barAxis === 'x' ? [x, y] : [y, x]
   // + 0 turns a negative zero into 0
   return [Math.atan2(-along, eye) + 0, Math.atan2(-across, eye) + 0]
@@ -110,6 +110,20 @@ export function tiltMatrix({ x, y }: Tilt2): number[] {
 /** A matrix in WebGL's column order times a vector */
 export const turned = (m: number[], [x, y, z]: [number, number, number]): [number, number, number] =>
   [m[0] * x + m[3] * y + m[6] * z, m[1] * x + m[4] * y + m[7] * z, m[2] * x + m[5] * y + m[8] * z]
+
+/**
+ * A banknote's turn (`tiltMatrix`) after a box's own rotation on the banknote (placed.ts), in WebGL's column order: it
+ * takes what lies along the box's own sides, its flakes or ridges, onto the banknote first, then turns it with the banknote.
+ * Upright, the turn itself.
+ */
+export function withBoxRotation(m: number[], box: Pick<PlacedBox, 'rotationDeg'>): number[] {
+  if (!rotationOf(box)) return m
+  // The box's own x and y as they lie on the banknote
+  const bx = outOfBox(box, 1, 0)
+  const by = outOfBox(box, 0, 1)
+  const column = (v: { x: number; y: number }) => turned(m, [v.x, v.y, 0])
+  return [...column(bx), ...column(by), m[6], m[7], m[8]]
+}
 
 const linear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
 
@@ -166,12 +180,14 @@ export interface InkLight {
   hue: number
 }
 
-type LitInk = Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'color' | 'tiltedColor' | 'barAxis' | 'barWidth'>
+type LitInk = Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'rotationDeg' | 'color' | 'tiltedColor' | 'barAxis' | 'barWidth'>
 
 /**
  * How to light `ink` on its banknote turned through `tilt` (turning over included), seen from `eye` mm away, as the
  * canvas's perspective sees it, with the banknotes rotated `quarter` quarter turns on screen. The lamp and the room stay
- * where they are as the banknote is rotated, as they would round one turned in the hand.
+ * where they are as the banknote is rotated, as they would round one turned in the hand. Ink rotated on its banknote is
+ * worked out along its own sides, the banknote's turn taking them onto it first (`withBoxRotation`), so its flakes and
+ * bar turn with it: its box is then where it lies along those sides, about the banknote's middle.
  */
 export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quarter: Quarter = 0): InkLight {
   const flat = oklch(ink.color)
@@ -184,9 +200,14 @@ export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quar
     // + 0 turns a −0 into 0
     return [on.x + 0, on.y + 0, z]
   }
+  // Rotated, its top-left corner along its own sides, about the banknote's middle
+  const middle = intoBox(ink, ink.xMm + ink.widthMm / 2 - note.widthMm / 2, ink.yMm + ink.heightMm / 2 - note.heightMm / 2)
+  const origin: [number, number] = rotationOf(ink)
+    ? [middle.x - ink.widthMm / 2, middle.y - ink.heightMm / 2]
+    : [ink.xMm - note.widthMm / 2, ink.yMm - note.heightMm / 2]
   return {
-    rot: tiltMatrix(tilt),
-    origin: [ink.xMm - note.widthMm / 2, ink.yMm - note.heightMm / 2],
+    rot: withBoxRotation(tiltMatrix(tilt), ink),
+    origin,
     size: [ink.widthMm, ink.heightMm],
     eye,
     axis: ink.barAxis === 'x' ? [1, 0] : [0, 1],

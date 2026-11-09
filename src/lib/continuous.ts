@@ -4,6 +4,7 @@ import { PAPER, mirrored, type Side } from './back'
 import { clamp } from './frames'
 import { loadImageUrl } from './images'
 import { pictureOf, type Picture } from './imageWork'
+import { type PlacedBox, boxBounds, pointInBox, rotationOf } from './placed'
 import { levelsCurve, type Reading } from './relief'
 import { fitSections, threadLength } from './thread'
 import type { ContinuousDesign, Note, Watermark } from './types'
@@ -396,10 +397,21 @@ export function watermarkWeight(watermark: Watermark, reading: Reading | undefin
   const curve = levelsCurve(watermark.levels ?? reading.auto)
   const table = Float32Array.from({ length: 256 }, (_, v) => curve(v / 255))
   return (xMm: number, yMm: number) => {
-    const across = Math.floor(((xMm - watermark.xMm) / watermark.widthMm) * reading.width)
+    // Rotated, the point as it lies on the watermark before it turned
+    const at = pointInBox(watermark, xMm, yMm)
+    const across = Math.floor(((at.xMm - watermark.xMm) / watermark.widthMm) * reading.width)
     const u = mirror ? reading.width - 1 - across : across
-    const v = Math.floor(((yMm - watermark.yMm) / watermark.heightMm) * reading.height)
+    const v = Math.floor(((at.yMm - watermark.yMm) / watermark.heightMm) * reading.height)
     return u < 0 || v < 0 || u >= reading.width || v >= reading.height ? 0 : table[reading.thin[v * reading.width + u]]
+  }
+}
+
+/** A rotated box's own shape on the banknote, for what reads under it: 1 within it as it turned, 0 past it; nothing upright */
+const withinTurned = (box: PlacedBox) => {
+  if (!rotationOf(box)) return undefined
+  return (xMm: number, yMm: number) => {
+    const at = pointInBox(box, xMm, yMm)
+    return at.xMm >= box.xMm && at.xMm < box.xMm + box.widthMm && at.yMm >= box.yMm && at.yMm < box.yMm + box.heightMm ? 1 : 0
   }
 }
 
@@ -465,12 +477,13 @@ export function designChecks(note: Note, design: DesignPixels, reading: Reading 
     // It shows through to the back, where it lies the other way round
     const back = side === 'back'
     const watermark = back ? mirrored(note.watermark, note) : note.watermark
-    const box = { x: watermark.xMm, y: watermark.yMm, width: watermark.widthMm, height: watermark.heightMm }
+    // All it covers, rotated or not, read within its own shape
+    const box = boxBounds(watermark)
     checks.push({
       id: 'watermark',
       title: 'Watermark on light paper',
       explain: `The design under the watermark is light (L* ${LIGHT_L} or more), as the brief asks, so it shows held to the light`,
-      issues: lightIssues(paperLight(design, [box], [], watermarkWeight(watermark, reading, back)), (share) => `${share} of it is over darker print`),
+      issues: lightIssues(paperLight(design, [box], [], watermarkWeight(watermark, reading, back) ?? withinTurned(watermark)), (share) => `${share} of it is over darker print`),
     })
   }
   // Nothing round a thread the side doesn't have

@@ -37,9 +37,14 @@ export const PAPER = '#E5E5E5'
 /** The back as saved, or on a banknote whose back was never set, plain paper */
 export const backOf = (note: Pick<Note, 'back' | 'color'>): NoteBack => note.back ?? { background: 'solid', color: note.color }
 
-/** Where a box on the banknote lies seen from its back: left and right swap, as the banknote turns over side to side */
-export const mirrored = <T extends { xMm: number; widthMm: number }>(box: T, note: Pick<Note, 'widthMm'>): T =>
-  ({ ...box, xMm: note.widthMm - box.xMm - box.widthMm })
+/**
+ * Where a box on the banknote lies seen from its back: left and right swap, as the banknote turns over side to side, and
+ * one rotated turns the other way round there
+ */
+export const mirrored = <T extends { xMm: number; widthMm: number; rotationDeg?: number }>(box: T, note: Pick<Note, 'widthMm'>): T => {
+  const flipped = { ...box, xMm: note.widthMm - box.xMm - box.widthMm }
+  return box.rotationDeg ? { ...flipped, rotationDeg: -box.rotationDeg } : flipped
+}
 
 /**
  * The banknote with one side's background in its own fields (`background`, `color`, `faceImageId`), for what reads the

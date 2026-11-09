@@ -2,7 +2,7 @@ import { clamp } from './frames'
 import { keptName } from './layerName'
 import type { Tilt2 } from './lens'
 import { offAxisDeg } from './light'
-import { type Size, fitBox, newBox, withBoxAspect } from './placed'
+import { type Size, fitBox, newBox, outOfBox, withBoxAspect } from './placed'
 import type { MagneticInk } from './types'
 
 /**
@@ -68,10 +68,16 @@ export const inkShift = (tilt: Tilt2) => smooth(clamp(offAxisDeg(tilt) / INK_SHI
 /**
  * How far the bar has rolled, −1 to 1: 0 flat, its middle in the middle of the shape; ±1 from INK_ROLL_DEG on its axis,
  * right off the shape's edge. It rolls towards the edge coming nearer, as the thread's sheen slides: tilting the top
- * away rolls a level bar down, turning the right side away rolls an upright bar left.
+ * away rolls a level bar down, turning the right side away rolls an upright bar left. On ink rotated on its banknote the
+ * bar turns with it, and rolls on the tilt across it there: rotated a quarter turn, a level bar rolls as an upright one.
  */
-export const inkRoll = (ink: Pick<MagneticInk, 'barAxis'>, tilt: Tilt2) =>
-  clamp((ink.barAxis === 'x' ? -tilt.x : tilt.y) / INK_ROLL_DEG, -1, 1) || 0
+export function inkRoll(ink: Pick<MagneticInk, 'barAxis' | 'rotationDeg'>, tilt: Tilt2) {
+  // Which way the bar rolls on the banknote (x right, y down): down the ink for a level bar, right for an upright one,
+  // turned counterclockwise with the ink
+  const across = outOfBox(ink, ink.barAxis === 'x' ? 1 : 0, ink.barAxis === 'x' ? 0 : 1)
+  // The eye moves left on the banknote as its right side turns away, and down it as the top tips away
+  return clamp((-tilt.x * across.x + tilt.y * across.y) / INK_ROLL_DEG, -1, 1) || 0
+}
 
 /** Where the middle of the bar is at a roll, as a share of the shape the way it rolls (down, or right): halfway flat, half a bar beyond the edge at ±1 */
 export const barCentre = (ink: Pick<MagneticInk, 'barWidth'>, roll: number) => 0.5 + (roll * (1 + ink.barWidth)) / 2

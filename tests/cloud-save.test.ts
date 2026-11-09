@@ -22,7 +22,7 @@ vi.mock('../src/cloud/client', () => ({
   },
 }))
 
-/** A banknote using everything added since the first cloud saves: frame fills, a watermark, the continuous check, thread sections, a back */
+/** A banknote using everything added since the first cloud saves: frame fills, a rotated watermark, the continuous check, thread sections, a back */
 function everything(): Note {
   const note = createNote({ name: 'Banknote', x: 0, y: 0, widthMm: 134, heightMm: 68, color: '#DBECC6' })
   const [empty, colour] = note.frames
@@ -33,7 +33,7 @@ function everything(): Note {
     faceImageId: crypto.randomUUID(),
     thread: { ...note.thread, widthMm: 5.5, backgroundColor: '#112233', windows: { enabled: true, sections: [{ id: 'w1', startMm: 5, endMm: 17 }, { id: 'w2', startMm: 24, endMm: 62 }] } },
     frames: [{ ...empty, kind: 'none' }, { ...colour, color: '#C2456B' }, image],
-    watermark: { imageId: crypto.randomUUID(), xMm: 12.3, yMm: 4.5, widthMm: 20, heightMm: 30, depth: 0.4, invert: true, levels: { low: 0.1, high: 0.8, gamma: 1.6 } },
+    watermark: { imageId: crypto.randomUUID(), xMm: 12.3, yMm: 4.5, widthMm: 20, heightMm: 30, rotationDeg: -12.5, depth: 0.4, invert: true, levels: { low: 0.1, high: 0.8, gamma: 1.6 } },
     continuous: { cutMm: 0.7 },
     back: { background: 'image', color: '#F0EAD6', imageId: crypto.randomUUID() },
     pattern: {

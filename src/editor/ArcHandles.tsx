@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { type ArcHandle, type MmPoint, canRemove, curvePoints, mmSpot, ridgeAngle, spotMm, withBend, withLineMoved, withSpot, withoutSpot } from '../lib/arcEnCiel'
-import { PLACE_STEP } from '../lib/placed'
+import { PLACE_STEP, boxTurn, intoBox, pointInBox } from '../lib/placed'
 import { type Quarter, unturn, unturnedPoint } from '../lib/rotate'
 import type { ArcEnCiel, BoxSpot } from '../lib/types'
 
@@ -13,10 +13,32 @@ type Gesture =
   | { kind: 'dot'; handle: ArcHandle; startX: number; startY: number; from: MmPoint }
   | { kind: 'line'; startX: number; startY: number; from: BoxSpot[]; moved: boolean }
 
-/** A dot's place in px on the banknote */
+/** A dot's place in px on the banknote, as on Arc-en-Ciel's box before it turned (its handles turn with it, `Turned`) */
 const dotAt = (arc: ArcEnCiel, spot: BoxSpot, scale: number): MmPoint => {
   const [x, y] = spotMm(spot, arc)
   return [(arc.xMm + x) * scale, (arc.yMm + y) * scale]
+}
+
+/**
+ * The handles over Arc-en-Ciel's box, laid out as on the box before it turned and turned with it about its middle, as
+ * far as it is rotated on the banknote
+ */
+function Turned({ arc, scale, children }: { arc: ArcEnCiel; scale: number; children: React.ReactNode }) {
+  const transform = boxTurn(arc)
+  if (!transform) return children
+  const origin = `${(arc.xMm + arc.widthMm / 2) * scale}px ${(arc.yMm + arc.heightMm / 2) * scale}px`
+  return <div className="pointer-events-none absolute inset-0" style={{ transform, transformOrigin: origin }}>{children}</div>
+}
+
+/**
+ * Where a point on screen lies on the banknote, px, as on Arc-en-Ciel's box before it turned: on the banknote as it lies
+ * before it was turned (`unturnedPoint`, round `banknote`, the handles' own box over it), then turned back about the
+ * box's middle
+ */
+function onBox(arc: ArcEnCiel, scale: number, clientX: number, clientY: number, banknote: Element, quarter: Quarter) {
+  const at = unturnedPoint(clientX, clientY, banknote.getBoundingClientRect(), quarter)
+  const inBox = pointInBox(arc, at.x / scale, at.y / scale)
+  return { x: inBox.xMm * scale, y: inBox.yMm * scale }
 }
 
 /**
@@ -26,7 +48,8 @@ const dotAt = (arc: ArcEnCiel, spot: BoxSpot, scale: number): MmPoint => {
  * the line to bend it there (a double-click in the box adds a point, through the placing box). Click a dot to pick it:
  * arrow keys nudge it, and Delete takes it out (one of several points, or a point bending Line; its ends stay) before the
  * editor's Delete can take out the layer. On a rotated banknote (`quarter`) the handles turn with it, and drags and arrow
- * keys still move them the way they point on screen.
+ * keys still move them the way they point on screen; so they do with Arc-en-Ciel rotated on the banknote, whose box they
+ * lie on (`Turned`).
  */
 export function ArcHandles({ arc, scale, quarter = 0, onChange }: {
   arc: ArcEnCiel
@@ -73,9 +96,10 @@ export function ArcHandles({ arc, scale, quarter = 0, onChange }: {
     }
   }, [picked])
 
-  /** Follows a drag on a dot or the line, (dx, dy) px on screen from where it started */
+  /** Follows a drag on a dot or the line, (dx, dy) px on screen from where it started: on the banknote, then along the box's own sides */
   const follow = (g: Gesture, dx: number, dy: number) => {
-    const along = unturn(dx, dy, quarter)
+    const onNote = unturn(dx, dy, quarter)
+    const along = intoBox(arc, onNote.x, onNote.y)
     if (g.kind === 'dot') onChange(withSpot(arc, g.handle, mmSpot([g.from[0] + along.x / scale, g.from[1] + along.y / scale], arc)))
     else onChange(withLineMoved(arc, g.from, along.x / scale, along.y / scale))
   }
@@ -114,75 +138,77 @@ export function ArcHandles({ arc, scale, quarter = 0, onChange }: {
 
   return (
     <div data-placed="arcEnCiel" data-arc-handles="" className="pointer-events-none absolute inset-0">
-      {kind === 'line' && (
-        <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
-          <polyline points={curve} fill="none" stroke="white" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
-          <polyline points={curve} fill="none" className="stroke-fuchsia-500" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-          {/* Wider than it looks, to press */}
-          <polyline data-arc-line="" points={curve} fill="none" stroke="transparent" strokeWidth={14} strokeLinejoin="round" strokeLinecap="round"
-            className="cursor-move touch-none" style={{ pointerEvents: 'stroke' }}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return
-              // Not a press on the banknote, which would stop placing
-              event.stopPropagation()
-              event.preventDefault()
-              event.currentTarget.setPointerCapture(event.pointerId)
-              gesture.current = { kind: 'line', startX: event.clientX, startY: event.clientY, from: arc.line, moved: false }
-            }}
-            {...pointer}
-            onDoubleClick={(event) => {
-              // Where on the banknote, as it lies before it was turned: the handles cover it from its corner
-              const banknote = event.currentTarget.closest('[data-arc-handles]')
-              if (!banknote) return
-              const at = unturnedPoint(event.clientX, event.clientY, banknote.getBoundingClientRect(), quarter)
-              const { arc: bent, index } = withBend(arc, mmSpot([at.x / scale - arc.xMm, at.y / scale - arc.yMm], arc))
-              if (index < 0) return
-              onChange(bent)
-              setChosen({ kind: 'line', index })
-            }} />
-        </svg>
-      )}
-      {spots.map((spot, index) => {
-        const [left, top] = dotAt(arc, spot, scale)
-        const handle: ArcHandle = { kind, index }
-        // Points and Line's ends are solid; points bending Line are hollow
-        const bend = kind === 'line' && index > 0 && index < spots.length - 1
-        const isPicked = picked?.kind === kind && picked.index === index
-        const name = kind === 'point' ? `point ${index + 1}` : index === 0 ? 'the line’s start' : index === spots.length - 1 ? 'the line’s end' : `bend ${index}`
-        return (
-          <button
-            key={index}
-            type="button"
-            data-arc-handle={index}
-            aria-label={`Move ${name}`}
-            aria-pressed={isPicked}
-            className={cn(
-              'pointer-events-auto absolute z-20 size-3 -translate-x-1/2 -translate-y-1/2 touch-none cursor-grab rounded-full border-2 shadow-sm outline-none',
-              bend ? 'border-fuchsia-500 bg-background' : 'border-background bg-fuchsia-500',
-              isPicked && 'ring-2 ring-fuchsia-500/50 ring-offset-1',
-            )}
-            style={{ left, top }}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return
-              event.stopPropagation()
-              event.preventDefault()
-              event.currentTarget.focus({ preventScroll: true })
-              event.currentTarget.setPointerCapture(event.pointerId)
-              gesture.current = { kind: 'dot', handle, startX: event.clientX, startY: event.clientY, from: spotMm(spot, arc) }
-              setChosen(handle)
-            }}
-            {...pointer}
-            onKeyDown={(event) => {
-              const by = NUDGE[event.key]
-              if (!by) return
-              event.preventDefault()
-              event.stopPropagation()
-              const step = (event.shiftKey ? 10 : 1) * PLACE_STEP * scale
-              follow({ kind: 'dot', handle, startX: 0, startY: 0, from: spotMm(spot, arc) }, by[0] * step, by[1] * step)
-            }}
-          />
-        )
-      })}
+      <Turned arc={arc} scale={scale}>
+        {kind === 'line' && (
+          <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
+            <polyline points={curve} fill="none" stroke="white" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
+            <polyline points={curve} fill="none" className="stroke-fuchsia-500" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            {/* Wider than it looks, to press */}
+            <polyline data-arc-line="" points={curve} fill="none" stroke="transparent" strokeWidth={14} strokeLinejoin="round" strokeLinecap="round"
+              className="cursor-move touch-none" style={{ pointerEvents: 'stroke' }}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return
+                // Not a press on the banknote, which would stop placing
+                event.stopPropagation()
+                event.preventDefault()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                gesture.current = { kind: 'line', startX: event.clientX, startY: event.clientY, from: arc.line, moved: false }
+              }}
+              {...pointer}
+              onDoubleClick={(event) => {
+                // Where on the banknote, as it lies before it was turned, and on the box before it was: the handles cover it from its corner
+                const banknote = event.currentTarget.closest('[data-arc-handles]')
+                if (!banknote) return
+                const at = onBox(arc, scale, event.clientX, event.clientY, banknote, quarter)
+                const { arc: bent, index } = withBend(arc, mmSpot([at.x / scale - arc.xMm, at.y / scale - arc.yMm], arc))
+                if (index < 0) return
+                onChange(bent)
+                setChosen({ kind: 'line', index })
+              }} />
+          </svg>
+        )}
+        {spots.map((spot, index) => {
+          const [left, top] = dotAt(arc, spot, scale)
+          const handle: ArcHandle = { kind, index }
+          // Points and Line's ends are solid; points bending Line are hollow
+          const bend = kind === 'line' && index > 0 && index < spots.length - 1
+          const isPicked = picked?.kind === kind && picked.index === index
+          const name = kind === 'point' ? `point ${index + 1}` : index === 0 ? 'the line’s start' : index === spots.length - 1 ? 'the line’s end' : `bend ${index}`
+          return (
+            <button
+              key={index}
+              type="button"
+              data-arc-handle={index}
+              aria-label={`Move ${name}`}
+              aria-pressed={isPicked}
+              className={cn(
+                'pointer-events-auto absolute z-20 size-3 -translate-x-1/2 -translate-y-1/2 touch-none cursor-grab rounded-full border-2 shadow-sm outline-none',
+                bend ? 'border-fuchsia-500 bg-background' : 'border-background bg-fuchsia-500',
+                isPicked && 'ring-2 ring-fuchsia-500/50 ring-offset-1',
+              )}
+              style={{ left, top }}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return
+                event.stopPropagation()
+                event.preventDefault()
+                event.currentTarget.focus({ preventScroll: true })
+                event.currentTarget.setPointerCapture(event.pointerId)
+                gesture.current = { kind: 'dot', handle, startX: event.clientX, startY: event.clientY, from: spotMm(spot, arc) }
+                setChosen(handle)
+              }}
+              {...pointer}
+              onKeyDown={(event) => {
+                const by = NUDGE[event.key]
+                if (!by) return
+                event.preventDefault()
+                event.stopPropagation()
+                const step = (event.shiftKey ? 10 : 1) * PLACE_STEP * scale
+                follow({ kind: 'dot', handle, startX: 0, startY: 0, from: spotMm(spot, arc) }, by[0] * step, by[1] * step)
+              }}
+            />
+          )
+        })}
+      </Turned>
     </div>
   )
 }
@@ -203,7 +229,8 @@ type Turn = { from: number; offset: number }
  * the box along the ridges, with a knob towards each end. Drag either knob round the middle to turn the ridges, in whole
  * degrees, or steps of 15° with Shift held; with a knob picked, arrow keys turn them a degree at a time (15° with Shift).
  * Ridges half a turn round are the same ridges, so the angle stays within ±90° (`ridgeAngle`) and the knob carries on
- * past upright. On a rotated banknote it turns with it and still follows the pointer on screen.
+ * past upright. On a rotated banknote it turns with it and still follows the pointer on screen. The angle is from the box's
+ * own level, so with Arc-en-Ciel rotated on the banknote the dial turns with it, as its ridges do.
  */
 export function RidgeDial({ arc, scale, quarter = 0, onTurn }: {
   arc: ArcEnCiel
@@ -222,11 +249,11 @@ export function RidgeDial({ arc, scale, quarter = 0, onTurn }: {
   const reach = Math.min(along.x ? width / 2 / Math.abs(along.x) : Infinity, along.y ? height / 2 / Math.abs(along.y) : Infinity)
   const knob = 0.42 * Math.min(width, height)
 
-  /** Where the pointer is round the middle, degrees */
+  /** Where the pointer is round the middle, degrees, from the box's own level (which it turns with, rotated) */
   const pointerAngle = (event: React.PointerEvent<HTMLElement>) => {
     const banknote = event.currentTarget.closest('[data-ridge-dial]')
     if (!banknote) return undefined
-    const at = unturnedPoint(event.clientX, event.clientY, banknote.getBoundingClientRect(), quarter)
+    const at = onBox(arc, scale, event.clientX, event.clientY, banknote, quarter)
     const dx = at.x - middle.x
     const dy = at.y - middle.y
     return Math.hypot(dx, dy) < 1 ? undefined : angleTo(dx, dy)
@@ -242,64 +269,66 @@ export function RidgeDial({ arc, scale, quarter = 0, onTurn }: {
 
   return (
     <div data-placed="arcEnCiel" data-ridge-dial="" className="pointer-events-none absolute inset-0">
-      <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
-        {[{ stroke: 'white', strokeWidth: 3, opacity: 0.7 }, { className: 'stroke-fuchsia-500', strokeWidth: 1.25, strokeDasharray: '5 4' }].map((look, i) => (
-          <line key={i} data-ridge-line={i ? '' : undefined} x1={middle.x - along.x * reach} y1={middle.y - along.y * reach}
-            x2={middle.x + along.x * reach} y2={middle.y + along.y * reach} strokeLinecap="round" {...look} />
+      <Turned arc={arc} scale={scale}>
+        <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
+          {[{ stroke: 'white', strokeWidth: 3, opacity: 0.7 }, { className: 'stroke-fuchsia-500', strokeWidth: 1.25, strokeDasharray: '5 4' }].map((look, i) => (
+            <line key={i} data-ridge-line={i ? '' : undefined} x1={middle.x - along.x * reach} y1={middle.y - along.y * reach}
+              x2={middle.x + along.x * reach} y2={middle.y + along.y * reach} strokeLinecap="round" {...look} />
+          ))}
+        </svg>
+        {[1, -1].map((end) => (
+          <button
+            key={end}
+            type="button"
+            data-ridge-knob={end > 0 ? 'right' : 'left'}
+            aria-label="Turn the ridges"
+            className="pointer-events-auto absolute z-20 h-3.5 w-2 touch-none cursor-grab rounded-full border-2 border-background bg-fuchsia-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500/50"
+            style={{
+              left: middle.x + along.x * knob * end,
+              top: middle.y + along.y * knob * end,
+              // Across the line, as a slider's thumb sits across its track
+              transform: `translate(-50%, -50%) rotate(${-arc.angleDeg}deg)`,
+            }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return
+              // Not a press on the box, which would move it
+              event.stopPropagation()
+              event.preventDefault()
+              event.currentTarget.focus({ preventScroll: true })
+              const at = pointerAngle(event)
+              if (at === undefined) return
+              event.currentTarget.setPointerCapture(event.pointerId)
+              // From the knob pressed, as the far one points the other way
+              turn.current = { from: arc.angleDeg, offset: at - (arc.angleDeg + (end > 0 ? 0 : 180)) }
+            }}
+            onPointerMove={(event) => {
+              const t = turn.current
+              if (!t) return
+              event.stopPropagation()
+              // A release that never reached us: stop following the pointer
+              if (event.buttons === 0) {
+                turn.current = null
+                return
+              }
+              const at = pointerAngle(event)
+              if (at !== undefined) turnTo(at - t.offset - (end > 0 ? 0 : 180), event.shiftKey ? TURN_SNAP : 1)
+            }}
+            onPointerUp={(event) => finish(event)}
+            onPointerCancel={(event) => finish(event, true)}
+            onLostPointerCapture={() => { turn.current = null }}
+            onKeyDown={(event) => {
+              const by = TURN[event.key]
+              if (!by) return
+              event.preventDefault()
+              event.stopPropagation()
+              const step = event.shiftKey ? TURN_SNAP : 1
+              // With Shift, on to the next step of 15° the way pressed
+              const next = event.shiftKey ? (by > 0 ? Math.floor(arc.angleDeg / step) + 1 : Math.ceil(arc.angleDeg / step) - 1) * step : arc.angleDeg + by
+              onTurn(ridgeAngle(next))
+            }}
+          />
         ))}
-      </svg>
-      {[1, -1].map((end) => (
-        <button
-          key={end}
-          type="button"
-          data-ridge-knob={end > 0 ? 'right' : 'left'}
-          aria-label="Turn the ridges"
-          className="pointer-events-auto absolute z-20 h-3.5 w-2 touch-none cursor-grab rounded-full border-2 border-background bg-fuchsia-500 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500/50"
-          style={{
-            left: middle.x + along.x * knob * end,
-            top: middle.y + along.y * knob * end,
-            // Across the line, as a slider's thumb sits across its track
-            transform: `translate(-50%, -50%) rotate(${-arc.angleDeg}deg)`,
-          }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return
-            // Not a press on the box, which would move it
-            event.stopPropagation()
-            event.preventDefault()
-            event.currentTarget.focus({ preventScroll: true })
-            const at = pointerAngle(event)
-            if (at === undefined) return
-            event.currentTarget.setPointerCapture(event.pointerId)
-            // From the knob pressed, as the far one points the other way
-            turn.current = { from: arc.angleDeg, offset: at - (arc.angleDeg + (end > 0 ? 0 : 180)) }
-          }}
-          onPointerMove={(event) => {
-            const t = turn.current
-            if (!t) return
-            event.stopPropagation()
-            // A release that never reached us: stop following the pointer
-            if (event.buttons === 0) {
-              turn.current = null
-              return
-            }
-            const at = pointerAngle(event)
-            if (at !== undefined) turnTo(at - t.offset - (end > 0 ? 0 : 180), event.shiftKey ? TURN_SNAP : 1)
-          }}
-          onPointerUp={(event) => finish(event)}
-          onPointerCancel={(event) => finish(event, true)}
-          onLostPointerCapture={() => { turn.current = null }}
-          onKeyDown={(event) => {
-            const by = TURN[event.key]
-            if (!by) return
-            event.preventDefault()
-            event.stopPropagation()
-            const step = event.shiftKey ? TURN_SNAP : 1
-            // With Shift, on to the next step of 15° the way pressed
-            const next = event.shiftKey ? (by > 0 ? Math.floor(arc.angleDeg / step) + 1 : Math.ceil(arc.angleDeg / step) - 1) * step : arc.angleDeg + by
-            onTurn(ridgeAngle(next))
-          }}
-        />
-      ))}
+      </Turned>
     </div>
   )
 }

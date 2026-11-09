@@ -12,7 +12,7 @@ import { type BandShape, bandLook, drawArcEnCiel, loadBandShape, needsShape } fr
 import { type InkMask, exportInkMask } from './inkMask'
 import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
-import type { Size } from './placed'
+import { type PlacedBox, type Size, rotationOf } from './placed'
 import { inkLight } from './realisticInk'
 import { copyStarts, imageBox } from './artwork'
 import { fitSections, threadLength } from './thread'
@@ -202,6 +202,23 @@ async function loadArc(arc: ArcEnCiel, imageId: string, px: number): Promise<Not
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
+/**
+ * Draws a placed layer turned about its box's middle as far as it is rotated on the banknote, as NoteView's CSS rotate
+ * turns its box (`boxTurn`): `draw` draws it upright in its box, as before it turned
+ */
+function turnedAs(ctx: Ctx, box: PlacedBox, mm: (value: number) => number, draw: () => void) {
+  const deg = rotationOf(box)
+  if (!deg) return draw()
+  const cx = mm(box.xMm + box.widthMm / 2), cy = mm(box.yMm + box.heightMm / 2)
+  ctx.save()
+  ctx.translate(cx, cy)
+  // Counterclockwise on the banknote, which on a canvas's y-down is a negative turn
+  ctx.rotate((-deg * Math.PI) / 180)
+  ctx.translate(-cx, -cy)
+  draw()
+  ctx.restore()
+}
+
 function roundedRect(ctx: Ctx, width: number, height: number, radius: number) {
   ctx.beginPath()
   ctx.roundRect(0, 0, width, height, radius)
@@ -253,16 +270,19 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.globalAlpha = watermarkOpacity(watermark.depth, options.reveal ?? watermarkReveal(0, { x: angleX, y: angle }))
     // Scaled down as smoothly as the canvas draws it, so fine detail doesn't turn to grain
     ctx.imageSmoothingQuality = 'high'
+    const light = assets.relief.canvas
     if (options.back) {
-      // Seen from the back it lies the other way round, at the other side
+      // Seen from the back it lies the other way round, at the other side, turned the other way
       const box = mirrored(watermark, note)
-      ctx.save()
-      ctx.translate(mm(box.xMm + box.widthMm), mm(box.yMm))
-      ctx.scale(-1, 1)
-      ctx.drawImage(assets.relief.canvas, 0, 0, mm(box.widthMm), mm(box.heightMm))
-      ctx.restore()
+      turnedAs(ctx, box, mm, () => {
+        ctx.save()
+        ctx.translate(mm(box.xMm + box.widthMm), mm(box.yMm))
+        ctx.scale(-1, 1)
+        ctx.drawImage(light, 0, 0, mm(box.widthMm), mm(box.heightMm))
+        ctx.restore()
+      })
     } else {
-      ctx.drawImage(assets.relief.canvas, mm(watermark.xMm), mm(watermark.yMm), mm(watermark.widthMm), mm(watermark.heightMm))
+      turnedAs(ctx, watermark, mm, () => ctx.drawImage(light, mm(watermark.xMm), mm(watermark.yMm), mm(watermark.widthMm), mm(watermark.heightMm)))
     }
     ctx.imageSmoothingQuality = 'low'
     ctx.globalAlpha = 1
@@ -276,11 +296,16 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   }
   // Realistic, lit as the canvas lights them, turned over (only as it shows turning, in perspective) and rotated as the banknote shows
   const turn = options.perspective ? options.turn : 0
+  // Each turned about its middle as far as it is rotated on the banknote, as NoteView turns its box
   if (arcEnCiel && assets.arc) {
-    drawArc(ctx, arcEnCiel, assets.arc, mm, { x: angleX, y: angle }, options.realistic ? { turn, quarter: options.quarter } : undefined)
+    const arc = assets.arc
+    turnedAs(ctx, arcEnCiel, mm, () =>
+      drawArc(ctx, arcEnCiel, arc, mm, { x: angleX, y: angle }, options.realistic ? { turn, quarter: options.quarter } : undefined))
   }
   if (magneticInk && assets.ink) {
-    drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle }, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain } : undefined)
+    const ink = assets.ink
+    turnedAs(ctx, magneticInk, mm, () =>
+      drawInk(ctx, magneticInk, ink, mm, { x: angleX, y: angle }, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain } : undefined))
   }
   // A banknote without a thread ends there too (Keller, 4 November: the thread is added like any other feature)
   if (note.noThread) {

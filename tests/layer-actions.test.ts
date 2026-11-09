@@ -23,7 +23,7 @@ vi.mock('../src/lib/standIns', () => ({
     return new File(['x'], `${layer}.png`, { type: 'image/png' })
   },
 }))
-const { addFeature, addLayer, removeFeature, renameFeature, updateWatermark } = await import('../src/editor/layerActions')
+const { addFeature, addLayer, placeLayer, removeFeature, renameFeature, updateWatermark } = await import('../src/editor/layerActions')
 
 const ref = { projectId: 'p', noteId: 'n' }
 
@@ -117,5 +117,19 @@ describe('renaming a security feature', () => {
     expect(fitArcEnCiel({ ...newArcEnCiel(size), name: 'Petals' }, size).name).toBe('Petals')
     expect(fitMagneticInk({ ...newMagneticInk(size), name: 'Fifteen' }, size).name).toBe('Fifteen')
     expect(featureName({ ...held.note!, arcEnCiel: { ...newArcEnCiel(size), name: 'Petals' } }, 'arcEnCiel')).toBe('Petals')
+  })
+})
+
+describe('rotating a placed layer', () => {
+  it('keeps its rotation through a drag or resize that leaves it out, and takes one given, within half a turn either way', () => {
+    held.note = { ...held.note!, magneticInk: { ...newMagneticInk(held.note!), rotationDeg: 30 } }
+    const ink = held.note.magneticInk!
+    placeLayer(ref, 'magneticInk', { xMm: ink.xMm + 1, yMm: ink.yMm, widthMm: ink.widthMm, heightMm: ink.heightMm })
+    expect(held.note!.magneticInk).toEqual({ ...ink, xMm: ink.xMm + 1 })
+    placeLayer(ref, 'magneticInk', { ...held.note!.magneticInk!, rotationDeg: 400 })
+    expect(held.note!.magneticInk!.rotationDeg).toBe(40)
+    // Upright again, it saves no rotation at all
+    placeLayer(ref, 'magneticInk', { ...held.note!.magneticInk!, rotationDeg: 0 })
+    expect(held.note!.magneticInk).not.toHaveProperty('rotationDeg')
   })
 })

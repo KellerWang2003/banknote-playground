@@ -1,30 +1,61 @@
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
 import { mirrored } from '../lib/back'
 import { LAYER_NAMES, type PlacedLayer } from '../lib/layers'
-import { type Corner, PLACE_STEP, type PlacedBox, dragBoxCorner, moveBox } from '../lib/placed'
-import { type Quarter, onItsSide, unturn, unturnedPoint } from '../lib/rotate'
+import { type Corner, PLACE_STEP, type PlacedBox, boxTurn, dragBoxCorner, intoBox, moveBox, normalRotation, rotationOf } from '../lib/placed'
+import { type Quarter, unturn } from '../lib/rotate'
 import type { Note } from '../lib/types'
 
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se']
 const CORNER_NAMES: Record<Corner, string> = { nw: 'top-left', ne: 'top-right', sw: 'bottom-left', se: 'bottom-right' }
 
-type Gesture = { mode: 'move' | Corner; startX: number; startY: number; original: PlacedBox }
+type Gesture =
+  | { mode: 'move' | Corner; startX: number; startY: number; original: PlacedBox }
+  /** Turning it: where the pointer started round the box's middle on screen, degrees, and that middle */
+  | { mode: 'rotate'; from: number; middle: { x: number; y: number }; original: PlacedBox }
 /** Arrow keys nudge one step (ten with Shift) */
 const NUDGE: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
 
 /** The same corner seen from the banknote's back, where left and right swap */
 const MIRRORED: Record<Corner, Corner> = { nw: 'ne', ne: 'nw', sw: 'se', se: 'sw' }
 
+/** Which way each corner lies from the middle of an upright box, degrees counterclockwise from its right, as on a square */
+const CORNER_DEG: Record<Corner, number> = { ne: 45, nw: 135, sw: 225, se: 315 }
+/** The resize cursor along a corner's diagonal, each 45° round from level */
+const RESIZE_CURSORS = ['ew-resize', 'nesw-resize', 'ns-resize', 'nwse-resize']
+const resizeCursor = (deg: number) => RESIZE_CURSORS[((Math.round(deg / 45) % 4) + 4) % 4]
+
+/** px across the area just past each corner that turns the box, as in Figma */
+export const ROTATE_ZONE_PX = 16
+/** A turn with Shift held goes in steps this big, as the ridges' dial does */
+const ROTATE_SNAP = 15
+
+/** Degrees round a point (dx, dy) px from the middle, on screen's y down: 0 to the right, 90 straight up */
+const angleTo = (dx: number, dy: number) => (Math.atan2(-dy, dx) * 180) / Math.PI
+
+/**
+ * The cursor just past a corner that turns the box: a curved arrow round the corner, pointing both ways, drawn for the
+ * top-right corner and turned `deg` counterclockwise to the corner it is at (white under black, to show on any banknote)
+ */
+function rotateCursor(deg: number) {
+  const arc = 'M6 7 A11 11 0 0 1 17 18'
+  const heads = 'M2.5 7 L6.5 3.5 L6.5 10.5 Z M17 21.5 L13.5 17.5 L20.5 17.5 Z'
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g transform='rotate(${-deg + 45} 12 12) translate(0.5 -0.5)'>`
+    + `<path d='${arc}' fill='none' stroke='white' stroke-width='4' stroke-linecap='round'/><path d='${heads}' fill='white' stroke='white' stroke-width='2.5' stroke-linejoin='round'/>`
+    + `<path d='${arc}' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'/><path d='${heads}' fill='black'/></g></svg>`
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 12 12, crosshair`
+}
+
 /**
  * Canvas-only placing surface for a layer placed on a flat banknote (the watermark, shown clear, or magnetic ink): drag
  * the box to move the layer, a corner to resize it with its proportions kept, in 0.5 mm steps; arrow keys nudge it.
- * It takes its gestures before the banknote can tilt or pan. On the banknote's back (`mirror`, only the watermark shows
- * there) it sits where the layer shows, the other side round, and moves the way the pointer does there. On a rotated
- * banknote (`quarter`, quarter turns clockwise) it turns with it, and drags and arrow keys still move it the way they point
- * on screen. A double-click in it, away from its corners, can place something there (`onDoubleClick`: one more of
- * Arc-en-Ciel's points).
+ * Just past each corner, a press turns it about its middle instead, as in Figma (Keller, 9 November: "I can also rotate
+ * elements on the banknote"): in whole degrees, or steps of 15° with Shift held, the cursor a curved arrow there. A turned
+ * box shows turned, its corners resizing it along its own sides. It takes its gestures before the banknote can tilt or
+ * pan. On the banknote's back (`mirror`, only the watermark shows there) it sits where the layer shows, the other side
+ * round and turned the other way, and moves and turns the way the pointer does there. On a rotated banknote (`quarter`,
+ * quarter turns clockwise) it turns with it, and drags and arrow keys still move it the way they point on screen. A
+ * double-click in it, away from its corners, can place something there (`onDoubleClick`: one more of Arc-en-Ciel's points).
  */
 export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 0, onChange, onDoubleClick }: {
   note: Note
@@ -34,7 +65,7 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
   mirror?: boolean
   quarter?: Quarter
   onChange: (box: PlacedBox) => void
-  /** Where a double-click lands on the banknote, mm from its front's top-left */
+  /** Where a double-click lands on the banknote, mm from its front's top-left, as on the box before it turned */
   onDoubleClick?: (at: { xMm: number; yMm: number }) => void
 }) {
   const gesture = useRef<Gesture | null>(null)
@@ -42,6 +73,20 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
   // Along the front's X, a move to the right on the back is a move to the left
   const across = mirror ? -1 : 1
   const shown = mirror ? mirrored(box, note) : box
+  const width = shown.widthMm * scale
+  const height = shown.heightMm * scale
+  // How far it shows turned on screen, degrees counterclockwise: its own rotation, less the banknote's quarter turns clockwise
+  const onScreen = rotationOf(shown) - 90 * quarter
+  /**
+   * Where its middle is on screen. A box turned about its middle has its bounds on screen about the same middle, so it
+   * is that far into them from their top-left (worked out rather than read, as `unturnedPoint` does)
+   */
+  const middleOf = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect()
+    const a = (onScreen * Math.PI) / 180
+    const cos = Math.abs(Math.cos(a)), sin = Math.abs(Math.sin(a))
+    return { x: rect.left + (width * cos + height * sin) / 2, y: rect.top + (width * sin + height * cos) / 2 }
+  }
   const finish = (event: React.PointerEvent<HTMLDivElement>, cancel = false) => {
     const g = gesture.current
     if (!g) return
@@ -59,15 +104,21 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
       data-placed={layer}
       data-placing=""
       className="absolute touch-none cursor-move border border-fuchsia-500 ring-2 ring-fuchsia-500/40 outline-none focus-visible:ring-fuchsia-500/70"
-      style={{ left: shown.xMm * scale, top: shown.yMm * scale, width: shown.widthMm * scale, height: shown.heightMm * scale }}
+      style={{ left: shown.xMm * scale, top: shown.yMm * scale, width, height, transform: boxTurn(shown) }}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.stopPropagation()
         event.preventDefault()
         event.currentTarget.focus({ preventScroll: true })
         event.currentTarget.setPointerCapture(event.pointerId)
+        const target = event.target as HTMLElement
+        if (target.closest('[data-rotate]')) {
+          const middle = middleOf(event.currentTarget)
+          gesture.current = { mode: 'rotate', from: angleTo(event.clientX - middle.x, event.clientY - middle.y), middle, original: box }
+          return
+        }
         // The corner as it shows, which on the back is the front's other one
-        const corner = (event.target as HTMLElement).closest<HTMLElement>('[data-corner]')?.dataset.corner as Corner | undefined
+        const corner = target.closest<HTMLElement>('[data-corner]')?.dataset.corner as Corner | undefined
         gesture.current = { mode: corner ? (mirror ? MIRRORED[corner] : corner) : 'move', startX: event.clientX, startY: event.clientY, original: box }
       }}
       onPointerMove={(event) => {
@@ -76,6 +127,14 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
         event.stopPropagation()
         // A release that never reached us: stop following the pointer
         if (event.buttons === 0) return finish(event)
+        if (g.mode === 'rotate') {
+          // As far round its middle as the pointer has gone on screen, counterclockwise; on the back that turns the front the other way
+          const turned = angleTo(event.clientX - g.middle.x, event.clientY - g.middle.y) - g.from
+          const step = event.shiftKey ? ROTATE_SNAP : 1
+          const rotationDeg = normalRotation(Math.round((rotationOf(g.original) + across * turned) / step) * step)
+          if (rotationDeg !== rotationOf(box)) onChange({ ...g.original, rotationDeg })
+          return
+        }
         const along = unturn(event.clientX - g.startX, event.clientY - g.startY, quarter)
         const dx = (across * along.x) / scale
         const dy = along.y / scale
@@ -86,12 +145,14 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
       onPointerCancel={(event) => finish(event, true)}
       onLostPointerCapture={() => { gesture.current = null }}
       onDoubleClick={(event) => {
-        if (!onDoubleClick || (event.target as HTMLElement).closest('[data-corner]')) return
-        // Where in the box as it lies before the banknote was turned, then on the banknote; on the back the other side round
-        const at = unturnedPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), quarter,
-          { width: shown.widthMm * scale, height: shown.heightMm * scale })
-        const xMm = shown.xMm + at.x / scale
-        onDoubleClick({ xMm: mirror ? note.widthMm - xMm : xMm, yMm: shown.yMm + at.y / scale })
+        if (!onDoubleClick || (event.target as HTMLElement).closest('[data-corner], [data-rotate]')) return
+        // Where in the box as it lies before the banknote was turned and before the box itself was, then on the banknote;
+        // on the back the other side round
+        const middle = middleOf(event.currentTarget)
+        const onNote = unturn(event.clientX - middle.x, event.clientY - middle.y, quarter)
+        const at = intoBox(shown, onNote.x, onNote.y)
+        const xMm = shown.xMm + (width / 2 + at.x) / scale
+        onDoubleClick({ xMm: mirror ? note.widthMm - xMm : xMm, yMm: shown.yMm + (height / 2 + at.y) / scale })
       }}
       onKeyDown={(event) => {
         const by = NUDGE[event.key]
@@ -104,6 +165,22 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
       }}
     >
       {CORNERS.map((corner) => (
+        // Just past the corner, out along its diagonal, under the corner's own handle: a press there turns the box
+        <span
+          key={`rotate-${corner}`}
+          aria-hidden="true"
+          data-rotate={corner}
+          className="absolute"
+          style={{
+            width: ROTATE_ZONE_PX,
+            height: ROTATE_ZONE_PX,
+            [corner[0] === 'n' ? 'top' : 'bottom']: -ROTATE_ZONE_PX,
+            [corner[1] === 'w' ? 'left' : 'right']: -ROTATE_ZONE_PX,
+            cursor: rotateCursor(CORNER_DEG[corner] + onScreen),
+          }}
+        />
+      ))}
+      {CORNERS.map((corner) => (
         <Button
           key={corner}
           variant="outline"
@@ -111,15 +188,13 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
           tabIndex={-1}
           data-corner={corner}
           aria-label={`Resize ${name} from its ${CORNER_NAMES[corner]} corner`}
-          className={cn(
-            'absolute z-10 size-2.5 min-w-0 rounded-sm border-fuchsia-500 p-0 active:translate-y-0',
-            // On its side, a corner shows on the other diagonal
-            (corner === 'nw' || corner === 'se') !== onItsSide(quarter) ? 'cursor-nwse-resize' : 'cursor-nesw-resize',
-          )}
+          className="absolute z-10 size-2.5 min-w-0 rounded-sm border-fuchsia-500 p-0 active:translate-y-0"
           style={{
             [corner[0] === 'n' ? 'top' : 'bottom']: 0,
             [corner[1] === 'w' ? 'left' : 'right']: 0,
             transform: `translate(${corner[1] === 'w' ? '-50%' : '50%'}, ${corner[0] === 'n' ? '-50%' : '50%'})`,
+            // Along its diagonal as it shows, turned with the box and the banknote
+            cursor: resizeCursor(CORNER_DEG[corner] + onScreen),
           }}
         />
       ))}
