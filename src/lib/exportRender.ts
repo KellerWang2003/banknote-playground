@@ -165,10 +165,9 @@ export function framePx(note: Note, frame: Frame, scale: number) {
 /**
  * A banknote's images, ready to draw at the full resolution they were uploaded at (Keller): the originals, never display
  * copies, and the watermark, Arc-en-Ciel and magnetic ink read from the whole image, an SVG's at least as big as `scale`
- * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark. With
- * `realistic`, Arc-en-Ciel's maps for the area it embosses too.
+ * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark.
  */
-export async function loadNoteAssets(note: Note, scale = 0, back = false, realistic = false): Promise<NoteAssets> {
+export async function loadNoteAssets(note: Note, scale = 0, back = false): Promise<NoteAssets> {
   const frames = new Map<string, HTMLImageElement>()
   const drawnPx = (box: { widthMm: number; heightMm: number }) => Math.max(box.widthMm, box.heightMm) * scale
   const { watermark } = note
@@ -178,7 +177,7 @@ export async function loadNoteAssets(note: Note, scale = 0, back = false, realis
   const [face, relief, arc, ink] = await Promise.all([
     design ? loadArtwork(design) : undefined,
     watermark?.imageId ? exportRelief({ imageId: watermark.imageId, invert: watermark.invert, levels: watermark.levels }, drawnPx(watermark)) : undefined,
-    arcEnCiel?.imageId ? loadArc(arcEnCiel, arcEnCiel.imageId, drawnPx(arcEnCiel), realistic) : undefined,
+    arcEnCiel?.imageId ? loadArc(arcEnCiel, arcEnCiel.imageId, drawnPx(arcEnCiel)) : undefined,
     magneticInk?.imageId ? exportInkMask(magneticInk.imageId, magneticInk.invert, drawnPx(magneticInk)) : undefined,
     ...(back ? [] : note.frames).map(async (frame) => {
       if (frame.kind !== 'image' || !frame.imageId) return
@@ -190,13 +189,13 @@ export async function loadNoteAssets(note: Note, scale = 0, back = false, realis
 }
 
 /**
- * Arc-en-Ciel's mask from the whole image, and the maps its bands start from or Realistic embosses, which need no more
- * detail than the canvas's
+ * Arc-en-Ciel's mask from the whole image, and the maps its bands start from or its white edge is drawn from, which need
+ * no more detail than the canvas's
  */
-async function loadArc(arc: ArcEnCiel, imageId: string, px: number, realistic: boolean): Promise<NoteAssets['arc']> {
+async function loadArc(arc: ArcEnCiel, imageId: string, px: number): Promise<NoteAssets['arc']> {
   const [mask, shape] = await Promise.all([
     exportInkMask(imageId, arc.invert, px),
-    needsShape(arc, realistic) ? loadBandShape(imageId, arc.invert) : undefined,
+    needsShape(arc) ? loadBandShape(imageId, arc.invert) : undefined,
   ])
   return mask && { mask, ...(shape ? { shape } : {}) }
 }
@@ -482,7 +481,7 @@ export function drawArc(
   const light = lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter) : undefined
   const look = bandLook(arc, assets.shape, tilt, light)
   if (!look) return
-  // Realistic's embossed outline reaches past the box all round
+  // The white edge reaches past the box all round
   const o = look.outset ?? 0
   const dest = { x: mm(arc.xMm - o), y: mm(arc.yMm - o), width: mm(arc.widthMm + 2 * o), height: mm(arc.heightMm + 2 * o) }
   const size = { width: Math.max(1, Math.round(dest.width)), height: Math.max(1, Math.round(dest.height)) }

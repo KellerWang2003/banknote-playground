@@ -292,13 +292,13 @@ describe('Arc-en-Ciel in an export', () => {
     expect(looks[2]).toMatchObject({ lit: arcLight(arc, { x: 0, y: 10 }, 3) })
   })
 
-  it('reads the maps for the area it embosses only with Realistic on, unless its bands start from the shape', async () => {
+  it('reads the maps for its white edge, or when its bands start from the shape, and otherwise not', async () => {
     const base = makeNote(150, 70)
     const note = { ...base, arcEnCiel: { ...newArcEnCiel(base), imageId: 'a', flow: 'point' as const } }
     loadBandShape.mockClear()
     await loadNoteAssets(note, 10)
     expect(loadBandShape).not.toHaveBeenCalled()
-    await loadNoteAssets(note, 10, false, true)
+    await loadNoteAssets({ ...note, arcEnCiel: { ...note.arcEnCiel, edgeMm: 1 } }, 10)
     expect(loadBandShape).toHaveBeenCalledWith('a', undefined)
     loadBandShape.mockClear()
     await loadNoteAssets({ ...note, arcEnCiel: { ...note.arcEnCiel, flow: 'edge' } }, 10)

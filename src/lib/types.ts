@@ -250,6 +250,12 @@ export interface ArcEnCiel {
   /** How wide one colour band is, mm */
   bandMm: number
   /**
+   * How wide, mm, the white edge round the shape is: bare paper, as Oberthur's brochure shows round its own, embossed with
+   * the ridges with Realistic on (Keller, 9 November: whether to have it, and how wide, is the designer's to set). Saved
+   * only when on
+   */
+  edgeMm?: number
+  /**
    * The ridges' angle from the banknote's horizontal, degrees, −90 to 90, rising to the right as it grows: the tilt across
    * them slides the bands, so level ridges (0) answer tipping the top away, upright ones (90) turning a side away, and any
    * between both (Keller, 9 November, in place of Moves on's ↕ or ↔)

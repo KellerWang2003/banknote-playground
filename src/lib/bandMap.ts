@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  ARC_EMBOSS_MM, ARC_ROUNDING, type ArcLight, type MmPoint, type Rgb, averageRgb, bandColour, bandSlide, curveControls, lineDistance,
-  linearRgb, pointsDistance, sampleCurve, spotMm, srgbBytes,
+  ARC_ROUNDING, type ArcLight, type MmPoint, type Rgb, averageRgb, bandColour, bandSlide, curveControls, lineDistance, linearRgb,
+  pointsDistance, sampleCurve, spotMm, srgbBytes,
 } from './arcEnCiel'
 import { inkCoverage } from './inkMask'
 import { type MaskSource, drawBands, paintBands } from './inkRenderer'
@@ -17,9 +17,9 @@ import type { ArcEnCiel } from './types'
  * its own, since each pixel goes by the edge nearest it. Deeper in, the distances are rounded (`roundedField`), so rings
  * near an edge follow it and deeper ones round off its corners rather than meet in sharp tips and seams, as printed rings
  * do (Keller, 9 November). Point and Line need no map: their distances are worked out as they are drawn. Tilting only
- * slides the bands along these distances (`bandSlide`), so a map is never redrawn for a tilt. With Realistic on, how far
- * the paper round the shape lies from it is worked out with them, for the outline the intaglio plate embosses round it
- * (`outlineField`), whatever the bands start from.
+ * slides the bands along these distances (`bandSlide`), so a map is never redrawn for a tilt. With the white edge on, how
+ * far the paper round the shape lies from it is worked out with them, for the edge (`outlineField`), whatever the bands
+ * start from.
  */
 
 /** Longest side a map is worked out at, px: a distance changes smoothly, so the GPU's interpolation keeps band edges smooth at any zoom */
@@ -34,7 +34,7 @@ export interface BandField {
   data: Float32Array
   /** The largest distance in it */
   max: number
-  /** Pixels it reaches past the image all round, for paper beyond its edges (the outline's); none for the others */
+  /** Pixels it reaches past the image all round, for paper beyond its edges (the white edge's); none for the others */
   pad?: number
 }
 
@@ -45,7 +45,7 @@ export interface BandShape {
   edge: BandField
   /** How far each pixel lies from the nearest hole in the shape; none when it has no holes */
   holes?: BandField
-  /** How far each pixel lies from the shape, reaching past the image (`outlineField`, 0 in it); none when nothing is in the shape */
+  /** How far each pixel lies from the shape, reaching past the image (`outlineField`, 0 in it), for the white edge; none when nothing is in the shape */
   emboss?: BandField
 }
 
@@ -255,15 +255,18 @@ function roundedField(seeds: Uint8Array, width: number, height: number, within?:
   return { width, height, data, max }
 }
 
-/** How far the outline's map reaches past the image all round, as a share of its longest side: room for the embossed outline round a shape up to the image's edge */
-const OUTLINE_PAD = 0.15
+/**
+ * How far the white edge's map reaches past the image all round, as a share of its longest side: room for the widest edge
+ * (ARC_EDGE) round a shape up to the image's edge on a box 7.5 mm across or more
+ */
+const OUTLINE_PAD = 0.4
 
 /**
- * How far the paper lies from the shape, for the outline the intaglio plate embosses round it with Realistic on, ARC_EMBOSS_MM
- * wide all round it as Oberthur's brochure shows (Keller, 9 November), its holes and bays too where they are as narrow:
- * from each pixel's middle to the shape's nearest edge, in box widths, 0 in it, over the image and OUTLINE_PAD of its longest
- * side past it all round (`pad`), as the outline can reach past the image. Read from half coverage, as `shapeMaps` reads
- * the shape. Undefined when nothing is in the shape.
+ * How far the paper lies from the shape, for the white edge round it (`edgeMm`), as wide all round it as Oberthur's
+ * brochure shows its own (Keller, 9 November), its holes and bays too where they are as narrow: from each pixel's middle to
+ * the shape's nearest edge, in box widths, 0 in it, over the image and OUTLINE_PAD of its longest side past it all round
+ * (`pad`), as the edge can reach past the image. Read from half coverage, as `shapeMaps` reads the shape. Undefined when
+ * nothing is in the shape.
  */
 export function outlineField(coverage: Uint8ClampedArray, width: number, height: number): BandField | undefined {
   const pad = Math.max(1, Math.ceil(OUTLINE_PAD * Math.max(width, height)))
@@ -290,21 +293,21 @@ export function outlineField(coverage: Uint8ClampedArray, width: number, height:
 }
 
 /**
- * How far, mm, the embossed outline reaches past Arc-en-Ciel's box all round: ARC_EMBOSS_MM, or as far as its map reaches
- * past the image where that is less (a box under 7 mm or so across). None without one
+ * How wide, mm, Arc-en-Ciel's white edge is drawn, and so how far its drawing reaches past its box all round: as wide as
+ * it is set, or as far as its map reaches past the image where that is less (the widest edge on a box under 7.5 mm or so
+ * across), so the edge is never cut off by the drawing's own edge. None with the edge off, or without its map
  */
-export function embossOutset(box: { widthMm: number; heightMm: number }, emboss: BandField | undefined) {
-  if (!emboss?.pad) return 0
+export function embossOutset(arc: Pick<ArcEnCiel, 'widthMm' | 'heightMm' | 'edgeMm'>, emboss: BandField | undefined) {
+  if (arc.edgeMm === undefined || !emboss?.pad) return 0
   const inner = { width: emboss.width - 2 * emboss.pad, height: emboss.height - 2 * emboss.pad }
-  return Math.min(ARC_EMBOSS_MM, (emboss.pad * box.widthMm) / inner.width, (emboss.pad * box.heightMm) / inner.height)
+  return Math.min(arc.edgeMm, (emboss.pad * arc.widthMm) / inner.width, (emboss.pad * arc.heightMm) / inner.height)
 }
 
 /**
  * The maps for a shape, from how much ink each pixel takes (0 to 255, one byte a pixel, `inkCoverage`): a pixel is in the
  * shape from half coverage. Beyond the image is paper, so a shape cut by its edge has an edge there. Holes are paper the
  * shape closes round: paper that can't reach the image's edge without crossing the shape. Both are rounded deeper in
- * (`roundedField`). How far the paper round the shape lies from it, for the outline Realistic embosses, comes with them
- * (`outlineField`).
+ * (`roundedField`). How far the paper round the shape lies from it, for the white edge, comes with them (`outlineField`).
  */
 export function shapeMaps(coverage: Uint8ClampedArray, width: number, height: number, key = ''): BandShape {
   const w = width + 2, h = height + 2
@@ -448,8 +451,8 @@ export function useBandShape(arc: Pick<ArcEnCiel, 'imageId' | 'invert'> | undefi
 /** Whether the bands start from the shape (Edge, Holes), so they need its maps */
 export const fromShape = (arc: Pick<ArcEnCiel, 'flow'>) => arc.flow === 'edge' || arc.flow === 'holes'
 
-/** Whether Arc-en-Ciel needs its shape's maps: for bands from the shape, or with Realistic on (`realistic`) for the area it embosses */
-export const needsShape = (arc: Pick<ArcEnCiel, 'flow'>, realistic: boolean) => fromShape(arc) || realistic
+/** Whether Arc-en-Ciel needs its shape's maps: for bands from the shape, or for its white edge */
+export const needsShape = (arc: Pick<ArcEnCiel, 'flow' | 'edgeMm'>) => fromShape(arc) || arc.edgeMm !== undefined
 
 /** Everything Arc-en-Ciel is drawn from at a tilt, the canvas and the export alike, on the GPU or not */
 export interface BandLook {
@@ -465,22 +468,24 @@ export interface BandLook {
   slide: number
   /** The colours in linear light */
   colours: Rgb[]
-  /** With Realistic on, where it is drawn as lit ridges: the light at this tilt (`arcLight`), and how far the paper lies from the shape, for the embossed outline */
+  /** With Realistic on, where it is drawn as lit ridges: the light at this tilt (`arcLight`) */
   lit?: ArcLight
+  /** With the white edge on, how far the paper lies from the shape, for the edge */
   emboss?: BandField
-  /** How far, mm, the drawing reaches past the box all round, for the embossed outline (`embossOutset`); none without it */
+  /** How wide, mm, the white edge is, the drawing reaching as far past the box all round (`embossOutset`); none without it */
   outset?: number
 }
 
 /**
  * How Arc-en-Ciel looks at a tilt: undefined while the maps it needs are on their way. Holes on a shape without any start
  * the bands from its edge, as Edge does. With `light` (Realistic on, where the GPU can draw it) it is drawn as lit ridges
- * instead of sliding, with the outline embossed round its shape once that is worked out, reaching past its box.
+ * instead of sliding. Its white edge, when it has one, joins it once its map is worked out, reaching past its box.
  */
 export function bandLook(arc: ArcEnCiel, shape: BandShape | null | undefined, tilt: Tilt2, light?: ArcLight): BandLook | undefined {
   const map = fromShape(arc)
   const field = map ? (arc.flow === 'holes' && shape?.holes) || shape?.edge : undefined
   if (map && !field) return undefined
+  const outset = embossOutset(arc, shape?.emboss)
   return {
     from: map ? 'map' : arc.flow === 'point' ? 'point' : 'line',
     ...(field ? { field } : {}),
@@ -489,7 +494,8 @@ export function bandLook(arc: ArcEnCiel, shape: BandShape | null | undefined, ti
     bandMm: arc.bandMm,
     slide: light ? 0 : bandSlide(arc, tilt),
     colours: arc.colors.map(linearRgb),
-    ...(light ? { lit: light, ...(shape?.emboss ? { emboss: shape.emboss, outset: embossOutset(arc, shape.emboss) } : {}) } : {}),
+    ...(light ? { lit: light } : {}),
+    ...(outset > 0 && shape?.emboss ? { emboss: shape.emboss, outset } : {}),
   }
 }
 
@@ -554,8 +560,9 @@ const byHand = new WeakMap<MaskSource, { key: string; field?: BandField; canvas:
 
 /**
  * Arc-en-Ciel drawn without the GPU, at rest (it doesn't slide, as each frame would mean working out every pixel again),
- * and plain with Realistic on: a canvas to scale into its box, up to BY_HAND_PX on its longest side for a box `width` ×
- * `height` pixels. Drawn again only when it would look different. Undefined where there is no canvas to draw on (the tests).
+ * plain with Realistic on, and without its white edge: a canvas to scale into its box, up to BY_HAND_PX on its longest side
+ * for a box `width` × `height` pixels. Drawn again only when it would look different. Undefined where there is no canvas to
+ * draw on (the tests).
  */
 export function bandsByHand(mask: MaskSource, look: BandLook, width: number, height: number) {
   const k = Math.min(1, BY_HAND_PX / Math.max(width, height))

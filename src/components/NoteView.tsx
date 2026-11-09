@@ -361,14 +361,14 @@ export function NoteView({
       paintLitInk(canvas, inkMask.canvas, inkLight(magneticInk, note, tilt, perspectiveFor(note, 1), quarter), inkPx.cell)
     }
   }
-  // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) or Realistic's
-  // embossed outline its maps; drawn into a canvas of its own in its box, as many pixels as it shows with, again only when
-  // its bands move, or with Realistic on its ridges turn from the lamp (where the browser can draw them: WebGL), the canvas
-  // then reaching past the box all round for the outline
+  // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) or its white edge
+  // its maps; drawn into a canvas of its own in its box, as many pixels as it shows with, again only when its bands move,
+  // or with Realistic on its ridges turn from the lamp (where the browser can draw them: WebGL), the canvas reaching past
+  // the box all round for the white edge
   const arcMask = useInkMask(arcEnCiel, arcEnCiel && devicePx(Math.max(arcEnCiel.widthMm, arcEnCiel.heightMm) * scale))
-  const arcShape = useBandShape(arcEnCiel && needsShape(arcEnCiel, realistic) ? arcEnCiel : undefined)
+  const arcShape = useBandShape(arcEnCiel && needsShape(arcEnCiel) ? arcEnCiel : undefined)
   const arcLit = realistic && arcEnCiel !== undefined && bandsAvailable()
-  const arcOutset = arcEnCiel && arcLit ? embossOutset(arcEnCiel, arcShape?.emboss) : 0
+  const arcOutset = arcEnCiel ? embossOutset(arcEnCiel, arcShape?.emboss) : 0
   const arcPx = arcEnCiel
     ? inkPixels((arcEnCiel.widthMm + 2 * arcOutset) * scale, (arcEnCiel.heightMm + 2 * arcOutset) * scale, devicePx(1))
     : undefined

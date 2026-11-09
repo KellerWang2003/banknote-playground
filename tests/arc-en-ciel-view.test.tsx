@@ -75,7 +75,8 @@ const withArc = (change: Partial<ArcEnCiel> = {}): Note & { arcEnCiel: ArcEnCiel
 const lastPaint = () => held.painted.at(-1)!
 const RAD = Math.PI / 180
 const solid: BandShape = { key: 'disc|', edge: { width: 1, height: 1, data: new Float32Array(1), max: 0 } }
-// Its outline's map reaching a pixel past an image a pixel across: as far as the box is wide, so the outline reaches 1 mm past it
+// Its white edge's map reaching a pixel past an image a pixel across: as far as the box is wide, so an edge as wide as it
+// is set reaches that far past it
 const embossed: BandShape = { ...solid, emboss: { width: 3, height: 3, data: new Float32Array(9).fill(0.2), max: 0.2, pad: 1 } }
 
 describe("a NoteView's Arc-en-Ciel", () => {
@@ -119,18 +120,18 @@ describe("a NoteView's Arc-en-Ciel", () => {
   it('with Realistic on, draws its ridges lit and embossed, turning from the lamp as the banknote tilts, rotates and turns over', () => {
     gpu.bands = true
     held.shape = embossed
-    const note = withArc({ flow: 'point' })
+    const note = withArc({ flow: 'point', edgeMm: 1 })
     let renders = 0
     function Counted() {
       renders++
       return <NoteView note={note} scale={2} live perspective realistic />
     }
     const { container } = render(<Counted />)
-    // Its shape's maps are read for the outline it embosses, though Point needs none
+    // Its shape's maps are read for its white edge, though Point needs none
     expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }, arcLight(note.arcEnCiel, { x: 0, y: 0 })))
     expect(lastPaint().look).toMatchObject({ emboss: embossed.emboss, outset: 1 })
-    // Its canvas reaches 1 mm past its box all round for the outline, as many pixels as that shows with, and takes no press
-    // of its own: its box does
+    // Its canvas reaches 1 mm past its box all round for the white edge, as many pixels as that shows with, and takes no
+    // press of its own: its box does
     const canvas = container.querySelector<HTMLElement>('[data-arc-en-ciel] canvas')! as HTMLCanvasElement
     expect([canvas.style.left, canvas.style.top, canvas.style.width, canvas.style.height]).toEqual(['-2px', '-2px', '64px', '44px'])
     expect([canvas.width, canvas.height]).toEqual([64, 44])
@@ -144,6 +145,19 @@ describe("a NoteView's Arc-en-Ciel", () => {
     act(() => setTilt({ turn: 0.2 }))
     expect(lastPaint().look).toMatchObject({ lit: arcLight(note.arcEnCiel, { x: turnDeg(0.2), y: 10 }, 1) })
     expect(renders).toBe(before)
+  })
+
+  it('with its white edge on, reaches past its box as far as the edge is wide, Realistic or not', () => {
+    held.shape = embossed
+    const { container, rerender } = render(<NoteView note={withArc({ flow: 'point', edgeMm: 2 })} scale={2} live perspective />)
+    expect(lastPaint().look).toMatchObject({ emboss: embossed.emboss, outset: 2 })
+    expect(lastPaint().look).not.toHaveProperty('lit')
+    const canvas = () => container.querySelector<HTMLCanvasElement>('[data-arc-en-ciel] canvas')!
+    expect([canvas().style.left, canvas().style.width, canvas().width, canvas().height]).toEqual(['-4px', '68px', 68, 48])
+    // Off, it keeps to its box
+    rerender(<NoteView note={withArc({ flow: 'point' })} scale={2} live perspective />)
+    expect(lastPaint().look).not.toHaveProperty('emboss')
+    expect([canvas().style.left, canvas().width]).toEqual(['0px', 60])
   })
 
   it('with Realistic on but no WebGL, shows its bands as without it', () => {
@@ -357,7 +371,8 @@ describe('the Arc-en-Ciel panel', () => {
     held.shape = solid
     show()
     const text = document.body.textContent!
-    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle'].map((words) => text.indexOf(words))
+    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle', 'White edge']
+      .map((words) => text.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
     // Realistic isn't one of its own: it is the canvas's, beside the lamp, for every banknote
@@ -396,6 +411,20 @@ describe('the Arc-en-Ciel panel', () => {
     expect(panel.arc!.angleDeg).toBe(30)
     fireEvent.change(field, { target: { value: '-90' } })
     expect(panel.arc!.angleDeg).toBe(-90)
+  })
+
+  it('ends with the white edge, off at first, saved only when on, with its width from 0.5 to 3 mm', async () => {
+    const { again } = show({ flow: 'point' })
+    expect(screen.queryByTitle(/How wide the white edge/)).toBeNull()
+    await userEvent.click(screen.getByRole('switch', { name: 'White edge' }))
+    expect(panel.arc!.edgeMm).toBe(1)
+    again()
+    const field = within(screen.getByTitle(/How wide the white edge/)).getByRole('textbox')
+    fireEvent.change(field, { target: { value: '2.5' } })
+    expect(panel.arc!.edgeMm).toBe(2.5)
+    again()
+    await userEvent.click(screen.getByRole('switch', { name: 'White edge' }))
+    expect(panel.arc!).not.toHaveProperty('edgeMm')
   })
 
   it('offers Invert only once it has an image', () => {

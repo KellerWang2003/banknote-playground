@@ -1,6 +1,6 @@
 import {
-  ARC_EMBOSS_MM, ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_MEAN_LIGHT, ARC_PAPER, ARC_POINTS, ARC_PRINT, ARC_RIDGE_FADE, ARC_RIDGE_MM,
-  ARC_RIDGE_SAMPLES, ARC_RIDGE_SLOPE_DEG, ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
+  ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_MEAN_LIGHT, ARC_PAPER, ARC_POINTS, ARC_PRINT, ARC_RIDGE_FADE, ARC_RIDGE_MM, ARC_RIDGE_SAMPLES,
+  ARC_RIDGE_SLOPE_DEG, ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
 } from './arcEnCiel'
 import type { BandField, BandLook } from './bandMap'
 import {
@@ -116,9 +116,9 @@ const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
 // slid along by the tilt, gives its place among the bands and so its colour, through the shape's mask. The same sums as
 // bandMap.ts's, which draws it without the GPU. With Realistic on (uLit), the ridges instead: each spot across a ridge on
 // the slope the eye sees there, in the line of colour printed where it sees the paper (every ridge carries them all, as
-// Oberthur's brochure shows), lit by the lamp, and the paper embossed round the shape lit the same way over whatever is
-// printed beneath (arcEnCiel.ts's `arcLight` and `ARC_PRINT`). The print's finest unevenness needs high precision, and is
-// left out without it
+// Oberthur's brochure shows), lit by the lamp (arcEnCiel.ts's `arcLight` and `ARC_PRINT`). With the white edge on, bare
+// paper round the shape, uOutset wide, covering whatever is printed beneath: flat, or with Realistic on embossed with the
+// ridges and lit the same way. The print's finest unevenness needs high precision, and is left out without it
 const RAD = Math.PI / 180
 const [PAPER_R, PAPER_G, PAPER_B] = ARC_PAPER.map(glsl)
 const BANDS_FRAGMENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -128,6 +128,8 @@ const float FINE_NOISE = 1.0;
 precision mediump float;
 const float FINE_NOISE = 0.0;
 #endif
+// The banknote's paper, which the ink thins to and the white edge is
+const vec3 PAPER = vec3(${PAPER_R}, ${PAPER_G}, ${PAPER_B});
 varying vec2 vUv;
 uniform sampler2D uMask;
 uniform sampler2D uMap;
@@ -272,7 +274,6 @@ float bandAt(float phase, out float blend) {
   return i;
 }
 vec3 encode(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
-float encode1(float c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
 // Smooth noise over the paper, −1 to 1, on a grid \`scale\` mm apart, a pattern of its own for each \`seed\`
 float hash(vec2 g) {
   vec3 h = fract(vec3(g.xyx) * 0.1031);
@@ -292,28 +293,23 @@ float paperNoise(vec2 p, float scale, float seed) {
 float showing(float scale) { return 1.0 - smoothstep(0.5 * scale, 1.5 * scale, uPixel); }
 // Ink as it prints: a little dull, and thinner by \`thin\`, showing the paper through
 vec3 printed(vec3 c, float thin) {
-  vec3 paper = vec3(${PAPER_R}, ${PAPER_G}, ${PAPER_B});
-  return mix(mix(c, 0.88 * paper, ${glsl(ARC_PRINT.dull)}), paper, thin);
-}
-// Paper lit to a light with a sheen on it, drawn over whatever is printed beneath: grey light over a shade, exact over white
-// paper and black, close between (premultiplied, as drawn)
-vec2 paperAt(float light, float sheen) {
-  float w = encode1(sheen);
-  return vec2(w, 1.0 - encode1(light + sheen) + w);
+  return mix(mix(c, 0.88 * PAPER, ${glsl(ARC_PRINT.dull)}), PAPER, thin);
 }
 
 void main() {
-  // Where on the box, as the drawing reaches uOutset mm past it all round for the embossed outline
+  // Where on the box, as the drawing reaches uOutset mm past it all round for the white edge
   vec2 uv = (vUv * (uBox + 2.0 * uOutset) - uOutset) / uBox;
   float m = uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0 ? texture2D(uMask, uv).a : 0.0;
-  // How far inside the embossed outline, ARC_EMBOSS_MM round the shape, up to a pixel
+  // How far inside the white edge, uOutset round the shape, up to a pixel
   float e = 0.0;
-  if (uLit == 1 && uEmbossMax > 0.0) {
+  if (uEmbossMax > 0.0) {
     vec2 inner = uEmbossSize - 2.0 * uEmbossPad;
     float apart = fieldAt(uEmboss, uEmbossSize, uEmbossMax, (uv * inner + uEmbossPad) / uEmbossSize) * uBox.x;
-    e = clamp((${glsl(ARC_EMBOSS_MM)} - apart) / uPixel, 0.0, 1.0);
+    e = clamp((uOutset - apart) / uPixel, 0.0, 1.0);
   }
   if (m < 0.002 && e < 0.002) { gl_FragColor = vec4(0.0); return; }
+  // The white edge's bare paper, where the shape takes no ink
+  float bare = (1.0 - m) * e;
   vec2 p = uv * uBox;
   float d = 0.0;
   // Point's and Line's unit step on through the bands
@@ -328,7 +324,7 @@ void main() {
     float blend;
     float i = bandAt(d / uBand - uSlide, blend);
     vec3 colour = mix(mix(colourAt(i), nextColour(i), blend), uAverage, blur);
-    gl_FragColor = vec4(encode(colour) * m, m);
+    gl_FragColor = vec4(encode(colour) * m + encode(PAPER) * bare, m + bare);
     return;
   }
   // The paper and the print as they are (ARC_PRINT): a sheet a little cockled and grainy, ridges wandering a little off
@@ -360,6 +356,7 @@ void main() {
   rate = clamp(rate, -1.0, 1.0);
   float fine = smoothstep(${glsl(ARC_RIDGE_FADE.from)}, ${glsl(ARC_RIDGE_FADE.to)}, w);
   vec3 ink = vec3(0.0);
+  // The white edge's light and sheen, its paper embossed with the same ridges
   vec2 paper = vec2(0.0);
   if (fine < 1.0) {
     // Ridges wide enough to see: a few spots across the pixel, each on the slope the eye sees there
@@ -386,8 +383,7 @@ void main() {
       vec3 colour = mix(printed(screenAt(inks * fract(at - misprint) + here, soft), thin), uAverage, blur);
       float light = shade * (1.0 - sheen);
       ink += colour * light + sheen;
-      // Paper is drawn over what is beneath it, so it can darken it but not light it past itself
-      paper += paperAt(min(light, 1.0), sheen);
+      paper += vec2(light, sheen);
     }
     ink /= ${glsl(ARC_RIDGE_SAMPLES)};
     paper /= ${glsl(ARC_RIDGE_SAMPLES)};
@@ -400,12 +396,11 @@ void main() {
   vec3 firstMean = mix(printed(screenMean(start, lines), thin), uAverage, blur);
   vec3 secondMean = mix(printed(screenMean(start + 0.5 * inks, lines), thin), uAverage, blur);
   vec3 inkMean = c * (firstMean * uMeans.x + uMeans.y) + (1.0 - c) * (secondMean * uMeans.z + uMeans.w);
-  vec2 paperMean = paperAt(min(c * uMeans.x + (1.0 - c) * uMeans.z, 1.0), c * uMeans.y + (1.0 - c) * uMeans.w);
+  vec2 paperMean = vec2(c * uMeans.x + (1.0 - c) * uMeans.z, c * uMeans.y + (1.0 - c) * uMeans.w);
   ink = mix(ink, inkMean, fine);
   paper = mix(paper, paperMean, fine);
-  // The ink where the shape takes it; the paper's light and shade round it, where the plate embosses
-  float bare = (1.0 - m) * e;
-  gl_FragColor = vec4(encode(ink) * m + vec3(paper.x * bare), m + paper.y * bare);
+  // The ink where the shape takes it, and round it the white edge, each no brighter than white (premultiplied, as drawn)
+  gl_FragColor = vec4(encode(min(ink, 1.0)) * m + encode(min(PAPER * paper.x + paper.y, 1.0)) * bare, m + bare);
 }`
 
 const BAND_UNIFORMS = [
@@ -446,7 +441,7 @@ interface Renderer {
 
 /** Masks kept on the GPU: every banknote's on the canvas and an export's */
 const TEXTURES_KEPT = 4
-/** Maps kept on the GPU: each Arc-en-Ciel's bands' and, with Realistic on, its embossed area's */
+/** Maps kept on the GPU: each Arc-en-Ciel's bands' and, with its white edge on, the edge's */
 const MAPS_KEPT = 8
 
 let renderer: Renderer | null | undefined
@@ -733,7 +728,8 @@ export function drawBands(
   const texture = textureFor(r, mask)
   const map = look.field ? mapFor(r, look.field) : r.noMap
   const { lit } = look
-  const embossed = lit ? look.emboss : undefined
+  // The white edge, where it has one
+  const embossed = look.emboss
   const emboss = embossed ? mapFor(r, embossed) : r.noMap
   if (!texture || !map || !emboss) return false
   gl.useProgram(bands.program)
@@ -764,15 +760,15 @@ export function drawBands(
   gl.uniform3fv(u('uColours'), colours)
   gl.uniform1i(u('uColourCount'), Math.min(4, look.colours.length))
   gl.uniform3f(u('uAverage'), ...averageRgb(look.colours))
-  // The drawing reaches past the box all round for the embossed outline
+  // The white edge, as wide as the drawing reaches past the box all round
   const outset = embossed ? look.outset ?? 0 : 0
   gl.uniform1f(u('uOutset'), outset)
   gl.uniform1f(u('uPixel'), (look.box[0] + 2 * outset) / width)
-  // Realistic: the ridges in the lamp's light, and the outline embossed round the shape
-  gl.uniform1i(u('uLit'), lit ? 1 : 0)
   gl.uniform2f(u('uEmbossSize'), embossed?.width ?? 1, embossed?.height ?? 1)
   gl.uniform1f(u('uEmbossMax'), embossed?.max ?? 0)
   gl.uniform1f(u('uEmbossPad'), embossed?.pad ?? 0)
+  // Realistic: the ridges in the lamp's light
+  gl.uniform1i(u('uLit'), lit ? 1 : 0)
   gl.uniform1f(u('uRidge'), ARC_RIDGE_MM)
   gl.uniform2f(u('uAcross'), ...(lit?.across ?? [0, 1]))
   gl.uniform1f(u('uShare'), lit?.share ?? 0)

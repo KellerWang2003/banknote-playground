@@ -118,7 +118,7 @@ export async function exportTilt(projectName: string, options: ExportOptions, on
   const sides: Side[] = turnsOver(notes[0]) ? ['front', 'back'] : [options.back ? 'back' : 'front']
   const loadSides = async (note: Note) => {
     const loaded: SideAssets = {}
-    await Promise.all(sides.map(async (side) => { loaded[side] = await loadNoteAssets(note, scales.get(note.id), side === 'back', options.realistic) }))
+    await Promise.all(sides.map(async (side) => { loaded[side] = await loadNoteAssets(note, scales.get(note.id), side === 'back') }))
     return loaded
   }
   const assets = new Map(await Promise.all(notes.map(async (n) => [n.id, await loadSides(n)] as const)))

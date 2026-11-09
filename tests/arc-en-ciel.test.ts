@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ARC_BAND, ARC_EMBOSS_MM, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
+  ARC_BAND, ARC_EDGE, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
   bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeAcross, ridgeAngle,
   ridgeLight, sampleCurve, srgbBytes, withArcImage, withBend, withLineMoved, withPoint, withSpot, withoutSpot,
 } from '../src/lib/arcEnCiel'
@@ -361,7 +361,7 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(Math.min(...flat.means)).toBeGreaterThanOrEqual(0)
   })
 
-  it('embosses an outline round the shape, as far from it all round, reaching past the image', () => {
+  it('measures the white edge round the shape, as far from it all round, reaching past the image', () => {
     const bitten = grid([
       '..........',
       '..######..',
@@ -374,50 +374,79 @@ describe('Arc-en-Ciel, Realistic', () => {
       '..........',
     ])
     const outline = outlineField(bitten.coverage, bitten.width, bitten.height)!
-    // A seventh of the image's longest side past it all round, rounded up
-    expect(outline.pad).toBe(2)
-    expect([outline.width, outline.height]).toEqual([14, 13])
+    // Two fifths of the image's longest side past it all round, rounded up
+    expect(outline.pad).toBe(4)
+    expect([outline.width, outline.height]).toEqual([18, 17])
     expect(shapeMaps(bitten.coverage, bitten.width, bitten.height).emboss).toEqual(outline)
     // In pixels from the shape's nearest edge, from each pixel's middle: 0 in it, the bay too as far as it is from it
-    const at = (x: number, y: number) => outline.data[(y + 2) * outline.width + x + 2] * bitten.width
+    const at = (x: number, y: number) => outline.data[(y + 4) * outline.width + x + 4] * bitten.width
     expect(at(3, 3)).toBe(0)
     expect(at(6, 3)).toBeCloseTo(0.5)
     expect(at(8, 4)).toBeCloseTo(1.5)
     expect(at(0, 0)).toBeCloseTo(Math.sqrt(5) - 0.5)
-    // Past the image too
+    // Past the image too, all the way out
     expect(at(-2, 4)).toBeCloseTo(2.5)
+    expect(at(-4, 4)).toBeCloseTo(4.5)
     expect(outlineField(new Uint8ClampedArray(81), 9, 9)).toBeUndefined()
     expect(shapeMaps(new Uint8ClampedArray(81), 9, 9).emboss).toBeUndefined()
   })
 
-  it('reaches past its box all round by the outline’s width, or as far as the outline’s map does on a small box', () => {
+  it('draws the white edge as wide as it is set, reaching as far past its box, or as far as its map does on a small box', () => {
     const outline = outlineField(new Uint8ClampedArray(100 * 100).fill(255), 100, 100)!
-    // 15 of the map's 100 pixels past it, as far as 2.25 mm on a box 15 mm across
-    expect(embossOutset({ widthMm: 15, heightMm: 15 }, outline)).toBe(ARC_EMBOSS_MM)
-    expect(embossOutset({ widthMm: 4, heightMm: 4 }, outline)).toBeCloseTo(0.6)
-    expect(embossOutset({ widthMm: 15, heightMm: 15 }, undefined)).toBe(0)
-    expect(embossOutset({ widthMm: 15, heightMm: 15 }, { width: 1, height: 1, data: new Float32Array(1), max: 0 })).toBe(0)
+    // 40 of the map's 100 pixels past it, as far as 6 mm on a box 15 mm across, and 3 mm on one 7.5 mm across: room for
+    // the widest edge
+    const box = { widthMm: 15, heightMm: 15 }
+    expect(embossOutset({ ...box, edgeMm: 1 }, outline)).toBe(1)
+    expect(embossOutset({ ...box, edgeMm: ARC_EDGE.max }, outline)).toBe(ARC_EDGE.max)
+    expect(embossOutset({ widthMm: 7.5, heightMm: 7.5, edgeMm: ARC_EDGE.max }, outline)).toBeCloseTo(ARC_EDGE.max)
+    expect(embossOutset({ widthMm: 4, heightMm: 4, edgeMm: ARC_EDGE.max }, outline)).toBeCloseTo(1.6)
+    // None with the edge off, or without its map
+    expect(embossOutset(box, outline)).toBe(0)
+    expect(embossOutset({ ...box, edgeMm: 1 }, undefined)).toBe(0)
+    expect(embossOutset({ ...box, edgeMm: 1 }, { width: 1, height: 1, data: new Float32Array(1), max: 0 })).toBe(0)
     const shape = { key: 'k', edge: outline, emboss: outline }
-    const look = bandLook(arc({ widthMm: 15, heightMm: 15 }), shape, { x: 0, y: 0 }, arcLight(arc(), { x: 0, y: 0 }))!
-    expect(look.outset).toBe(ARC_EMBOSS_MM)
-    expect(bandLook(arc({ widthMm: 15, heightMm: 15 }), shape, { x: 0, y: 0 })).not.toHaveProperty('outset')
+    const look = bandLook(arc({ ...box, edgeMm: 1 }), shape, { x: 0, y: 0 })!
+    expect(look).toMatchObject({ emboss: outline, outset: 1 })
+    expect(bandLook(arc(box), shape, { x: 0, y: 0 })).not.toHaveProperty('outset')
+    expect(bandLook(arc(box), shape, { x: 0, y: 0 })).not.toHaveProperty('emboss')
     // The box within a drawing of it that reaches past it: 1 mm of the 17 each way
     expect(boxIn({ x: 0, y: 0, width: 170, height: 170 }, look)).toEqual({ x: 10, y: 10, width: 150, height: 150 })
     expect(boxIn({ x: 5, y: 5, width: 150, height: 150 }, { ...look, outset: undefined })).toEqual({ x: 5, y: 5, width: 150, height: 150 })
   })
 
-  it('is drawn as lit ridges instead of sliding, with its shape’s embossed area once worked out', () => {
+  it('is drawn as lit ridges instead of sliding, with its white edge once its map is worked out', () => {
     const shape = shapeMaps(new Uint8ClampedArray(16).fill(255), 4, 4)
     const light = arcLight(arc(), { x: 0, y: 10 })
-    expect(bandLook(arc(), shape, { x: 0, y: 10 }, light)).toMatchObject({ field: shape.edge, slide: 0, lit: light, emboss: shape.emboss })
+    expect(bandLook(arc({ edgeMm: 1 }), shape, { x: 0, y: 10 }, light)).toMatchObject({ field: shape.edge, slide: 0, lit: light, emboss: shape.emboss })
     expect(bandLook(arc(), shape, { x: 0, y: 10 })).not.toHaveProperty('lit')
-    // Point and Line are drawn at once, the embossed outline joining them when it is ready
-    const pointed = bandLook(arc({ flow: 'point' }), undefined, { x: 0, y: 10 }, light)!
+    // Point and Line are drawn at once, the white edge joining them when it is ready
+    const pointed = bandLook(arc({ flow: 'point', edgeMm: 1 }), undefined, { x: 0, y: 10 }, light)!
     expect(pointed).toMatchObject({ from: 'point', lit: light })
     expect(pointed).not.toHaveProperty('emboss')
-    // So it needs the shape's maps with Realistic on, whatever the bands start from
-    expect(needsShape({ flow: 'point' }, false)).toBe(false)
-    expect(needsShape({ flow: 'point' }, true)).toBe(true)
-    expect(needsShape({ flow: 'holes' }, false)).toBe(true)
+    // So it needs the shape's maps for its white edge, whatever the bands start from, Realistic or not
+    expect(needsShape({ flow: 'point' })).toBe(false)
+    expect(needsShape({ flow: 'point', edgeMm: 1 })).toBe(true)
+    expect(needsShape({ flow: 'holes' })).toBe(true)
+  })
+})
+
+describe('Arc-en-Ciel’s white edge', () => {
+  it('is saved only when on, as wide as it can be', () => {
+    expect(newArcEnCiel(note)).not.toHaveProperty('edgeMm')
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 1.5 }, note).edgeMm).toBe(1.5)
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 10 }, note).edgeMm).toBe(ARC_EDGE.max)
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 0 }, note).edgeMm).toBe(ARC_EDGE.min)
+    expect(fitArcEnCiel({ ...arc(), edgeMm: Number.NaN }, note)).not.toHaveProperty('edgeMm')
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 'wide' } as unknown as ArcEnCiel, note)).not.toHaveProperty('edgeMm')
+    expect(fitArcEnCiel(arc(), note)).not.toHaveProperty('edgeMm')
+  })
+
+  it('is drawn whether or not Realistic is on', () => {
+    const shape = shapeMaps(new Uint8ClampedArray(16).fill(255), 4, 4)
+    const plain = bandLook(arc({ edgeMm: 2 }), shape, { x: 0, y: 10 })!
+    expect(plain).toMatchObject({ emboss: shape.emboss, outset: 2 })
+    expect(plain).not.toHaveProperty('lit')
+    expect(bandLook(arc({ edgeMm: 2, flow: 'point' }), shape, { x: 0, y: 10 }, arcLight(arc(), { x: 0, y: 10 })))
+      .toMatchObject({ emboss: shape.emboss, outset: 2 })
   })
 })

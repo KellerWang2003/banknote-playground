@@ -158,6 +158,22 @@ describe("magnetic ink's shape", () => {
     expect(coverage.filter((_, p) => !inside(p % 5, Math.floor(p / 5), 5) || p === 12).every((v) => v === 0)).toBe(true)
   })
 
+  it('leaves out a faint line along the image’s edges, as an export can leave, but not a shape running off them', () => {
+    // A red bar across the middle, out to the left and right edges, and a faint line of the same red along the top and down
+    // the right side, on transparency: the line would print as one along the layer's box
+    const RED = [200, 40, 40]
+    const line = (x: number, y: number) => y === 0 || x === 5
+    const bar = (y: number) => y === 2 || y === 3
+    const art = paint(6, 6, (x, y) => (bar(y) ? [...RED, 255] : line(x, y) ? [...RED, 90] : grey(0, 0)))
+    const shape = Array.from({ length: 36 }, (_, p) => (bar(Math.floor(p / 6)) ? 255 : 0))
+    expect(Array.from(inkCoverage(art, 6, 6))).toEqual(shape)
+    // Nor does it leave a gap in the ink round the shape when inverted
+    expect(Array.from(inkCoverage(art, 6, 6, true))).toEqual(shape.map((v) => 255 - v))
+    // On an opaque background too
+    const onWhite = paint(6, 6, (x, y) => (bar(y) ? grey(0) : line(x, y) ? grey(225) : grey(255)))
+    expect(Array.from(inkCoverage(onWhite, 6, 6))).toEqual(shape)
+  })
+
   it('goes round the shape instead when inverted', () => {
     // Round the strip and in its 15
     expect(Array.from(inkCoverage(strip(), 6, 8, true))).toEqual(stripInk(255, 0, 255))
