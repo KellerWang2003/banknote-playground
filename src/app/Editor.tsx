@@ -285,7 +285,9 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   const reference = note ?? project.notes.at(0)
   const lens = reference ? playbackLens(reference) : undefined
   const noteRef = note ? { projectId: project.id, noteId: note.id } : undefined
-  const tiltPad = !isEmpty && !editingWindows && !placing
+  // The tilt card stays whatever is picked, placing a layer or editing windows included (Keller, 9 November: "That
+  // should be always there"); only an empty project, with nothing to tilt, goes without it
+  const tiltPad = !isEmpty
   const threadNote = note && note.id === threadNoteId ? note : undefined
 
   const selectAndFocus = (noteId: string) => {

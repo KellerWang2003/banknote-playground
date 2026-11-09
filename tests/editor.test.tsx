@@ -1111,13 +1111,13 @@ describe('username workspace editor', () => {
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     expect(picked()).toBe('Security thread')
 
-    // Adding the watermark selects it and shows the banknote flat with it clear, with its box to place; the tilt pad steps aside
+    // Adding the watermark selects it and shows the banknote flat with it clear, with its box to place; the tilt card stays
     await user.click(addFeature())
     await user.click(await screen.findByRole('menuitem', { name: /^Watermark/ }))
     expect(watermark()).toBeDefined()
     expect(picked()).toBe('Watermark')
     expect(placing()).not.toBeNull()
-    expect(screen.queryByRole('group', { name: 'Tilt' })).toBeNull()
+    expect(screen.getByRole('group', { name: 'Tilt' })).toBeDefined()
     const { xMm } = watermark()!
     fireEvent.keyDown(placing()!, { key: 'ArrowRight' })
     expect(watermark()!.xMm).toBe(xMm + 0.5)
@@ -1437,7 +1437,7 @@ describe('username workspace editor', () => {
     const ink = () => useProjects.getState().demoPreview!.notes[0].magneticInk
 
     // The + lists every layer the banknote doesn't have yet; adding the ink selects it and shows its box to place, the
-    // banknote laid flat and the tilt pad stepping aside, as for the watermark
+    // banknote laid flat and the tilt card staying, as for the watermark
     await user.click(addFeature())
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent))
       .toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
@@ -1446,7 +1446,7 @@ describe('username workspace editor', () => {
     expect(picked()).toBe('Magnetic ink')
     expect(screen.getByRole('button', { name: 'Magnetic ink', exact: true }).classList.contains('bg-muted')).toBe(true)
     expect(placing()).not.toBeNull()
-    expect(screen.queryByRole('group', { name: 'Tilt' })).toBeNull()
+    expect(screen.getByRole('group', { name: 'Tilt' })).toBeDefined()
 
     // Arrow keys nudge it, Shift ten steps; a corner resizes it from the opposite corner, its proportions kept
     const start = ink()!
