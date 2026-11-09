@@ -4,8 +4,8 @@ import {
 } from './arcEnCiel'
 import type { BandField, BandLook } from './bandMap'
 import {
-  AWAY_LIGHT, FILM_FULL, FILM_N2, GLINT_LOBE, GLINT_POWER, GLINT_TILT, GLINT_WHITE, GRAIN_LIGHT, GRAIN_TILT, LAMP_GLOW, LAMP_POWER,
-  ROOM_LIGHT, SHIFT_DIP, type InkLight,
+  AWAY_LIGHT, FILM_FULL, FILM_N2, GLINT_LOBE, GLINT_POWER, GLINT_TILT, GLINT_WHITE, GRAIN_LIGHT, GRAIN_TILT, HIGHLIGHT_WHITE, LAMP_GLOW,
+  LAMP_POWER, ROOM_LIGHT, SHIFT_DIP, type InkLight,
 } from './realisticInk'
 
 /**
@@ -67,12 +67,12 @@ vec3 oklabToLinear(vec3 c) {
              -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
 }
 float film(float th) { float s = sin(th); return 1.0 - sqrt(1.0 - s * s / ${glsl(FILM_N2)}); }
-// Bright light rolls off softly instead of clipping, its highlights going towards white
+// Bright light rolls off softly instead of clipping, its highlights going some of the way towards white
 vec3 tone(vec3 x) {
   vec3 over = max(x - 0.8, 0.0);
   vec3 y = min(x, 0.8) + 0.2 * (1.0 - exp(-over / 0.2));
   float peak = max(max(x.r, x.g), x.b);
-  return mix(y, vec3(max(max(y.r, y.g), y.b)), smoothstep(1.0, 3.4, peak) * 0.6);
+  return mix(y, vec3(max(max(y.r, y.g), y.b)), smoothstep(1.0, 3.4, peak) * ${glsl(HIGHLIGHT_WHITE)});
 }
 vec3 encode(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 float lobe(vec3 r, vec3 l, float width) { float a = acos(clamp(dot(r, l), -1.0, 1.0)); return exp(-(a * a) / (width * width)); }

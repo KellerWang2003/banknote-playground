@@ -18,7 +18,9 @@ import type { MagneticInk } from './types'
  * flat, towards the top, where the flakes face halfway between the lamp and the eye, and in the middle, as bright, with the
  * banknote's top tipped back by half LAMP_HEIGHT_DEG. An upright bar shows only near that tip, the lamp being above it
  * rather than in its curve. Holding the banknote to the light leaves the ink as it was. The numbers are tuned by eye on
- * Keller's 15 strip, as the flat look's are, and are not settings. This file sets up each draw
+ * Keller's 15 strip, as the flat look's are, and are not settings; Keller found the first ones too flashy, reflective and
+ * sparkly (9 November), so the lamp is dimmer and whitens less, and the glints are fewer and dimmer, over a finer grain,
+ * the bar and its glow rolling as before. This file sets up each draw
  * (`inkLight`); the GPU shades every pixel with it (inkRenderer.ts), on the canvas and in exports alike.
  */
 
@@ -31,9 +33,11 @@ export const FILM_N2 = 2.1
 /** How much less vivid the colour is halfway between Flat and Tilted, as a metal's in-between colour is */
 export const SHIFT_DIP = 0.2
 /** The lamp's brightness off a flake mirroring it straight to the eye */
-export const LAMP_POWER = 3
+export const LAMP_POWER = 1.8
 /** The soft glow round the bar, three times as wide as its core: the flakes are never all perfectly aligned */
-export const LAMP_GLOW = 0.35
+export const LAMP_GLOW = 0.3
+/** How far the brightest light goes towards white as it rolls off, rather than keeping the ink's colour */
+export const HIGHLIGHT_WHITE = 0.35
 /**
  * How high the lamp hangs over the viewer's head: degrees above the line from the middle of the banknote to their eye.
  * Flat, the bar rests towards the top of the ink, where the flakes face halfway between the lamp and the eye, and tipping
@@ -45,14 +49,14 @@ export const LAMP_HEIGHT_DEG = 20
 /** The light the room gives, mirrored from above and from below */
 export const ROOM_LIGHT = { above: 0.8, below: 0.4 }
 /** How far each flake strays from the curve, radians either way, and how much brighter or darker it is: the metal's fine grain */
-export const GRAIN_TILT = 0.02
-export const GRAIN_LIGHT = 0.1
+export const GRAIN_TILT = 0.012
+export const GRAIN_LIGHT = 0.06
 /** Stray flakes tilted any which way, up to this far either way: each catches the lamp for a moment, so the ink sparkles as it turns */
 export const GLINT_TILT = 0.4
 /** How narrow a stray flake's flash is (radians), how bright, and how far towards white */
-export const GLINT_LOBE = 0.07
-export const GLINT_POWER = 3.4
-export const GLINT_WHITE = 0.45
+export const GLINT_LOBE = 0.055
+export const GLINT_POWER = 1.6
+export const GLINT_WHITE = 0.25
 /** Flakes turned away from the viewer are seen only dimly, by their edges */
 export const AWAY_LIGHT = 0.15
 /** Chroma below which a colour counts as grey, with no hue of its own */
