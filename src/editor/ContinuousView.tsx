@@ -1,16 +1,15 @@
 import { DesignTiles } from '../components/DesignTiles'
 import { PAPER } from '../lib/back'
-import { edgeBreaks, useDesign, type CutDrift } from '../lib/continuous'
+import { edgeBreaks, useDesign } from '../lib/continuous'
 import { designPx, useImageUrl } from '../lib/images'
 import type { Note } from '../lib/types'
 import { useTilt } from '../tilt/tilt'
 
 /**
- * The continuous check on the canvas, while the banknote itself is picked: its neighbours on the print sheet around it,
- * where its edges break and the cut tolerance's line. All of it lies flat, so it steps back while the banknote is
- * turned, played or dragged, and none of it takes a click or is exported. A drifted cut moves everything that belongs
- * to the design (its copies and the breaks) the other way, while the banknote stays where it is, and so does the
- * tolerance's line, as it marks where the cut can land (Keller).
+ * The continuous check on the canvas, while the banknote itself is picked: its neighbours on the print sheet around it
+ * and where its edges break. All of it lies flat, so it steps back while the banknote is turned, played or dragged, and
+ * none of it takes a click or is exported. No line marks the cut tolerance inside the edges and nothing previews a cut
+ * landing off (Keller, 9 November: the dashed line round the banknote and the drift went).
  */
 
 /** How far out from the banknote its neighbours show, mm, and at most on screen, px, so they never cover the canvas */
@@ -41,7 +40,7 @@ function useShown(quiet: boolean) {
  * Behind the banknote: copies of its design where its neighbours sit on the print sheet, edge to edge with it, as strong
  * as the banknote by it and fading out further away. Where an edge doesn't carry on into its copy, the seam shows.
  */
-export function NeighbourRing({ note, scale, drift, quiet }: { note: Note; scale: number; drift: CutDrift; quiet: boolean }) {
+export function NeighbourRing({ note, scale, quiet }: { note: Note; scale: number; quiet: boolean }) {
   // The same copy the banknote shows, so both draw from one
   const url = useImageUrl(note.faceImageId, designPx(note, scale))
   const shown = useShown(quiet)
@@ -58,46 +57,34 @@ export function NeighbourRing({ note, scale, drift, quiet }: { note: Note; scale
       style={{ left: -margin, top: -margin, width: width + 2 * margin, height: height + 2 * margin, opacity: shown ? 1 : 0,
         maskImage: mask, WebkitMaskImage: mask, maskComposite: 'intersect', WebkitMaskComposite: 'source-in' }}>
       <div className="absolute" style={{ left: margin, top: margin }}>
-        <DesignTiles url={url} width={width} height={height} color={PAPER} shift={{ x: drift.x * scale, y: drift.y * scale }} />
+        <DesignTiles url={url} width={width} height={height} color={PAPER} />
       </div>
     </div>
   )
 }
 
 /**
- * Over the banknote: the cut tolerance as a dashed line inside each edge (the cut may land anywhere between it and the
- * edge), and amber bars just outside the edges along the stretches that don't carry on into the edge across, on both
- * edges of each pair
+ * Round the banknote: amber bars just outside the edges along the stretches that don't carry on into the edge across, on
+ * both edges of each pair
  */
-export function EdgeMarks({ note, scale, drift, quiet }: { note: Note; scale: number; drift: CutDrift; quiet: boolean }) {
+export function EdgeMarks({ note, scale, quiet }: { note: Note; scale: number; quiet: boolean }) {
   const design = useDesign(note)
   const shown = useShown(quiet)
   const breaks = design ? edgeBreaks(design) : undefined
-  const cut = (note.continuous?.cutMm ?? 0) * scale
   const width = note.widthMm * scale
   const height = note.heightMm * scale
-  const dx = drift.x * scale
-  const dy = drift.y * scale
-  const span = (startMm: number, endMm: number, shift: number) => ({ at: startMm * scale - shift, length: Math.max(MARK_MIN_PX, (endMm - startMm) * scale) })
+  const span = (startMm: number, endMm: number) => ({ at: startMm * scale, length: Math.max(MARK_MIN_PX, (endMm - startMm) * scale) })
   return (
     <div aria-hidden="true" data-edge-marks="" className="pointer-events-none absolute top-0 left-0 transition-opacity duration-150"
       style={{ width, height, opacity: shown ? 1 : 0 }}>
-      {cut > 0 && (
-        // A light edge under the dashes, so the line shows on any design
-        <svg className="absolute inset-0 overflow-visible" width={width} height={height}>
-          {[{ className: 'stroke-background/70', strokeWidth: 3 }, { className: 'stroke-foreground/80', strokeWidth: 1, strokeDasharray: '4 3' }].map((line) => (
-            <rect key={line.className} data-cut-line="" x={cut} y={cut} width={Math.max(0, width - 2 * cut)} height={Math.max(0, height - 2 * cut)} fill="none" {...line} />
-          ))}
-        </svg>
-      )}
       {breaks?.topBottom.flatMap((s) => {
-        const { at, length } = span(s.startMm, s.endMm, dx)
+        const { at, length } = span(s.startMm, s.endMm)
         return [-MARK_GAP_PX - MARK_PX, height + MARK_GAP_PX].map((top) => (
           <div key={`${s.startMm}:${top}`} data-break="top" className="absolute rounded-full bg-amber-500" style={{ left: at, top, width: length, height: MARK_PX }} />
         ))
       })}
       {breaks?.leftRight.flatMap((s) => {
-        const { at, length } = span(s.startMm, s.endMm, dy)
+        const { at, length } = span(s.startMm, s.endMm)
         return [-MARK_GAP_PX - MARK_PX, width + MARK_GAP_PX].map((left) => (
           <div key={`${s.startMm}:${left}`} data-break="side" className="absolute rounded-full bg-amber-500" style={{ top: at, left, height: length, width: MARK_PX }} />
         ))

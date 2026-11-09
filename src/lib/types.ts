@@ -183,7 +183,7 @@ export interface WatermarkLevels {
  * nothing about how the banknote looks or exports.
  */
 export interface ContinuousDesign {
-  /** How far either side of each edge the cut may land, mm: the dashed line inside each edge */
+  /** How far either side of each edge the cut may land, mm */
   cutMm: number
 }
 

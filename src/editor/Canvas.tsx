@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils'
 import { IconButton, Panel } from '../components/controls'
 import { NoteView } from '../components/NoteView'
 import { designFace } from '../lib/back'
-import { driftWithin, useCutDrift } from '../lib/continuous'
 import { clamp, perspectiveFor } from '../lib/frames'
 import { lensState } from '../lib/lens'
 import { playbackPlan } from '../lib/moves'
@@ -181,7 +180,6 @@ export function Canvas({
   const plan = useMemo(() => playbackPlan(reference ? playbackTilt(reference) : { cycleDeg: 30, transition: 0 }, loopLens), [reference, loopLens])
   useTiltLoop(plan, loopLens.viewDeg, !inStudio)
   const offsets = usePatternOffsets((s) => s.offsets)
-  const drifts = useCutDrift((s) => s.drifts)
   const unit = useLengthUnit((s) => s.unit)
 
   // Until the first pan or zoom, the view simply fits every note
@@ -625,13 +623,11 @@ export function Canvas({
           const picked = isSelected ? layer : undefined
           const hovered = !hand && hover?.noteId === note.id && hover.part !== picked ? hover.part : undefined
           const ref: NoteRef = { projectId, noteId: note.id }
-          // The continuous check shows around an uploaded design while the banknote itself is picked, with the drift it
-          // previews. Meanwhile the banknote has no outline, label or shadow, so nothing comes between it and its
-          // neighbours (Keller). It checks the side showing: turned over, the back's design, which the drift moves as it
-          // moves the front's
+          // The continuous check shows around an uploaded design while the banknote itself is picked. Meanwhile the
+          // banknote has no outline, label or shadow, so nothing comes between it and its neighbours (Keller). It checks
+          // the side showing: turned over, the back's design
           const face = designFace(note, back ? 'back' : 'front')
-          const check = picked === 'note' && face.background === 'image' && face.faceImageId ? note.continuous : undefined
-          const drift = check ? driftWithin(drifts[note.id], check.cutMm) : undefined
+          const checking = picked === 'note' && face.background === 'image' && !!face.faceImageId && !!note.continuous
           // Where the banknote's top-left corner shows once rotated, for its name
           const corner = turnedCorner(note.widthMm, note.heightMm, quarter)
           return (
@@ -649,7 +645,7 @@ export function Canvas({
                   className={cn(
                     'absolute bottom-full left-0 mb-1.5 flex origin-bottom-left items-baseline gap-1.5 text-xs whitespace-nowrap',
                     'cursor-move',
-                    drift && 'invisible',
+                    checking && 'invisible',
                   )}
                 >
                   <span className={cn('font-medium', isSelected ? 'text-foreground' : 'text-muted-foreground')}>{note.name}</span>
@@ -666,7 +662,7 @@ export function Canvas({
                 className={cn('absolute inset-0 transition-transform ease-in-out motion-reduce:transition-none',
                   onItsSide(quarter) && !grab && (note.thread.direction === 'vertical' ? '[&_[data-thread]]:cursor-ns-resize!' : '[&_[data-thread]]:cursor-ew-resize!'))}
                 style={{ transform: quarterTurns ? `rotate(${quarterTurns * 90}deg)` : undefined, transitionDuration: `${ROTATE_SECONDS}s` }}>
-                {drift && <NeighbourRing note={face} scale={scale} drift={drift} quiet={quiet} />}
+                {checking && <NeighbourRing note={face} scale={scale} quiet={quiet} />}
                 <div
                   data-note-body={note.id}
                   // A short perspective, relative to the note's size, so the near edge visibly widens and the far edge
@@ -674,17 +670,16 @@ export function Canvas({
                   style={{ perspective: perspectiveFor(note, scale), borderRadius: 1.5 * scale }}
                   className={cn(
                     'outline-offset-4 transition-[outline-color] duration-150 cursor-ns-resize',
-                    drift ? 'outline-0' : picked === 'note' ? 'outline-2' : hovered === 'note' ? 'outline-1' : 'outline-0',
+                    checking ? 'outline-0' : picked === 'note' ? 'outline-2' : hovered === 'note' ? 'outline-1' : 'outline-0',
                     quiet ? 'outline-primary/5' : 'outline-primary/25',
                     // NoteView's own shadow would darken the seam
-                    drift && '[&>div:first-child]:shadow-none',
+                    checking && '[&>div:first-child]:shadow-none',
                   )}
                 >
                   {/* Editing windows shows the banknote flat with its watermark faint; placing a layer, flat (the watermark clear) */}
                   <NoteView note={note} scale={scale} live perspective={perspective && !editingThis && !placingThis} sheen={sheen} realistic={realistic}
                     reveal={editingThis ? 0 : placingThis === 'watermark' ? 1 : undefined} showWindowCuts={editingThis} showFrameNumber={frameNumbers} offsetMm={offsets[note.id]}
-                    selected={picked === 'note' || editingThis || placingThis || quiet ? undefined : picked} hovered={hovered === 'note' ? undefined : hovered}
-                    faceShiftMm={drift && (drift.x || drift.y) ? drift : undefined} />
+                    selected={picked === 'note' || editingThis || placingThis || quiet ? undefined : picked} hovered={hovered === 'note' ? undefined : hovered} />
                   {placingThis && (
                     <PlacingBox note={note} layer={placingThis} box={note[placingThis]!} scale={scale} mirror={back} quarter={quarter}
                       onChange={(next) => placeLayer(ref, placingThis, next)}
@@ -712,7 +707,7 @@ export function Canvas({
                     <UploadDesignButton noteRef={ref} side={back ? 'back' : 'front'} />
                   )}
                 </div>
-                {drift && <EdgeMarks note={face} scale={scale} drift={drift} quiet={quiet} />}
+                {checking && <EdgeMarks note={face} scale={scale} quiet={quiet} />}
               </div>
             </div>
           )

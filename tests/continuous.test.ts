@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CUT_MM, type DesignPixels, coverCrop, designChecks, driftWithin, edgeBreaks, failingChecks, fitContinuous, paperLight, setCutDrift, threadBoxes,
-  useCutDrift, watermarkWeight,
+  CUT_MM, type DesignPixels, coverCrop, designChecks, edgeBreaks, failingChecks, fitContinuous, paperLight, threadBoxes, watermarkWeight,
 } from '../src/lib/continuous'
 import { createNote, migrateProject } from '../src/lib/notes'
 import type { Reading } from '../src/lib/relief'
@@ -167,16 +166,5 @@ describe('saving the check', () => {
     const opened = migrateProject(structuredClone(project))
     expect(opened.notes.map((n) => n.continuous)).toEqual([{ cutMm: 0.8 }, undefined, undefined])
     expect(opened.notes.every((n, i) => i === 0 || !('continuous' in n))).toBe(true)
-  })
-})
-
-describe('the drift preview', () => {
-  it('stays within the tolerance, and is dropped once back to none', () => {
-    expect(driftWithin({ x: 2, y: -3 }, 1)).toEqual({ x: 1, y: -1 })
-    expect(driftWithin(undefined, 1)).toEqual({ x: 0, y: 0 })
-    setCutDrift('n', { x: 0.5, y: 0 })
-    expect(useCutDrift.getState().drifts).toEqual({ n: { x: 0.5, y: 0 } })
-    setCutDrift('n', { x: 0, y: 0 })
-    expect(useCutDrift.getState().drifts).toEqual({})
   })
 })

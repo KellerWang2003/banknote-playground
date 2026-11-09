@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { create } from 'zustand'
 import { PAPER, mirrored, type Side } from './back'
 import { clamp } from './frames'
 import { loadImageUrl } from './images'
@@ -16,8 +15,8 @@ import { formatLength, lengthIn, type LengthUnit } from './units'
  * little off shows more of the same design instead of a seam. It reads the design uploaded as the banknote's
  * background as it shows there (cut to the banknote's proportions, centred, over its colour), compares each edge with
  * the one across from it and finds where they break. The cut tolerance is how far the cut may land either side of each
- * edge; the drift previews a cut that far off and is never saved. The same reading checks two rules the brief sets for
- * light paper, under the watermark and around the thread. The thresholds are first guesses, to tune with Keller.
+ * edge. The same reading checks two rules the brief sets for light paper, under the watermark and around the thread.
+ * The thresholds are first guesses, to tune with Keller.
  */
 
 /** The cut tolerance, mm (the crit said to allow 0.5 to 1 mm) */
@@ -53,29 +52,6 @@ export function fitContinuous(raw: unknown): ContinuousDesign | undefined {
   const cut = (raw as { cutMm?: unknown }).cutMm
   return { cutMm: typeof cut === 'number' && Number.isFinite(cut) ? clamp(cut, CUT_MM.min, CUT_MM.max) : CUT_MM.initial }
 }
-
-/** A cut landing off the edges, mm: positive moves it right and down over the design */
-export interface CutDrift {
-  x: number
-  y: number
-}
-
-/**
- * Each banknote's drift preview: a way of looking while its Banknote tab shows it, never saved or undone, and back to
- * none once the tab closes
- */
-export const useCutDrift = create<{ drifts: Record<string, CutDrift> }>(() => ({ drifts: {} }))
-
-export function setCutDrift(noteId: string, drift: CutDrift | undefined) {
-  useCutDrift.setState((s) => {
-    const { [noteId]: _old, ...drifts } = s.drifts
-    return { drifts: drift && (drift.x || drift.y) ? { ...drifts, [noteId]: drift } : drifts }
-  })
-}
-
-/** The drift shown: never past the tolerance, so lowering it brings the cut back */
-export const driftWithin = (drift: CutDrift | undefined, cutMm: number): CutDrift =>
-  ({ x: clamp(drift?.x ?? 0, -cutMm, cutMm), y: clamp(drift?.y ?? 0, -cutMm, cutMm) })
 
 /** What decides how the design reads: the image, and the banknote's size */
 interface DesignLook {

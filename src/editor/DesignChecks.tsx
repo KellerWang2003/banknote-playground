@@ -1,10 +1,9 @@
 import { CircleCheck, TriangleAlert } from 'lucide-react'
-import { useEffect } from 'react'
 import { create } from 'zustand'
 import { cn } from '@/lib/utils'
 import { Drawer, Labeled, LengthField, Section, SwitchField } from '../components/controls'
 import { designFace, type Side } from '../lib/back'
-import { CUT_MM, designChecks, driftWithin, failingChecks, setCutDrift, useCutDrift, useDesign, type DesignCheck } from '../lib/continuous'
+import { CUT_MM, designChecks, failingChecks, useDesign, type DesignCheck } from '../lib/continuous'
 import { useReading } from '../lib/relief'
 import { updateNote } from '../lib/store'
 import type { Note } from '../lib/types'
@@ -14,8 +13,7 @@ import { Explain } from './LensVisuals'
 
 /**
  * Under the banknote's background, for an uploaded design: the continuous check. On, the canvas shows the design's
- * neighbours on the print sheet around the banknote, where its edges break and the cut tolerance's line, and the Checks
- * drawer lists the breaks. Drift previews a cut landing that far off.
+ * neighbours on the print sheet around the banknote and where its edges break, and the Checks drawer lists the breaks.
  */
 export function ContinuousSection({ note, noteRef }: { note: Note; noteRef: NoteRef }) {
   const update = (change: (n: Note) => Note) => updateNote(noteRef.projectId, noteRef.noteId, change)
@@ -26,35 +24,12 @@ export function ContinuousSection({ note, noteRef }: { note: Note; noteRef: Note
         checked={check !== undefined}
         onChange={(on) => update(({ continuous: _check, ...n }) => (on ? { ...n, continuous: { cutMm: CUT_MM.initial } } : n))} />
       {check && (
-        <>
-          <Labeled label="Cut tolerance">
-            <LengthField label="±" title="How far either side of each edge the cut may land: the dashed line inside each edge"
-              value={check.cutMm} min={CUT_MM.min} max={CUT_MM.max} step={CUT_MM.step} onChange={(cutMm) => update((n) => ({ ...n, continuous: { cutMm } }))} />
-          </Labeled>
-          {check.cutMm > 0 && <DriftFields noteId={note.id} cutMm={check.cutMm} />}
-        </>
+        <Labeled label="Cut tolerance">
+          <LengthField label="±" title="How far either side of each edge the cut may land"
+            value={check.cutMm} min={CUT_MM.min} max={CUT_MM.max} step={CUT_MM.step} onChange={(cutMm) => update((n) => ({ ...n, continuous: { cutMm } }))} />
+        </Labeled>
       )}
     </Section>
-  )
-}
-
-/**
- * A cut landing up to the tolerance off, across and down: the design slides the other way and its neighbours come in at
- * the edges. A way of looking, not saved or undone
- */
-function DriftFields({ noteId, cutMm }: { noteId: string; cutMm: number }) {
-  const drift = driftWithin(useCutDrift((s) => s.drifts[noteId]), cutMm)
-  // Only while the tab shows it: closing the tab, the banknote or the check brings the cut back
-  useEffect(() => () => setCutDrift(noteId, undefined), [noteId])
-  return (
-    <Labeled label="Drift">
-      <div className="grid grid-cols-2 gap-2">
-        <LengthField label="X" title="Preview the cut landing this far right, or left below 0: not saved" value={drift.x} min={-cutMm} max={cutMm}
-          step={CUT_MM.step} onChange={(x) => setCutDrift(noteId, { ...drift, x })} />
-        <LengthField label="Y" title="Preview the cut landing this far down, or up below 0: not saved" value={drift.y} min={-cutMm} max={cutMm}
-          step={CUT_MM.step} onChange={(y) => setCutDrift(noteId, { ...drift, y })} />
-      </div>
-    </Labeled>
   )
 }
 

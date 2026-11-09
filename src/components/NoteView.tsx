@@ -21,7 +21,6 @@ import { type PlacedBox, boxTurn } from '../lib/placed'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { hasThread, type PlacedLayer } from '../lib/layers'
 import { framesTiltOf, showsBack, useTilt } from '../tilt/tilt'
-import { DesignTiles } from './DesignTiles'
 
 // Height ÷ width of each image, once loaded
 const aspects = new Map<string, number>()
@@ -286,7 +285,6 @@ export function NoteView({
   offsetMm = 0,
   selected,
   hovered,
-  faceShiftMm,
   side = 'front',
 }: {
   note: Note
@@ -316,11 +314,6 @@ export function NoteView({
   selected?: 'thread' | PlacedLayer
   /** On the canvas, the part a click would pick, outlined lightly */
   hovered?: 'thread' | PlacedLayer
-  /**
-   * On the canvas, a cut landing this far off the edges, mm (the continuous check's drift): the design moves the other
-   * way and its neighbours' copies come in at the edges. Never exported
-   */
-  faceShiftMm?: { x: number; y: number }
   /** The face a still note shows; a live one shows whichever the shared turn has come round to, turning over in 3D with `perspective` */
   side?: Side
 }) {
@@ -469,9 +462,7 @@ export function NoteView({
         willChange: live && perspective ? 'transform' : undefined,
       }}
     >
-      {face && (faceShiftMm
-        ? <DesignTiles url={face} width={mm(note.widthMm)} height={mm(note.heightMm)} color={PAPER} shift={{ x: mm(faceShiftMm.x), y: mm(faceShiftMm.y) }} />
-        : <img src={face} alt="" draggable={false} className="absolute inset-0 size-full object-cover" />)}
+      {face && <img src={face} alt="" draggable={false} className="absolute inset-0 size-full object-cover" />}
       {/* The design still on its way: the paper shimmers where it will show, under everything drawn over it */}
       {design && face === undefined && <Loading />}
 
