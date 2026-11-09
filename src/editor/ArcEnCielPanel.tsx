@@ -46,8 +46,9 @@ function FlowPicker({ value, holes, onChange }: { value: ArcFlow; holes: boolean
 /**
  * Right, under the Arc-en-Ciel tab: the selected banknote's Arc-en-Ciel, in the order Keller asked for (8 November): where
  * it sits, then its image, whose shape takes the bands (whatever stands out from its background), or the bands go round it
- * with Invert, then the bands: where they start, their colours in order, how wide each is, and the tilt that slides them.
- * Points and Line are placed on the canvas (ArcHandles.tsx). Removing it is beside the tabs.
+ * with Invert, then the bands: where they start, their colours in order, how wide each is, and the tilt that slides them,
+ * and last Realistic, which draws the embossed ridges themselves in the lamp's light. Points and Line are placed on the
+ * canvas (ArcHandles.tsx). Removing it is beside the tabs.
  */
 export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
   note: Note
@@ -113,6 +114,8 @@ export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
               onChange={(axis) => change((a) => ({ ...a, axis }))} />
           </Labeled>
         </div>
+        <SwitchField label="Realistic" title="Drawn as embossed ridges in the lamp's light: two colours to a ridge, and the slopes facing you win"
+          checked={arc.realistic === true} onChange={(on) => change((a) => ({ ...a, realistic: on }))} />
       </Section>
     </Group>
   )

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  type MmPoint, type Rgb, averageRgb, bandColour, bandSlide, curveControls, lineDistance, linearRgb, pointsDistance, sampleCurve, spotMm,
-  srgbBytes,
+  type ArcLight, type MmPoint, type Rgb, averageRgb, bandColour, bandSlide, curveControls, lineDistance, linearRgb, pointsDistance,
+  sampleCurve, spotMm, srgbBytes,
 } from './arcEnCiel'
 import { inkCoverage } from './inkMask'
 import { type MaskSource, drawBands, paintBands } from './inkRenderer'
@@ -16,6 +16,8 @@ import type { ArcEnCiel } from './types'
  * (`inkCoverage`), and kept. Every separate shape in the image gets its own bands, as the sponsor's flower gives each petal
  * its own, since each pixel goes by the edge nearest it. Point and Line need no map: their distances are worked out as
  * they are drawn. Tilting only slides the bands along these distances (`bandSlide`), so a map is never redrawn for a tilt.
+ * With Realistic on, the area the intaglio plate embosses is worked out with them (`embossField`), whatever the bands
+ * start from.
  */
 
 /** Longest side a map is worked out at, px: a distance changes smoothly, so the GPU's interpolation keeps band edges smooth at any zoom */
@@ -39,6 +41,8 @@ export interface BandShape {
   edge: BandField
   /** How far each pixel lies from the nearest hole in the shape; none when it has no holes */
   holes?: BandField
+  /** How far each pixel lies inside the area the plate embosses (`embossField`, 0 outside it); none when nothing is in the shape */
+  emboss?: BandField
 }
 
 const UNREACHED = 1e20
@@ -106,10 +110,102 @@ function fieldFrom(seeds: Uint8Array, width: number, height: number): BandField 
   return { width, height, data, max }
 }
 
+/** A corner of a pixel on the shape's grid, px from its top-left */
+type GridPoint = [number, number]
+
+const cross = (o: GridPoint, a: GridPoint, b: GridPoint) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+/** The convex hull of some points, in order round it, without points along its sides: Andrew's monotone chain */
+export function convexHull(points: GridPoint[]): GridPoint[] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  if (sorted.length < 3) return sorted
+  const chain = (from: GridPoint[]) => {
+    const kept: GridPoint[] = []
+    for (const p of from) {
+      while (kept.length >= 2 && cross(kept[kept.length - 2], kept[kept.length - 1], p) <= 0) kept.pop()
+      kept.push(p)
+    }
+    kept.pop()
+    return kept
+  }
+  return [...chain(sorted), ...chain([...sorted].reverse())]
+}
+
+/**
+ * The area the intaglio plate embosses, with Realistic on (the plan of 8 November: white emboss inside a rubber band round
+ * the shape): the convex hull of its pixels, read from half coverage as `shapeMaps` reads them, so the paper in its holes
+ * and bays is embossed too. How far each pixel's middle lies inside it, in box widths, 0 outside, worked out exactly from
+ * the hull's sides, so its edge stays straight however far in it is seen. Undefined when nothing is in the shape.
+ */
+export function embossField(coverage: Uint8ClampedArray, width: number, height: number): BandField | undefined {
+  // The pixels at either end of each row, by their corners: the hull of those is the hull of them all
+  const corners: GridPoint[] = []
+  for (let y = 0; y < height; y++) {
+    let first = -1, last = -1
+    for (let x = 0, row = y * width; x < width; x++) {
+      if (coverage[row + x] < 128) continue
+      if (first < 0) first = x
+      last = x
+    }
+    if (first >= 0) corners.push([first, y], [first, y + 1], [last + 1, y], [last + 1, y + 1])
+  }
+  const hull = convexHull(corners)
+  if (hull.length < 3) return undefined
+  // Each side as a line, its normal pointing in: a pixel's distance inside is the least of its distances from them
+  let area = 0
+  hull.forEach((a, i) => {
+    const b = hull[(i + 1) % hull.length]
+    area += a[0] * b[1] - b[0] * a[1]
+  })
+  const sides = hull.map((a, i) => {
+    const b = hull[(i + 1) % hull.length]
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1])
+    const nx = ((a[1] - b[1]) / length) * Math.sign(area), ny = ((b[0] - a[0]) / length) * Math.sign(area)
+    return { nx, ny, c: nx * a[0] + ny * a[1] }
+  }).sort((a, b) => b.nx - a.nx)
+  const data = new Float32Array(width * height)
+  let max = 0
+  // Along each row the sides' distances are straight lines; the least of them is a chain of them in order of slope, found
+  // once a row (the lower envelope), so each pixel looks at one or two
+  const slopes: number[] = [], heights: number[] = []
+  for (let y = 0; y < height; y++) {
+    const py = y + 0.5
+    slopes.length = 0
+    heights.length = 0
+    for (const { nx, ny, c } of sides) {
+      const b = ny * py - c
+      const top = slopes.length - 1
+      if (top >= 0 && Math.abs(slopes[top] - nx) < 1e-12) {
+        if (b >= heights[top]) continue
+        slopes.pop()
+        heights.pop()
+      }
+      while (slopes.length >= 2) {
+        const m1 = slopes[slopes.length - 2], b1 = heights[heights.length - 2]
+        const m2 = slopes[slopes.length - 1], b2 = heights[heights.length - 1]
+        if ((b - b1) * (m1 - m2) > (b2 - b1) * (m1 - nx)) break
+        slopes.pop()
+        heights.pop()
+      }
+      slopes.push(nx)
+      heights.push(b)
+    }
+    for (let x = 0, j = 0, row = y * width; x < width; x++) {
+      const px = x + 0.5
+      while (j + 1 < slopes.length && slopes[j + 1] * px + heights[j + 1] <= slopes[j] * px + heights[j]) j++
+      const d = Math.max(0, slopes[j] * px + heights[j]) / width
+      data[row + x] = d
+      if (d > max) max = d
+    }
+  }
+  return { width, height, data, max }
+}
+
 /**
  * The maps for a shape, from how much ink each pixel takes (0 to 255, one byte a pixel, `inkCoverage`): a pixel is in the
  * shape from half coverage. Beyond the image is paper, so a shape cut by its edge has an edge there. Holes are paper the
- * shape closes round: paper that can't reach the image's edge without crossing the shape.
+ * shape closes round: paper that can't reach the image's edge without crossing the shape. The embossed area comes with
+ * them (`embossField`).
  */
 export function shapeMaps(coverage: Uint8ClampedArray, width: number, height: number, key = ''): BandShape {
   const w = width + 2, h = height + 2
@@ -151,7 +247,13 @@ export function shapeMaps(coverage: Uint8ClampedArray, width: number, height: nu
       anyHole = true
     }
   }
-  return { key, edge: fieldFrom(paper, width, height), ...(anyHole ? { holes: fieldFrom(holes, width, height) } : {}) }
+  const emboss = embossField(coverage, width, height)
+  return {
+    key,
+    edge: fieldFrom(paper, width, height),
+    ...(anyHole ? { holes: fieldFrom(holes, width, height) } : {}),
+    ...(emboss ? { emboss } : {}),
+  }
 }
 
 /** Coverage averaged down to at most MAP_PX on its longest side, in whole steps */
@@ -246,6 +348,9 @@ export function useBandShape(arc: Pick<ArcEnCiel, 'imageId' | 'invert'> | undefi
 /** Whether the bands start from the shape (Edge, Holes), so they need its maps */
 export const fromShape = (arc: Pick<ArcEnCiel, 'flow'>) => arc.flow === 'edge' || arc.flow === 'holes'
 
+/** Whether Arc-en-Ciel needs its shape's maps: for bands from the shape, or with Realistic on for the area it embosses */
+export const needsShape = (arc: Pick<ArcEnCiel, 'flow' | 'realistic'>) => fromShape(arc) || arc.realistic === true
+
 /** Everything Arc-en-Ciel is drawn from at a tilt, the canvas and the export alike, on the GPU or not */
 export interface BandLook {
   /** Where the distances come from: a map (Edge, Holes), the nearest point (Point) or Line */
@@ -256,17 +361,21 @@ export interface BandLook {
   /** The box, mm */
   box: [number, number]
   bandMm: number
-  /** How far the bands have slid, in bands (`bandSlide`) */
+  /** How far the bands have slid, in bands (`bandSlide`); none with Realistic on, where the ridges move them */
   slide: number
   /** The colours in linear light */
   colours: Rgb[]
+  /** With Realistic on, where it is drawn as lit ridges: the light at this tilt (`arcLight`), and the area embossed */
+  lit?: ArcLight
+  emboss?: BandField
 }
 
 /**
  * How Arc-en-Ciel looks at a tilt: undefined while the maps it needs are on their way. Holes on a shape without any start
- * the bands from its edge, as Edge does.
+ * the bands from its edge, as Edge does. With `light` (Realistic on, where the GPU can draw it) it is drawn as lit ridges
+ * instead of sliding, its shape's embossed area round it once that is worked out.
  */
-export function bandLook(arc: ArcEnCiel, shape: BandShape | null | undefined, tilt: Tilt2): BandLook | undefined {
+export function bandLook(arc: ArcEnCiel, shape: BandShape | null | undefined, tilt: Tilt2, light?: ArcLight): BandLook | undefined {
   const map = fromShape(arc)
   const field = map ? (arc.flow === 'holes' && shape?.holes) || shape?.edge : undefined
   if (map && !field) return undefined
@@ -276,8 +385,9 @@ export function bandLook(arc: ArcEnCiel, shape: BandShape | null | undefined, ti
     spots: arc.flow === 'point' ? arc.points.map((spot) => spotMm(spot, arc)) : arc.flow === 'line' ? curveControls(arc) : [],
     box: [arc.widthMm, arc.heightMm],
     bandMm: arc.bandMm,
-    slide: bandSlide(arc, tilt),
+    slide: light ? 0 : bandSlide(arc, tilt),
     colours: arc.colors.map(linearRgb),
+    ...(light ? { lit: light, ...(shape?.emboss ? { emboss: shape.emboss } : {}) } : {}),
   }
 }
 
@@ -332,14 +442,14 @@ const BY_HAND_PX = 512
 const byHand = new WeakMap<MaskSource, { key: string; field?: BandField; canvas: HTMLCanvasElement }>()
 
 /**
- * Arc-en-Ciel drawn without the GPU, at rest (it doesn't slide, as each frame would mean working out every pixel again):
- * a canvas to scale into its box, up to BY_HAND_PX on its longest side for a box `width` × `height` pixels. Drawn again
- * only when it would look different. Undefined where there is no canvas to draw on (the tests).
+ * Arc-en-Ciel drawn without the GPU, at rest (it doesn't slide, as each frame would mean working out every pixel again),
+ * and plain with Realistic on: a canvas to scale into its box, up to BY_HAND_PX on its longest side for a box `width` ×
+ * `height` pixels. Drawn again only when it would look different. Undefined where there is no canvas to draw on (the tests).
  */
 export function bandsByHand(mask: MaskSource, look: BandLook, width: number, height: number) {
   const k = Math.min(1, BY_HAND_PX / Math.max(width, height))
   const w = Math.max(1, Math.round(width * k)), h = Math.max(1, Math.round(height * k))
-  const { field, ...rest } = { ...look, slide: 0 }
+  const { field, ...rest } = { ...look, slide: 0, lit: undefined, emboss: undefined }
   const key = `${w}×${h}|${JSON.stringify(rest)}`
   const last = byHand.get(mask)
   if (last?.key === key && last.field === field) return last.canvas

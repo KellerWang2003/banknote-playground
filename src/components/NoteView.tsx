@@ -12,8 +12,9 @@ import { threadWindowMask, windowEdges } from '../lib/thread'
 import type { Frame, MagneticInk, Note } from '../lib/types'
 import { paintRelief, reliefPixels, useRelief } from '../lib/relief'
 import { useInkMask } from '../lib/inkMask'
-import { litInkAvailable, paintLitInk } from '../lib/inkRenderer'
-import { bandLook, fromShape, paintArcEnCiel, useBandShape } from '../lib/bandMap'
+import { bandsAvailable, litInkAvailable, paintLitInk } from '../lib/inkRenderer'
+import { bandLook, fromShape, needsShape, paintArcEnCiel, useBandShape } from '../lib/bandMap'
+import { arcLight } from '../lib/arcEnCiel'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
 import { type Quarter, quarterOf } from '../lib/rotate'
@@ -354,15 +355,17 @@ export function NoteView({
       paintLitInk(canvas, inkMask.canvas, inkLight(magneticInk, note, tilt, perspectiveFor(note, 1), quarter), inkPx.cell)
     }
   }
-  // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) its distance maps;
-  // drawn into a canvas of its own in its box, as many pixels as it shows with, again only when its bands move
+  // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) or Realistic's
+  // embossed area its maps; drawn into a canvas of its own in its box, as many pixels as it shows with, again only when its
+  // bands move, or with Realistic on its ridges turn from the lamp (where the browser can draw them: WebGL)
   const arcMask = useInkMask(arcEnCiel, arcEnCiel && devicePx(Math.max(arcEnCiel.widthMm, arcEnCiel.heightMm) * scale))
-  const arcShape = useBandShape(arcEnCiel && fromShape(arcEnCiel) ? arcEnCiel : undefined)
+  const arcShape = useBandShape(arcEnCiel && needsShape(arcEnCiel) ? arcEnCiel : undefined)
+  const arcLit = arcEnCiel?.realistic === true && bandsAvailable()
   const arcPx = arcEnCiel ? inkPixels(arcEnCiel.widthMm * scale, arcEnCiel.heightMm * scale, devicePx(1)) : undefined
   const arcCanvas = useRef<HTMLCanvasElement>(null)
-  const paintArc = (tilt: Tilt2) => {
+  const paintArc = (tilt: Tilt2, view: Tilt2, quarter: Quarter) => {
     const canvas = arcCanvas.current
-    const look = canvas && arcEnCiel && bandLook(arcEnCiel, arcShape, tilt)
+    const look = canvas && arcEnCiel && bandLook(arcEnCiel, arcShape, tilt, arcLit ? arcLight(arcEnCiel, view, quarter) : undefined)
     if (canvas && look && arcMask?.canvas) paintArcEnCiel(canvas, arcMask.canvas, look)
   }
   const revealOf = (state: LiveState) => reveal ?? watermarkReveal(state.light, { x: state.angleX, y: state.angle })
@@ -385,9 +388,12 @@ export function NoteView({
       }
       // Realistic ink turns from the lamp as the banknote turns on screen, turning over included; it draws again only when
       // that changes, not with the light or the timeline
-      if (realistic) paintInk({ x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }, quarterOf(state.quarterTurns ?? 0))
-      // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen
-      paintArc({ x: angleX, y: angle })
+      const view = { x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }
+      const quarter = quarterOf(state.quarterTurns ?? 0)
+      if (realistic) paintInk(view, quarter)
+      // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen; Realistic, its ridges
+      // turn from the lamp as the ink does
+      paintArc({ x: angleX, y: angle }, view, quarter)
     }
     apply.current(useTilt.getState())
   })
@@ -395,7 +401,7 @@ export function NoteView({
   useLayoutEffect(() => {
     if (live) return
     if (realistic) paintInk({ x: angleX, y: angle }, 0)
-    paintArc({ x: angleX, y: angle })
+    paintArc({ x: angleX, y: angle }, { x: angleX, y: angle }, 0)
   })
   useLayoutEffect(() => {
     if (!live) return

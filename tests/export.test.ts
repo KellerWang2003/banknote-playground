@@ -7,6 +7,8 @@ import type { InkMask } from '../src/lib/inkMask'
 import type { Relief } from '../src/lib/relief'
 import { DEFAULT_INK, INK_BAR_LIGHT, INK_ROLL_DEG, barCentre, inkShift } from '../src/lib/magneticInk'
 import { inkLight } from '../src/lib/realisticInk'
+import { arcLight, bandSlide, newArcEnCiel } from '../src/lib/arcEnCiel'
+import type { BandLook } from '../src/lib/bandMap'
 import { FLIP_SECONDS, PAPER, turnDeg } from '../src/lib/back'
 import { createNote } from '../src/lib/notes'
 import { SWEEP_SECONDS } from '../src/lib/playback'
@@ -16,12 +18,17 @@ import type { Note, PlaybackMove } from '../src/lib/types'
 const loadImageUrl = vi.hoisted(() => vi.fn(async (_id: string, _px?: number): Promise<string | undefined> => undefined))
 vi.mock('../src/lib/images', () => ({ loadImageUrl }))
 
-// jsdom has no WebGL: realistic magnetic ink's renderer notes what it was asked to light, and lights it or not as told
-const gpu = vi.hoisted(() => ({ lights: true, drawn: [] as unknown[][] }))
+// jsdom has no WebGL: realistic magnetic ink's renderer, and Arc-en-Ciel's, note what they were asked to draw, and draw
+// it or not as told
+const gpu = vi.hoisted(() => ({ lights: true, drawn: [] as unknown[][], bands: [] as unknown[][] }))
 vi.mock('../src/lib/inkRenderer', () => ({
   drawLitInk: (...args: unknown[]) => {
     gpu.drawn.push(args)
     return gpu.lights
+  },
+  drawBands: (...args: unknown[]) => {
+    gpu.bands.push(args)
+    return true
   },
 }))
 
@@ -246,6 +253,32 @@ describe('magnetic ink in an export', () => {
     vi.unstubAllGlobals()
     expect(gpu.drawn.map((args) => args[3])).toEqual([inkLight(note.magneticInk, note, { x: turnDeg(0.1), y: 4 }, perspectiveFor(note, 1), 1)])
     expect(gpu.drawn[0][5]).toBe(Math.max(1, Math.round(layout.height / 1080)))
+  })
+})
+
+describe('Arc-en-Ciel in an export', () => {
+  it('slides its bands with the tilt, or with Realistic on lights its ridges as the canvas does, turned over and rotated as the banknote shows', () => {
+    gpu.bands = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}),
+      set: (target, key, value) => {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as CanvasRenderingContext2D
+    const base = makeNote(150, 70)
+    const arc = { ...newArcEnCiel(base), imageId: 'a', flow: 'point' as const }
+    const assets = { frames: new Map(), arc: { mask: { canvas: 'mask' } as unknown as InkMask } }
+    drawFace(ctx, { ...base, noThread: true, arcEnCiel: arc }, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
+    const realistic = { ...arc, realistic: true }
+    drawFace(ctx, { ...base, noThread: true, arcEnCiel: realistic }, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
+    drawFace(ctx, { ...base, noThread: true, arcEnCiel: realistic }, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, turn: 0.3, quarter: 3 })
+    const looks = gpu.bands.map((args) => args[3] as BandLook)
+    expect(looks[0]).toMatchObject({ slide: bandSlide(arc, { x: 0, y: 10 }) })
+    expect(looks[0]).not.toHaveProperty('lit')
+    expect(looks[1]).toMatchObject({ slide: 0, lit: arcLight(arc, { x: turnDeg(0.3), y: 10 }, 3) })
+    // Without perspective, turning over leaves it lit as it was, as realistic ink is
+    expect(looks[2]).toMatchObject({ lit: arcLight(arc, { x: 0, y: 10 }, 3) })
   })
 })
 

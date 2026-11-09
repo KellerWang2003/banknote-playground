@@ -7,7 +7,8 @@ import { loadImageUrl } from './images'
 import { patternMix, playbackLens, playbackTilt, preparePattern, sectionSpans, shownLabel } from './pattern'
 import { SWEEP_SECONDS, playbackEase, playbackSettings } from './playback'
 import { type Relief, exportRelief } from './relief'
-import { type BandShape, bandLook, drawArcEnCiel, fromShape, loadBandShape } from './bandMap'
+import { arcLight } from './arcEnCiel'
+import { type BandShape, bandLook, drawArcEnCiel, loadBandShape, needsShape } from './bandMap'
 import { type InkMask, exportInkMask } from './inkMask'
 import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
@@ -187,11 +188,14 @@ export async function loadNoteAssets(note: Note, scale = 0, back = false): Promi
   return { face, frames, relief, arc, ink }
 }
 
-/** Arc-en-Ciel's mask from the whole image, and the maps its bands start from, which need no more detail than the canvas's */
+/**
+ * Arc-en-Ciel's mask from the whole image, and the maps its bands start from or Realistic embosses, which need no more
+ * detail than the canvas's
+ */
 async function loadArc(arc: ArcEnCiel, imageId: string, px: number): Promise<NoteAssets['arc']> {
   const [mask, shape] = await Promise.all([
     exportInkMask(imageId, arc.invert, px),
-    fromShape(arc) ? loadBandShape(imageId, arc.invert) : undefined,
+    needsShape(arc) ? loadBandShape(imageId, arc.invert) : undefined,
   ])
   return mask && { mask, ...(shape ? { shape } : {}) }
 }
@@ -268,7 +272,9 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.restore()
     return
   }
-  if (arcEnCiel && assets.arc) drawArc(ctx, arcEnCiel, assets.arc, mm, { x: angleX, y: angle })
+  if (arcEnCiel && assets.arc) {
+    drawArc(ctx, arcEnCiel, assets.arc, mm, { x: angleX, y: angle }, { turn: options.perspective ? options.turn : 0, quarter: options.quarter })
+  }
   if (magneticInk && assets.ink) {
     drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle }, { note, turn: options.perspective ? options.turn : 0, quarter: options.quarter, grain: options.grain })
   }
@@ -457,10 +463,20 @@ export function drawInk(
 
 /**
  * Arc-en-Ciel as NoteView draws it, over the watermark and under magnetic ink: its bands slid as far as the tilt takes
- * them, through its mask, on the canvas's renderer, or at rest where the browser has no WebGL
+ * them, through its mask, on the canvas's renderer, or at rest where the browser has no WebGL. Realistic, on its banknote
+ * (`lit`), its ridges are lit as the canvas lights them, turned over and rotated as the banknote shows (`lit.turn`,
+ * `lit.quarter`).
  */
-export function drawArc(ctx: Ctx, arc: ArcEnCiel, assets: NonNullable<NoteAssets['arc']>, mm: (value: number) => number, tilt: Tilt2) {
-  const look = bandLook(arc, assets.shape, tilt)
+export function drawArc(
+  ctx: Ctx,
+  arc: ArcEnCiel,
+  assets: NonNullable<NoteAssets['arc']>,
+  mm: (value: number) => number,
+  tilt: Tilt2,
+  lit?: { turn?: number; quarter?: Quarter },
+) {
+  const light = arc.realistic && lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter) : undefined
+  const look = bandLook(arc, assets.shape, tilt, light)
   if (!look) return
   const size = { width: Math.max(1, Math.round(mm(arc.widthMm))), height: Math.max(1, Math.round(mm(arc.heightMm))) }
   drawArcEnCiel(ctx, { x: mm(arc.xMm), y: mm(arc.yMm), width: mm(arc.widthMm), height: mm(arc.heightMm) }, assets.mask.canvas, look, size)

@@ -8,7 +8,8 @@ import { ArcEnCielPanel } from '../src/editor/ArcEnCielPanel'
 import { ArcHandles } from '../src/editor/ArcHandles'
 import { ColourList } from '../src/editor/ColourList'
 import { PlacingBox } from '../src/editor/PlacingBox'
-import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
+import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
+import { turnDeg } from '../src/lib/back'
 import { bandLook, type BandShape } from '../src/lib/bandMap'
 import { createNote } from '../src/lib/notes'
 import { PLACE_STEP } from '../src/lib/placed'
@@ -32,6 +33,12 @@ vi.mock('../src/lib/bandMap', async (importOriginal) => ({
   useBandShape: (arc?: { imageId?: string }) => (arc?.imageId ? held.shape : undefined),
   paintArcEnCiel: (canvas: HTMLCanvasElement, mask: unknown, look: unknown) => { held.painted.push({ canvas, mask, look }) },
 }))
+// Nor has it WebGL: whether Realistic's ridges can be drawn is what a test says
+const gpu = vi.hoisted(() => ({ bands: false }))
+vi.mock('../src/lib/inkRenderer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/inkRenderer')>()),
+  bandsAvailable: () => gpu.bands,
+}))
 // The panel's changes go to the banknote here
 const panel = vi.hoisted(() => ({ arc: undefined as ArcEnCiel | undefined, note: undefined as Note | undefined }))
 vi.mock('../src/editor/layerActions', async (importOriginal) => ({
@@ -47,6 +54,7 @@ vi.mock('../src/lib/images', async (importOriginal) => ({
 beforeEach(() => {
   held.shape = undefined
   held.painted = []
+  gpu.bands = false
   vi.stubGlobal('PointerEvent', class extends MouseEvent {
     pointerId: number
     constructor(type: string, options: PointerEventInit) { super(type, options); this.pointerId = options.pointerId ?? 1 }
@@ -66,6 +74,7 @@ const arcOf = (change: Partial<ArcEnCiel> = {}): ArcEnCiel => ({ ...newArcEnCiel
 const withArc = (change: Partial<ArcEnCiel> = {}): Note & { arcEnCiel: ArcEnCiel } => ({ ...plain(), arcEnCiel: arcOf(change) })
 const lastPaint = () => held.painted.at(-1)!
 const solid: BandShape = { key: 'disc|', edge: { width: 1, height: 1, data: new Float32Array(1), max: 0 } }
+const embossed: BandShape = { ...solid, emboss: { width: 1, height: 1, data: new Float32Array([0.2]), max: 0.2 } }
 
 describe("a NoteView's Arc-en-Ciel", () => {
   it('draws its bands into a canvas of its own in its box, as many pixels as it shows with, and slides them as it tilts', () => {
@@ -103,6 +112,38 @@ describe("a NoteView's Arc-en-Ciel", () => {
     rerender(<NoteView note={withArc()} scale={1} live />)
     expect(container.querySelector('[data-loading]')).toBeNull()
     expect(lastPaint().look).toMatchObject({ from: 'map', field: solid.edge })
+  })
+
+  it('with Realistic on, draws its ridges lit and embossed, turning from the lamp as the banknote tilts, rotates and turns over', () => {
+    gpu.bands = true
+    held.shape = embossed
+    const note = withArc({ flow: 'point', realistic: true })
+    let renders = 0
+    function Counted() {
+      renders++
+      return <NoteView note={note} scale={2} live perspective />
+    }
+    render(<Counted />)
+    // Its shape's maps are read for the area it embosses, though Point needs none
+    expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }, arcLight(note.arcEnCiel, { x: 0, y: 0 })))
+    expect(lastPaint().look).toMatchObject({ emboss: embossed.emboss })
+    const before = renders
+    act(() => setTilt({ angle: 10 }))
+    expect(lastPaint().look).toMatchObject({ slide: 0, lit: arcLight(note.arcEnCiel, { x: 0, y: 10 }) })
+    // The lamp stays put as the banknote is rotated on screen, and turning it over turns the ridges from it too
+    act(() => setTilt({ quarterTurns: 1 }))
+    expect(lastPaint().look).toMatchObject({ lit: arcLight(note.arcEnCiel, { x: 0, y: 10 }, 1) })
+    act(() => setTilt({ turn: 0.2 }))
+    expect(lastPaint().look).toMatchObject({ lit: arcLight(note.arcEnCiel, { x: turnDeg(0.2), y: 10 }, 1) })
+    expect(renders).toBe(before)
+  })
+
+  it('with Realistic on but no WebGL, shows its bands as without it', () => {
+    held.shape = embossed
+    const note = withArc({ flow: 'point', realistic: true })
+    render(<NoteView note={note} scale={2} live perspective />)
+    expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }))
+    expect(lastPaint().look).not.toHaveProperty('lit')
   })
 
   it('shows nothing without an image, nor on the back, and a still note draws it as at its own tilt', () => {
@@ -246,7 +287,7 @@ describe('the Arc-en-Ciel panel', () => {
     held.shape = solid
     show()
     const text = document.body.textContent!
-    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Moves on'].map((words) => text.indexOf(words))
+    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Moves on', 'Realistic'].map((words) => text.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
   })
@@ -274,6 +315,12 @@ describe('the Arc-en-Ciel panel', () => {
     expect(panel.arc!.colors.slice(0, 3)).toEqual(DEFAULT_ARC.colors)
     again()
     expect(add().hasAttribute('disabled')).toBe(true)
+  })
+
+  it('ends with Realistic, saved only when on', async () => {
+    show({ flow: 'point' })
+    await userEvent.click(screen.getByRole('switch', { name: 'Realistic' }))
+    expect(panel.arc!.realistic).toBe(true)
   })
 
   it('offers Invert only once it has an image', () => {

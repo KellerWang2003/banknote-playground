@@ -248,6 +248,11 @@ export interface ArcEnCiel {
   bandMm: number
   /** The tilt that slides the bands: up/down (level ridges) or side to side (upright ones) */
   axis: 'y' | 'x'
+  /**
+   * Drawn as embossed ridges lit by magnetic ink's lamp (arcEnCiel.ts): two colours to a ridge, the slopes facing the eye
+   * winning as it tilts, and the paper round the print embossed too. Saved only when on
+   */
+  realistic?: boolean
 }
 
 /**

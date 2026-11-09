@@ -1,6 +1,8 @@
 import { clamp } from './frames'
 import type { Tilt2 } from './lens'
 import { type Size, fitBox, newBox, withBoxAspect } from './placed'
+import { LAMP_HEIGHT_DEG, tiltMatrix } from './realisticInk'
+import { type Quarter, unturn } from './rotate'
 import type { ArcEnCiel, ArcFlow, BoxSpot } from './types'
 
 /**
@@ -10,8 +12,10 @@ import type { ArcEnCiel, ArcFlow, BoxSpot } from './types'
  * neighbouring colours, one band apart, the bands seem to slide. Its shape is one uploaded image, read as magnetic ink's
  * stencil is (`inkCoverage` in inkMask.ts). The bands start from the shape's edges, holes in it, or points or a line placed
  * on the canvas (`flow`), run through its colours in order and repeat, each Band width wide. How far they slide, and over
- * what tilt, are fixed numbers tuned by eye, as magnetic ink's were, not settings. The canvas and the export both use them;
- * the distance maps Edge and Holes start from are in bandMap.ts, and the drawing on the GPU in inkRenderer.ts.
+ * what tilt, are fixed numbers tuned by eye, as magnetic ink's were, not settings. With Realistic on (Keller, 8 November: a
+ * realistic mode for it too) it is drawn as the ridges themselves instead, in magnetic ink's lamp (`arcLight`). The canvas
+ * and the export both use them; the distance maps Edge and Holes start from, and the area the plate embosses, are in
+ * bandMap.ts, and the drawing on the GPU in inkRenderer.ts.
  */
 
 export const ARC_FLOWS: readonly ArcFlow[] = ['edge', 'holes', 'point', 'line']
@@ -67,7 +71,7 @@ function fitSpots(value: unknown, min: number, max: number, fallback: BoxSpot[])
  * Keeps Arc-en-Ciel on its banknote, as every placed layer is kept (`fitBox`), with three or four colours, its band width in
  * range, at least one point and a line with its two ends, all within ARC_REACH of its box. Also repairs a damaged save:
  * colours that aren't #rrggbb are dropped (missing ones come from the defaults), an unknown flow or axis goes back to the
- * default, Invert is kept only when it is on, and anything unknown is dropped.
+ * default, Invert and Realistic are kept only when they are on, and anything unknown is dropped.
  */
 export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
   const colors = (Array.isArray(arc.colors) ? arc.colors : []).filter((c) => typeof c === 'string' && HEX.test(c)).slice(0, ARC_COLOURS.max)
@@ -81,6 +85,7 @@ export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
     axis: arc.axis === 'x' ? 'x' : 'y',
   }
   if (arc.invert === true) fitted.invert = true
+  if (arc.realistic === true) fitted.realistic = true
   return typeof arc.imageId === 'string' ? { imageId: arc.imageId, ...fitted } : fitted
 }
 
@@ -138,6 +143,112 @@ export function bandColour(colours: Rgb[], phase: number, blur = 0, average = av
     const c = from[k] + (to[k] - from[k]) * b
     return c + (average[k] - c) * fade
   }) as Rgb
+}
+
+/*
+ * Realistic: the ridges themselves. The intaglio plate embosses level ridges (↕) or upright ones (↔) ARC_RIDGE_MM apart in
+ * register with the print, and each ridge's two slopes carry the colours half a band either side of the band they sit in:
+ * the slope facing up (↕) or right (↔) the colour half a band further on, the other one the colour half a band back. Flat,
+ * each slope shows as much as the other, so every spot mixes two neighbouring colours; tilted across the ridges, the slopes
+ * facing the eye take more of each ridge, until by ARC_SLIDE_DEG only they show, and the bands have moved as far as step
+ * 1's slide takes them, the same way. The slopes are shaded by how they face magnetic ink's lamp, LAMP_HEIGHT_DEG above the
+ * eye, staying where it is as the banknote is rotated, against flat paper seen flat, as nothing else on the banknote is lit:
+ * dark in the grooves, with a narrow sheen off each ridge, strongest with the top tipped back by half LAMP_HEIGHT_DEG. The
+ * paper inside a rubber band round the shape is embossed too (bandMap.ts), white. The numbers are tuned by eye on the plan's
+ * stills (8 November), as magnetic ink's were, and are not settings.
+ */
+
+/** How far apart the ridges are, mm: 0.4 until Oberthur says how fine their plates emboss */
+export const ARC_RIDGE_MM = 0.4
+/** How steep the ridges' slopes are halfway down, degrees, for how they catch the light */
+export const ARC_RIDGE_SLOPE_DEG = 30
+/** The room's light, the lamp's, and how far the lamp's light wraps round a slope turning away from it */
+export const ARC_LIGHT = { room: 0.3, lamp: 0.7, wrap: 0.4 }
+/** The grooves between ridges: how much darker at the bottom, and how wide their shadow, as a share of a ridge either side */
+export const ARC_GROOVE = { dark: 0.5, width: 0.07 }
+/** The lamp's sheen off each ridge: how bright, and how narrow (the power of its fall-off) */
+export const ARC_SHEEN = { strength: 0.08, power: 80 }
+/** Pixels wider than `from` of a ridge start to show the ridges' average, and from `to` show only it, as the eye sees ridges too fine to tell apart */
+export const ARC_RIDGE_FADE = { from: 0.3, to: 0.6 }
+/** Spots across each pixel the ridges are drawn from where they are wide enough to see */
+export const ARC_RIDGE_SAMPLES = 6
+
+const RAD = Math.PI / 180
+const SLOPE = Math.tan(ARC_RIDGE_SLOPE_DEG * RAD)
+const wrapped = (cosine: number) => Math.max(0, (cosine + ARC_LIGHT.wrap) / (1 + ARC_LIGHT.wrap))
+/** The light flat paper catches seen flat, which the slopes' light is measured against */
+export const ARC_FLAT_LIGHT = ARC_LIGHT.room + ARC_LIGHT.lamp * wrapped(Math.cos(LAMP_HEIGHT_DEG * RAD))
+
+type Vec3 = [number, number, number]
+const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const unit = (v: Vec3): Vec3 => {
+  const length = Math.hypot(...v) || 1
+  return [v[0] / length, v[1] / length, v[2] / length]
+}
+
+/** Everything the GPU needs to draw Arc-en-Ciel's ridges at one tilt, as they lie on the banknote (x right, y down, z out of it) */
+export interface ArcLight {
+  /** Which way the ridges are counted, across them: the slope facing the other way carries the colour half a band on */
+  across: [number, number]
+  /** How much more of each ridge the slopes facing `across` show than the others, −1 to 1: 0 flat, all of it by ARC_SLIDE_DEG */
+  share: number
+  /** Which way the lamp is, and halfway between it and the eye, where a slope facing it shines */
+  lamp: Vec3
+  half: Vec3
+  /** Each slope's average light, `shade` × (1 − `sheen`), and its average sheen: the other slope's, then the one facing `across` */
+  means: [number, number, number, number]
+}
+
+/**
+ * How a spot `p` of the way across a ridge catches the light (0 and 1 the bottoms of its grooves, ½ its crest): `shade`,
+ * from how it faces the lamp, measured against flat paper seen flat and darker down in a groove; `sheen`, how much of the
+ * lamp it mirrors to the eye
+ */
+export function ridgeLight(light: Pick<ArcLight, 'across' | 'lamp' | 'half'>, p: number) {
+  const beta = Math.atan(SLOPE * Math.sin(2 * Math.PI * p))
+  const n: Vec3 = [-light.across[0] * Math.sin(beta), -light.across[1] * Math.sin(beta), Math.cos(beta)]
+  const groove = Math.min(p, 1 - p) / ARC_GROOVE.width
+  const shade = Math.min((ARC_LIGHT.room + ARC_LIGHT.lamp * wrapped(dot(n, light.lamp))) / ARC_FLAT_LIGHT, 1)
+    * (1 - ARC_GROOVE.dark * Math.exp(-groove * groove))
+  return { shade, sheen: ARC_SHEEN.strength * Math.max(0, dot(n, light.half)) ** ARC_SHEEN.power }
+}
+
+/** Spots each slope's average light is taken from */
+const MEAN_SAMPLES = 64
+
+/**
+ * How to draw Arc-en-Ciel's ridges with its banknote turned through `tilt` (turning over included) and rotated `quarter`
+ * quarter turns on screen: how much of each ridge each slope shows, seen from straight in front, and where the lamp is, as
+ * they lie on the banknote. The lamp stays where it is as the banknote is rotated, as magnetic ink's does (`inkLight`).
+ */
+export function arcLight(arc: Pick<ArcEnCiel, 'axis'>, tilt: Tilt2, quarter: Quarter = 0): ArcLight {
+  const m = tiltMatrix(tilt)
+  // From the room onto the banknote: rotated back first, then turned back
+  const onNote = ([x, y, z]: Vec3): Vec3 => {
+    const on = unturn(x, y, quarter)
+    const v: Vec3 = [on.x, on.y, z]
+    return [dot([m[0], m[1], m[2]], v), dot([m[3], m[4], m[5]], v), dot([m[6], m[7], m[8]], v)]
+  }
+  const eye = onNote([0, 0, 1])
+  const lamp = unit(onNote([0, -Math.tan(LAMP_HEIGHT_DEG * RAD), 1]))
+  // Down the banknote across level ridges, as tilting the top away shows the slopes facing down, which carry the colours
+  // half a band back, moving the bands the way step 1 slides them; leftwards across upright ones, as turning the right side
+  // away shows the slopes facing left
+  const across: [number, number] = arc.axis === 'x' ? [-1, 0] : [0, 1]
+  const tan = (eye[0] * across[0] + eye[1] * across[1]) / Math.max(eye[2], 1e-6)
+  const share = clamp(tan / Math.tan(ARC_SLIDE_DEG * RAD), -1, 1)
+  const light = { across, lamp, half: unit([lamp[0] + eye[0], lamp[1] + eye[1], lamp[2] + eye[2]]) }
+  const mean = (from: number) => {
+    let shade = 0, sheen = 0
+    for (let i = 0; i < MEAN_SAMPLES; i++) {
+      const at = ridgeLight(light, from + (i + 0.5) / (2 * MEAN_SAMPLES))
+      shade += at.shade * (1 - at.sheen)
+      sheen += at.sheen
+    }
+    return [shade / MEAN_SAMPLES, sheen / MEAN_SAMPLES]
+  }
+  // + 0 turns a −0 into 0
+  return { ...light, share: share + 0, means: [...mean(0), ...mean(0.5)] as ArcLight['means'] }
 }
 
 /** A point in mm from the top-left corner of the layer's box */

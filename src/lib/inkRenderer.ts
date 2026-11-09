@@ -1,4 +1,7 @@
-import { ARC_LINE_POINTS, ARC_POINTS, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb } from './arcEnCiel'
+import {
+  ARC_FLAT_LIGHT, ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_POINTS, ARC_RIDGE_FADE, ARC_RIDGE_MM, ARC_RIDGE_SAMPLES, ARC_RIDGE_SLOPE_DEG,
+  ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
+} from './arcEnCiel'
 import type { BandField, BandLook } from './bandMap'
 import {
   AWAY_LIGHT, FILM_FULL, FILM_N2, GLINT_LOBE, GLINT_POWER, GLINT_TILT, GLINT_WHITE, GRAIN_LIGHT, GRAIN_TILT, LAMP_GLOW, LAMP_POWER,
@@ -10,7 +13,8 @@ import {
  * in exports, as browsers allow only a few, with a program for each. It draws a layer at a tilt in its own canvas and
  * copies the result where it goes: a canvas in the layer's box on a banknote (`paintLitInk`, `paintBands`), redrawn only
  * when what it shows changes, or the export's banknote face (`drawLitInk`, `drawBands`). Without WebGL there is nothing to
- * draw them with: the ink keeps its flat look, and Arc-en-Ciel shows its bands at rest (bandMap.ts).
+ * draw them with: the ink keeps its flat look, and Arc-en-Ciel shows its bands at rest, plain with Realistic on too
+ * (bandMap.ts).
  */
 
 const glsl = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n))
@@ -110,7 +114,9 @@ const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
 
 // Every pixel of Arc-en-Ciel's box: how far it is from where the bands start (from the map, the nearest point, or Line),
 // slid along by the tilt, gives its place among the bands and so its colour, through the shape's mask. The same sums as
-// bandMap.ts's, which draws it without the GPU
+// bandMap.ts's, which draws it without the GPU. With Realistic on (uLit), the ridges instead: each spot across a ridge on
+// the slope the eye sees there, in the colour that slope carries, lit by the lamp, and the paper embossed round the shape
+// lit the same way over whatever is printed beneath (arcEnCiel.ts's `arcLight`)
 const BANDS_FRAGMENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
 #else
@@ -131,32 +137,52 @@ uniform vec3 uColours[4];
 uniform int uColourCount;
 uniform vec3 uAverage;
 uniform float uPixel;
+uniform int uLit;
+uniform sampler2D uEmboss;
+uniform vec2 uEmbossSize;
+uniform float uEmbossMax;
+uniform float uRidge;
+uniform vec2 uAcross;
+uniform float uShare;
+uniform vec3 uLamp;
+uniform vec3 uHalf;
+uniform vec4 uMeans;
 
-// The map holds 16 bits a texel, its high byte in luminance and its low one in alpha, read whole and blended here, as the
+// A map holds 16 bits a texel, its high byte in luminance and its low one in alpha, read whole and blended here, as the
 // GPU's own blending would mix the bytes apart
-float texelAt(vec2 at) {
-  vec4 t = texture2D(uMap, (clamp(at, vec2(0.0), uMapSize - 1.0) + 0.5) / uMapSize);
-  return (t.r * 65280.0 + t.a * 255.0) / 65535.0 * uMapMax;
+float texelAt(sampler2D map, vec2 size, float top, vec2 at) {
+  vec4 t = texture2D(map, (clamp(at, vec2(0.0), size - 1.0) + 0.5) / size);
+  return (t.r * 65280.0 + t.a * 255.0) / 65535.0 * top;
 }
-float fieldAt(vec2 uv) {
-  vec2 p = clamp(uv * uMapSize - 0.5, vec2(0.0), uMapSize - 1.0);
+float fieldAt(sampler2D map, vec2 size, float top, vec2 uv) {
+  vec2 p = clamp(uv * size - 0.5, vec2(0.0), size - 1.0);
   vec2 i = floor(p);
   vec2 f = p - i;
-  return mix(mix(texelAt(i), texelAt(i + vec2(1.0, 0.0)), f.x), mix(texelAt(i + vec2(0.0, 1.0)), texelAt(i + vec2(1.0, 1.0)), f.x), f.y);
+  return mix(mix(texelAt(map, size, top, i), texelAt(map, size, top, i + vec2(1.0, 0.0)), f.x),
+    mix(texelAt(map, size, top, i + vec2(0.0, 1.0)), texelAt(map, size, top, i + vec2(1.0, 1.0)), f.x), f.y);
 }
-float pointsAt(vec2 p) {
+// How far from the nearest point, and a unit step away from it
+float pointsAt(vec2 p, out vec2 away) {
   float best = 1e9;
+  away = vec2(0.0);
   for (int i = 0; i < ${ARC_POINTS}; i++) {
     if (i >= uSpotCount) break;
-    best = min(best, distance(p, uSpots[i]));
+    vec2 v = p - uSpots[i];
+    float d = length(v);
+    if (d < best) {
+      best = d;
+      away = v;
+    }
   }
+  away = best > 1e-6 ? away / best : vec2(0.0);
   return best;
 }
 // How far from Line, + on one side and - on the other: the curve through its points in CURVE_STEPS straight steps a
-// stretch, its first and last steps running on for ever
-float lineAt(vec2 p) {
+// stretch, its first and last steps running on for ever. Also the unit step that adds to it
+float lineAt(vec2 p, out vec2 away) {
   float best = 1e9;
   float side = 1.0;
+  away = vec2(0.0);
   int last = (uSpotCount - 1) * ${CURVE_STEPS} - 1;
   vec2 a = uSpots[1];
   for (int s = 0; s < ${ARC_LINE_POINTS - 1}; s++) {
@@ -177,14 +203,17 @@ float lineAt(vec2 p) {
       int at = s * ${CURVE_STEPS} + k - 1;
       if (at > 0) h = max(h, 0.0);
       if (at < last) h = min(h, 1.0);
-      float d = length(w - v * h);
+      vec2 off = w - v * h;
+      float d = length(off);
       if (d < best) {
         best = d;
         side = v.x * w.y - v.y * w.x < 0.0 ? -1.0 : 1.0;
+        away = off;
       }
       a = b;
     }
   }
+  away = best > 1e-6 ? away * side / best : vec2(0.0);
   return best * side;
 }
 vec3 colourAt(float i) {
@@ -193,25 +222,115 @@ vec3 colourAt(float i) {
   if (i < 2.5) return uColours[2];
   return uColours[3];
 }
-vec3 encode(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
-
-void main() {
-  float m = texture2D(uMask, vUv).a;
-  if (m < 0.002) { gl_FragColor = vec4(0.0); return; }
-  vec2 p = vUv * uBox;
-  float d = uFrom == 0 ? fieldAt(vUv) * uBox.x : uFrom == 1 ? pointsAt(p) : lineAt(p);
-  float phase = d / uBand - uSlide;
+vec3 nextColour(float i) { return colourAt(i + 1.0 < float(uColourCount) ? i + 1.0 : 0.0); }
+// Which band a spot that many bands from where they start falls in, and how far it has blended into the next
+float bandAt(float phase, out float blend) {
   float n = float(uColourCount);
   float f = phase - n * floor(phase / n);
   float i = min(floor(f), n - 1.0);
-  float blend = smoothstep(${glsl(1 - BAND_BLEND)}, 1.0, f - i);
-  vec3 colour = mix(colourAt(i), colourAt(i + 1.0 < n ? i + 1.0 : 0.0), blend);
-  colour = mix(colour, uAverage, smoothstep(${glsl(BAND_BLUR.from)}, ${glsl(BAND_BLUR.to)}, uPixel / uBand));
-  gl_FragColor = vec4(encode(colour) * m, m);
+  blend = smoothstep(${glsl(1 - BAND_BLEND)}, 1.0, f - i);
+  return i;
+}
+vec3 encode(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+float encode1(float c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+// Paper lit to a light with a sheen on it, drawn over whatever is printed beneath: grey light over a shade, exact over white
+// paper and black, close between (premultiplied, as drawn)
+vec2 paperAt(float light, float sheen) {
+  float w = encode1(sheen);
+  return vec2(w, 1.0 - encode1(light + sheen) + w);
+}
+
+void main() {
+  float m = texture2D(uMask, vUv).a;
+  // How far inside the embossed area, up to a pixel
+  float e = uLit == 1 ? clamp(fieldAt(uEmboss, uEmbossSize, uEmbossMax, vUv) * uBox.x / uPixel, 0.0, 1.0) : 0.0;
+  if (m < 0.002 && e < 0.002) { gl_FragColor = vec4(0.0); return; }
+  vec2 p = vUv * uBox;
+  float d = 0.0;
+  // Point's and Line's unit step on through the bands
+  vec2 away = vec2(0.0);
+  if (m >= 0.002) {
+    if (uFrom == 0) d = fieldAt(uMap, uMapSize, uMapMax, vUv) * uBox.x;
+    else if (uFrom == 1) d = pointsAt(p, away);
+    else d = lineAt(p, away);
+  }
+  float blur = smoothstep(${glsl(BAND_BLUR.from)}, ${glsl(BAND_BLUR.to)}, uPixel / uBand);
+  if (uLit == 0) {
+    float blend;
+    float i = bandAt(d / uBand - uSlide, blend);
+    vec3 colour = mix(mix(colourAt(i), nextColour(i), blend), uAverage, blur);
+    gl_FragColor = vec4(encode(colour) * m, m);
+    return;
+  }
+  // Each ridge: the slope facing away from uAcross carries the band half a band on, the other the band half a band back
+  float phase = d / uBand;
+  float riseBlend;
+  float fallBlend;
+  float rise = bandAt(phase + 0.5, riseBlend);
+  float fall = bandAt(phase - 0.5, fallBlend);
+  vec3 rise0 = mix(colourAt(rise), uAverage, blur);
+  vec3 rise1 = mix(nextColour(rise), uAverage, blur);
+  vec3 fall0 = mix(colourAt(fall), uAverage, blur);
+  vec3 fall1 = mix(nextColour(fall), uAverage, blur);
+  // How much of each ridge the first slope shows on screen, and how wide a pixel is, in ridges
+  float c = 0.5 - 0.5 * uShare;
+  float w = uPixel / uRidge;
+  // How fast the bands move on across the ridges, a mm a mm, so each printed line takes its band and blend from its own
+  // middle: taken spot by spot, a line that a blend runs along would be at the blend's edge right across, and smudge
+  float rate = dot(away, uAcross);
+  if (uFrom == 0) {
+    vec2 h = 0.25 * uRidge * uAcross / uBox;
+    rate = (fieldAt(uMap, uMapSize, uMapMax, vUv + h) - fieldAt(uMap, uMapSize, uMapMax, vUv - h)) * uBox.x / (0.5 * uRidge);
+  }
+  rate = clamp(rate, -1.0, 1.0);
+  float fine = smoothstep(${glsl(ARC_RIDGE_FADE.from)}, ${glsl(ARC_RIDGE_FADE.to)}, w);
+  vec3 ink = vec3(0.0);
+  vec2 paper = vec2(0.0);
+  if (fine < 1.0) {
+    // Ridges wide enough to see: a few spots across the pixel, each on the slope the eye sees there
+    float q0 = dot(p, uAcross) / uRidge;
+    // Half as wide again as the pixel, so ridges a few pixels apart don't beat against them
+    float span = min(1.5 * w, 1.0);
+    for (int k = 0; k < ${ARC_RIDGE_SAMPLES}; k++) {
+      float s = span * ((float(k) + 0.5) / ${glsl(ARC_RIDGE_SAMPLES)} - 0.5);
+      float q = fract(q0 + s);
+      bool first = q < c;
+      // Where on the ridge: 0 and 1 the bottoms of its grooves, 0.5 its crest
+      float at = first ? 0.5 * q / max(c, 1e-4) : 0.5 + 0.5 * (q - c) / max(1.0 - c, 1e-4);
+      float beta = atan(${glsl(Math.tan((ARC_RIDGE_SLOPE_DEG * Math.PI) / 180))} * sin(6.28318531 * at));
+      vec3 n = vec3(-uAcross * sin(beta), cos(beta));
+      float groove = min(at, 1.0 - at) / ${glsl(ARC_GROOVE.width)};
+      float lamp = max(0.0, (dot(n, uLamp) + ${glsl(ARC_LIGHT.wrap)}) / ${glsl(1 + ARC_LIGHT.wrap)});
+      float shade = min((${glsl(ARC_LIGHT.room)} + ${glsl(ARC_LIGHT.lamp)} * lamp) / ${glsl(ARC_FLAT_LIGHT)}, 1.0)
+        * (1.0 - ${glsl(ARC_GROOVE.dark)} * exp(-groove * groove));
+      float sheen = ${glsl(ARC_SHEEN.strength)} * pow(max(dot(n, uHalf), 0.0), ${glsl(ARC_SHEEN.power)});
+      // The slope's line, from the groove (0) to the crest (1), and its band at its middle, a ridge of s + mid - q from
+      // the pixel's: a blend prints the next colour on the share nearest the crest
+      float up = first ? 2.0 * at : 2.0 - 2.0 * at;
+      float mid = first ? 0.5 * c : 0.5 + 0.5 * c;
+      float blend;
+      float band = bandAt((d + rate * (s + mid - q) * uRidge) / uBand + (first ? 0.5 : -0.5), blend);
+      vec3 colour = mix(up >= 1.0 - blend ? nextColour(band) : colourAt(band), uAverage, blur);
+      float light = shade * (1.0 - sheen);
+      ink += colour * light + sheen;
+      paper += paperAt(light, sheen);
+    }
+    ink /= ${glsl(ARC_RIDGE_SAMPLES)};
+    paper /= ${glsl(ARC_RIDGE_SAMPLES)};
+  }
+  // Ridges too fine to tell apart: each slope's average light over as much of each ridge as it shows
+  vec3 inkMean = c * (mix(rise0, rise1, riseBlend) * uMeans.x + uMeans.y) + (1.0 - c) * (mix(fall0, fall1, fallBlend) * uMeans.z + uMeans.w);
+  vec2 paperMean = paperAt(c * uMeans.x + (1.0 - c) * uMeans.z, c * uMeans.y + (1.0 - c) * uMeans.w);
+  ink = mix(ink, inkMean, fine);
+  paper = mix(paper, paperMean, fine);
+  // The ink where the shape takes it; the paper's light and shade round it, where the plate embosses
+  float bare = (1.0 - m) * e;
+  gl_FragColor = vec4(encode(ink) * m + vec3(paper.x * bare), m + paper.y * bare);
 }`
 
 const BAND_UNIFORMS = [
   'uMask', 'uMap', 'uMapSize', 'uMapMax', 'uFrom', 'uBox', 'uSpots', 'uSpotCount', 'uBand', 'uSlide', 'uColours', 'uColourCount', 'uAverage', 'uPixel',
+  'uLit', 'uEmboss', 'uEmbossSize', 'uEmbossMax', 'uRidge', 'uAcross', 'uShare', 'uLamp', 'uHalf', 'uMeans',
 ] as const
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext
@@ -247,8 +366,8 @@ interface Renderer {
 
 /** Masks kept on the GPU: every banknote's on the canvas and an export's */
 const TEXTURES_KEPT = 4
-/** Maps kept on the GPU */
-const MAPS_KEPT = 4
+/** Maps kept on the GPU: each Arc-en-Ciel's bands' and, with Realistic on, its embossed area's */
+const MAPS_KEPT = 8
 
 let renderer: Renderer | null | undefined
 
@@ -533,7 +652,10 @@ export function drawBands(
   const { width, height } = drawingSize(r, size)
   const texture = textureFor(r, mask)
   const map = look.field ? mapFor(r, look.field) : r.noMap
-  if (!texture || !map) return false
+  const { lit } = look
+  const embossed = lit ? look.emboss : undefined
+  const emboss = embossed ? mapFor(r, embossed) : r.noMap
+  if (!texture || !map || !emboss) return false
   gl.useProgram(bands.program)
   gl.viewport(0, 0, width, height)
   gl.activeTexture(gl.TEXTURE0)
@@ -542,6 +664,9 @@ export function drawBands(
   gl.activeTexture(gl.TEXTURE1)
   gl.bindTexture(gl.TEXTURE_2D, map)
   gl.uniform1i(u('uMap'), 1)
+  gl.activeTexture(gl.TEXTURE2)
+  gl.bindTexture(gl.TEXTURE_2D, emboss)
+  gl.uniform1i(u('uEmboss'), 2)
   gl.activeTexture(gl.TEXTURE0)
   gl.uniform2f(u('uMapSize'), look.field?.width ?? 1, look.field?.height ?? 1)
   gl.uniform1f(u('uMapMax'), look.field?.max ?? 0)
@@ -560,28 +685,38 @@ export function drawBands(
   gl.uniform1i(u('uColourCount'), Math.min(4, look.colours.length))
   gl.uniform3f(u('uAverage'), ...averageRgb(look.colours))
   gl.uniform1f(u('uPixel'), look.box[0] / width)
+  // Realistic: the ridges in the lamp's light, and the area embossed round the shape
+  gl.uniform1i(u('uLit'), lit ? 1 : 0)
+  gl.uniform2f(u('uEmbossSize'), embossed?.width ?? 1, embossed?.height ?? 1)
+  gl.uniform1f(u('uEmbossMax'), embossed?.max ?? 0)
+  gl.uniform1f(u('uRidge'), ARC_RIDGE_MM)
+  gl.uniform2f(u('uAcross'), ...(lit?.across ?? [0, 1]))
+  gl.uniform1f(u('uShare'), lit?.share ?? 0)
+  gl.uniform3f(u('uLamp'), ...(lit?.lamp ?? [0, 0, 1]))
+  gl.uniform3f(u('uHalf'), ...(lit?.half ?? [0, 0, 1]))
+  gl.uniform4f(u('uMeans'), ...(lit?.means ?? [1, 0, 1, 0]))
   // Every pixel of it is drawn, clear ones too, so there is nothing to clear first
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   target.drawImage(canvas, 0, canvas.height - height, width, height, dest.x, dest.y, dest.width, dest.height)
   return true
 }
 
-/** What each Arc-en-Ciel canvas last showed, so a tilt that doesn't move its bands doesn't draw it again */
-const bandsPainted = new WeakMap<HTMLCanvasElement, { mask: MaskSource; field?: BandField; key: string }>()
+/** What each Arc-en-Ciel canvas last showed, so a tilt that doesn't change it doesn't draw it again */
+const bandsPainted = new WeakMap<HTMLCanvasElement, { mask: MaskSource; field?: BandField; emboss?: BandField; key: string }>()
 
 /**
  * Draws Arc-en-Ciel into a canvas of its own, in place of what it showed, at the canvas's own size. Nothing is drawn when
  * it would show the same again. False when it can't be drawn on the GPU (no WebGL).
  */
 export function paintBands(canvas: HTMLCanvasElement, mask: MaskSource, look: BandLook) {
-  const { field, ...rest } = look
+  const { field, emboss, ...rest } = look
   const key = `${canvas.width}×${canvas.height}|${JSON.stringify(rest)}`
   const last = bandsPainted.get(canvas)
-  if (last?.mask === mask && last.field === field && last.key === key) return true
+  if (last?.mask === mask && last.field === field && last.emboss === emboss && last.key === key) return true
   const ctx = canvas.getContext('2d')
   if (!ctx) return false
   ctx.globalCompositeOperation = 'copy'
   const drawn = drawBands(ctx, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mask, look, canvas)
-  if (drawn) bandsPainted.set(canvas, { mask, field, key })
+  if (drawn) bandsPainted.set(canvas, { mask, field, emboss, key })
   return drawn
 }
