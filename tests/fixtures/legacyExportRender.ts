@@ -1,4 +1,5 @@
-// The export renderer before thread patterns (55b631b), to prove a migrated banknote still exports the same
+// The export renderer before thread patterns (55b631b), to prove a migrated banknote still exports the same. Its corners
+// are square, as every banknote's have been since 9 November (Keller), so the comparison stays on the thread
 import { SHADE_DEG } from '../../src/lib/frames'
 import { lensMix, lensState, type Tilt2 } from '../../src/lib/lens'
 import { playbackPlan, tiltAt } from '../../src/lib/moves'
@@ -98,11 +99,6 @@ export async function loadNoteAssets(note: Note): Promise<NoteAssets> {
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
-function roundedRect(ctx: Ctx, width: number, height: number, radius: number) {
-  ctx.beginPath()
-  ctx.roundRect(0, 0, width, height, radius)
-}
-
 /** The flat note at `scale` px per mm, as NoteView draws it before it is turned in 3D */
 export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number, tiltAt: Tilt2 | number, options: { sheen: boolean; perspective: boolean; frameNumbers?: boolean }) {
   const { thread, frames } = note
@@ -110,7 +106,8 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   const mm = (value: number) => value * scale
   const width = mm(note.widthMm), height = mm(note.heightMm)
   ctx.save()
-  roundedRect(ctx, width, height, mm(1.5))
+  ctx.beginPath()
+  ctx.rect(0, 0, width, height)
   ctx.clip()
   ctx.fillStyle = note.color
   ctx.fillRect(0, 0, width, height)

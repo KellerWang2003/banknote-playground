@@ -666,8 +666,9 @@ export function Canvas({
                 <div
                   data-note-body={note.id}
                   // A short perspective, relative to the note's size, so the near edge visibly widens and the far edge
-                  // narrows: you can see which way the note is tilting, not just that it got shorter
-                  style={{ perspective: perspectiveFor(note, scale), borderRadius: 1.5 * scale }}
+                  // narrows: you can see which way the note is tilting, not just that it got shorter. Its outline is as
+                  // square-cornered as the banknote
+                  style={{ perspective: perspectiveFor(note, scale) }}
                   className={cn(
                     'outline-offset-4 transition-[outline-color] duration-150 cursor-ns-resize',
                     checking ? 'outline-0' : picked === 'note' ? 'outline-2' : hovered === 'note' ? 'outline-1' : 'outline-0',

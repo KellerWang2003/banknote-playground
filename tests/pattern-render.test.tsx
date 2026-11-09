@@ -185,7 +185,8 @@ describe('a thread with sections', () => {
     const tilt = { x: 0, y: 20 }
     const { ctx, log } = recorder()
     drawFace(ctx, note, assetsFor(note), 2, tilt, { sheen: false, perspective: false })
-    const clips = log.filter((op) => op[0] === 'rect').slice(1)
+    // Past the banknote's own edge and the thread's
+    const clips = log.filter((op) => op[0] === 'rect').slice(2)
     // 4 mm thread, 68 mm long, at 2 px/mm: one band per lane the whole length
     expect(clips).toEqual([['rect', 0, 0, 4, 136], ['rect', 4, 0, 4, 136]])
     const fills = log.filter((op) => op[0] === '=' && op[1] === 'fillStyle').map((op) => op[2])
@@ -200,7 +201,8 @@ describe('a thread with sections', () => {
     const faces = new Map([[note.id, { getContext: () => face.ctx, width: 400, height: 400 } as unknown as OffscreenCanvas]])
     const out = recorder()
     drawExportFrame(out.ctx, layout, new Map([[note.id, { front: assetsFor(note) }]]), faces, 1, 0, { sheen: false, perspective: false, offsets: { [note.id]: 1 } })
-    const blocks = face.log.filter((op) => op[0] === 'rect').slice(1)
+    // Past the banknote's own edge and the thread's
+    const blocks = face.log.filter((op) => op[0] === 'rect').slice(2)
     // At 1 px per mm the first block starts at the offset, and again one repeat later
     expect(blocks[0]).toEqual(['rect', 0, 1, 4, repeat / 2])
     expect(blocks).toContainEqual(['rect', 0, 1 + repeat, 4, repeat / 2])

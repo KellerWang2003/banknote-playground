@@ -60,7 +60,7 @@ function Loading({ style }: { style?: CSSProperties }) {
 export function NoteSkeleton({ widthMm, heightMm, scale }: { widthMm: number; heightMm: number; scale: number }) {
   return (
     <div aria-hidden="true" data-note-skeleton="" className="relative shrink-0 overflow-hidden shadow-note"
-      style={{ width: widthMm * scale, height: heightMm * scale, backgroundColor: PAPER, borderRadius: 1.5 * scale }}>
+      style={{ width: widthMm * scale, height: heightMm * scale, backgroundColor: PAPER }}>
       <Skeleton className="absolute inset-0 rounded-none bg-foreground/5" />
     </div>
   )
@@ -454,10 +454,11 @@ export function NoteView({
       data-back={back ? '' : undefined}
       className="relative overflow-hidden shadow-note"
       style={{
+        // Square-cornered, as a banknote is cut, here and in every export (Keller, 9 November: "banknotes shouldn't have
+        // corner radius at all"; until then 1.5 mm)
         width: mm(note.widthMm),
         height: mm(note.heightMm),
         backgroundColor: PAPER,
-        borderRadius: mm(1.5),
         transform: perspective && still ? still.rotate : undefined,
         willChange: live && perspective ? 'transform' : undefined,
       }}

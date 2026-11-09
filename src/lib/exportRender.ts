@@ -219,11 +219,6 @@ function turnedAs(ctx: Ctx, box: PlacedBox, mm: (value: number) => number, draw:
   ctx.restore()
 }
 
-function roundedRect(ctx: Ctx, width: number, height: number, radius: number) {
-  ctx.beginPath()
-  ctx.roundRect(0, 0, width, height, radius)
-}
-
 export interface FaceOptions {
   sheen: boolean
   perspective: boolean
@@ -251,7 +246,10 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   const mm = (value: number) => value * scale
   const width = mm(note.widthMm), height = mm(note.heightMm)
   ctx.save()
-  roundedRect(ctx, width, height, mm(1.5))
+  // Cut square at its edges, as NoteView is (Keller, 9 November: no corner radius, exports above all), the paper and its
+  // design filling every corner of a still image or a video's banknote
+  ctx.beginPath()
+  ctx.rect(0, 0, width, height)
   ctx.clip()
   ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, width, height)

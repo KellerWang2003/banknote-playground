@@ -1,4 +1,5 @@
-// The banknote as NoteView drew it before thread patterns (55b631b), to prove a migrated banknote still draws the same
+// The banknote as NoteView drew it before thread patterns (55b631b), to prove a migrated banknote still draws the same.
+// Its corners are square, as every banknote's have been since 9 November (Keller), so the comparison stays on the thread
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { SHADE_DEG, TILT_LIMIT } from '../../src/lib/frames'
@@ -210,7 +211,6 @@ export function NoteView({
         width: mm(note.widthMm),
         height: mm(note.heightMm),
         backgroundColor: note.color,
-        borderRadius: mm(1.5),
         transform: perspective && still ? still.rotate : undefined,
         willChange: live && perspective ? 'transform' : undefined,
       }}
