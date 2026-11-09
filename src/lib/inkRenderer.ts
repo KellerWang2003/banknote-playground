@@ -1,6 +1,6 @@
 import {
-  ARC_FLAT_LIGHT, ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_POINTS, ARC_RIDGE_FADE, ARC_RIDGE_MM, ARC_RIDGE_SAMPLES, ARC_RIDGE_SLOPE_DEG,
-  ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
+  ARC_GROOVE, ARC_LIGHT, ARC_LINE_POINTS, ARC_MEAN_LIGHT, ARC_PAPER, ARC_POINTS, ARC_PRINT, ARC_RIDGE_FADE, ARC_RIDGE_MM, ARC_RIDGE_SAMPLES,
+  ARC_RIDGE_SLOPE_DEG, ARC_SHEEN, BAND_BLEND, BAND_BLUR, CURVE_STEPS, averageRgb,
 } from './arcEnCiel'
 import type { BandField, BandLook } from './bandMap'
 import {
@@ -115,12 +115,17 @@ const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
 // Every pixel of Arc-en-Ciel's box: how far it is from where the bands start (from the map, the nearest point, or Line),
 // slid along by the tilt, gives its place among the bands and so its colour, through the shape's mask. The same sums as
 // bandMap.ts's, which draws it without the GPU. With Realistic on (uLit), the ridges instead: each spot across a ridge on
-// the slope the eye sees there, in the colour that slope carries, lit by the lamp, and the paper embossed round the shape
-// lit the same way over whatever is printed beneath (arcEnCiel.ts's `arcLight`)
+// the slope the eye sees there, in the colour printed where it sees the paper, lit by the lamp, and the paper embossed
+// round the shape lit the same way over whatever is printed beneath (arcEnCiel.ts's `arcLight` and `ARC_PRINT`). The
+// print's finest unevenness needs high precision, and is left out without it
+const RAD = Math.PI / 180
+const [PAPER_R, PAPER_G, PAPER_B] = ARC_PAPER.map(glsl)
 const BANDS_FRAGMENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
+const float FINE_NOISE = 1.0;
 #else
 precision mediump float;
+const float FINE_NOISE = 0.0;
 #endif
 varying vec2 vUv;
 uniform sampler2D uMask;
@@ -233,6 +238,28 @@ float bandAt(float phase, out float blend) {
 }
 vec3 encode(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 float encode1(float c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+// Smooth noise over the paper, −1 to 1, on a grid \`scale\` mm apart, a pattern of its own for each \`seed\`
+float hash(vec2 g) {
+  vec3 h = fract(vec3(g.xyx) * 0.1031);
+  h += dot(h, h.yzx + 33.33);
+  return fract((h.x + h.y) * h.z);
+}
+float paperNoise(vec2 p, float scale, float seed) {
+  vec2 g = p / scale;
+  vec2 i = floor(g);
+  vec2 f = g - i;
+  f = f * f * (3.0 - 2.0 * f);
+  // Each seed's grid points further along, after the fraction is taken, so it keeps its precision
+  i += vec2(37.0, 17.0) * seed;
+  return 2.0 * mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y) - 1.0;
+}
+// How much of a noise that fine still shows: none once it is finer than a pixel, as the eye averages it
+float showing(float scale) { return 1.0 - smoothstep(0.5 * scale, 1.5 * scale, uPixel); }
+// Ink as it prints: a little dull, and thinner by \`thin\`, showing the paper through
+vec3 printed(vec3 c, float thin) {
+  vec3 paper = vec3(${PAPER_R}, ${PAPER_G}, ${PAPER_B});
+  return mix(mix(c, 0.88 * paper, ${glsl(ARC_PRINT.dull)}), paper, thin);
+}
 // Paper lit to a light with a sheen on it, drawn over whatever is printed beneath: grey light over a shade, exact over white
 // paper and black, close between (premultiplied, as drawn)
 vec2 paperAt(float light, float sheen) {
@@ -262,21 +289,31 @@ void main() {
     gl_FragColor = vec4(encode(colour) * m, m);
     return;
   }
-  // Each ridge: the slope facing away from uAcross carries the band half a band on, the other the band half a band back
+  // The paper and the print as they are (ARC_PRINT): a sheet a little cockled and grainy, ridges wandering a little off
+  // straight, a print a little out of register with them, its ink a little uneven
+  float grain = ${glsl(ARC_PRINT.grain.tilt)} * FINE_NOISE;
+  vec2 tiltBy = ${glsl(ARC_PRINT.cockle.deg * RAD)} * vec2(paperNoise(p, ${glsl(ARC_PRINT.cockle.scale)}, 1.0), paperNoise(p, ${glsl(ARC_PRINT.cockle.scale)}, 2.0))
+    + grain * vec2(showing(${glsl(ARC_PRINT.grain.scales[0])}) * paperNoise(p, ${glsl(ARC_PRINT.grain.scales[0])}, 3.0),
+      showing(${glsl(ARC_PRINT.grain.scales[1])}) * paperNoise(p, ${glsl(ARC_PRINT.grain.scales[1])}, 4.0));
+  float wander = ${glsl(ARC_PRINT.wander.mm)} * paperNoise(p, ${glsl(ARC_PRINT.wander.scale)}, 5.0);
+  float misprint = ${glsl(ARC_PRINT.register.ridges)} * paperNoise(p, ${glsl(ARC_PRINT.register.scale)}, 6.0)
+    + ${glsl(ARC_PRINT.ragged.mm)} / uRidge * FINE_NOISE * showing(${glsl(ARC_PRINT.ragged.scale)}) * paperNoise(p, ${glsl(ARC_PRINT.ragged.scale)}, 7.0);
+  float thin = ${glsl(ARC_PRINT.uneven.amount)} * (0.5 + 0.35 * paperNoise(p, ${glsl(ARC_PRINT.uneven.scales[0])}, 8.0)
+    + 0.15 * FINE_NOISE * showing(${glsl(ARC_PRINT.uneven.scales[1])}) * paperNoise(p, ${glsl(ARC_PRINT.uneven.scales[1])}, 9.0));
+  // Each ridge: the slope facing away from uAcross carries the band half a band on, the other the band half a band back,
+  // each colour running into the next through its blend
   float phase = d / uBand;
   float riseBlend;
   float fallBlend;
   float rise = bandAt(phase + 0.5, riseBlend);
   float fall = bandAt(phase - 0.5, fallBlend);
-  vec3 rise0 = mix(colourAt(rise), uAverage, blur);
-  vec3 rise1 = mix(nextColour(rise), uAverage, blur);
-  vec3 fall0 = mix(colourAt(fall), uAverage, blur);
-  vec3 fall1 = mix(nextColour(fall), uAverage, blur);
+  vec3 riseColour = mix(printed(mix(colourAt(rise), nextColour(rise), riseBlend), thin), uAverage, blur);
+  vec3 fallColour = mix(printed(mix(colourAt(fall), nextColour(fall), fallBlend), thin), uAverage, blur);
   // How much of each ridge the first slope shows on screen, and how wide a pixel is, in ridges
   float c = 0.5 - 0.5 * uShare;
   float w = uPixel / uRidge;
-  // How fast the bands move on across the ridges, a mm a mm, so each printed line takes its band and blend from its own
-  // middle: taken spot by spot, a line that a blend runs along would be at the blend's edge right across, and smudge
+  // How fast the bands move on across the ridges, a mm a mm, so each spot takes the colour printed where it sees the paper,
+  // which on a tilted ridge is off where it is on screen
   float rate = dot(away, uAcross);
   if (uFrom == 0) {
     vec2 h = 0.25 * uRidge * uAcross / uBox;
@@ -288,7 +325,7 @@ void main() {
   vec2 paper = vec2(0.0);
   if (fine < 1.0) {
     // Ridges wide enough to see: a few spots across the pixel, each on the slope the eye sees there
-    float q0 = dot(p, uAcross) / uRidge;
+    float q0 = (dot(p, uAcross) + wander) / uRidge;
     // Half as wide again as the pixel, so ridges a few pixels apart don't beat against them
     float span = min(1.5 * w, 1.0);
     for (int k = 0; k < ${ARC_RIDGE_SAMPLES}; k++) {
@@ -297,30 +334,40 @@ void main() {
       bool first = q < c;
       // Where on the ridge: 0 and 1 the bottoms of its grooves, 0.5 its crest
       float at = first ? 0.5 * q / max(c, 1e-4) : 0.5 + 0.5 * (q - c) / max(1.0 - c, 1e-4);
-      float beta = atan(${glsl(Math.tan((ARC_RIDGE_SLOPE_DEG * Math.PI) / 180))} * sin(6.28318531 * at));
-      vec3 n = vec3(-uAcross * sin(beta), cos(beta));
+      // Round: steepest down in a groove, flat along the crest (arcEnCiel.ts's \`ridgeLight\`)
+      float beta = ${glsl(ARC_RIDGE_SLOPE_DEG * RAD)} * (1.0 - 2.0 * at);
+      vec3 n = normalize(vec3(-uAcross * sin(beta) + tiltBy, cos(beta)));
       float groove = min(at, 1.0 - at) / ${glsl(ARC_GROOVE.width)};
       float lamp = max(0.0, (dot(n, uLamp) + ${glsl(ARC_LIGHT.wrap)}) / ${glsl(1 + ARC_LIGHT.wrap)});
-      float shade = min((${glsl(ARC_LIGHT.room)} + ${glsl(ARC_LIGHT.lamp)} * lamp) / ${glsl(ARC_FLAT_LIGHT)}, 1.0)
+      float shade = (${glsl(ARC_LIGHT.room)} + ${glsl(ARC_LIGHT.lamp)} * lamp) / ${glsl(ARC_MEAN_LIGHT)}
         * (1.0 - ${glsl(ARC_GROOVE.dark)} * exp(-groove * groove));
       float sheen = ${glsl(ARC_SHEEN.strength)} * pow(max(dot(n, uHalf), 0.0), ${glsl(ARC_SHEEN.power)});
-      // The slope's line, from the groove (0) to the crest (1), and its band at its middle, a ridge of s + mid - q from
-      // the pixel's: a blend prints the next colour on the share nearest the crest
-      float up = first ? 2.0 * at : 2.0 - 2.0 * at;
-      float mid = first ? 0.5 * c : 0.5 + 0.5 * c;
-      float blend;
-      float band = bandAt((d + rate * (s + mid - q) * uRidge) / uBand + (first ? 0.5 : -0.5), blend);
-      vec3 colour = mix(up >= 1.0 - blend ? nextColour(band) : colourAt(band), uAverage, blur);
+      // The print where this spot sees the paper: which slope's colours by where on the ridge the print lands, a little out
+      // of register, the two spreading into each other where they meet
+      float here = (d + rate * (s + at - q) * uRidge) / uBand;
+      float onBlend;
+      float on = bandAt(here + 0.5, onBlend);
+      float backBlend;
+      float back = bandAt(here - 0.5, backBlend);
+      float v = fract(at - misprint);
+      float meet = smoothstep(0.0, ${glsl(ARC_PRINT.spread)}, min(min(v, abs(v - 0.5)), 1.0 - v) * uRidge);
+      float onShare = v < 0.5 ? 0.5 + 0.5 * meet : 0.5 - 0.5 * meet;
+      vec3 colour = mix(mix(colourAt(back), nextColour(back), backBlend), mix(colourAt(on), nextColour(on), onBlend), onShare);
+      colour = mix(printed(colour, thin), uAverage, blur);
       float light = shade * (1.0 - sheen);
       ink += colour * light + sheen;
-      paper += paperAt(light, sheen);
+      // Paper is drawn over what is beneath it, so it can darken it but not light it past itself
+      paper += paperAt(min(light, 1.0), sheen);
     }
     ink /= ${glsl(ARC_RIDGE_SAMPLES)};
     paper /= ${glsl(ARC_RIDGE_SAMPLES)};
   }
-  // Ridges too fine to tell apart: each slope's average light over as much of each ridge as it shows
-  vec3 inkMean = c * (mix(rise0, rise1, riseBlend) * uMeans.x + uMeans.y) + (1.0 - c) * (mix(fall0, fall1, fallBlend) * uMeans.z + uMeans.w);
-  vec2 paperMean = paperAt(c * uMeans.x + (1.0 - c) * uMeans.z, c * uMeans.y + (1.0 - c) * uMeans.w);
+  // Ridges too fine to tell apart: each slope's average light over as much of each ridge as it shows, in its own colour
+  // but for the share the print's misregister gives the other one
+  float off = min(2.0 * abs(misprint), 1.0);
+  vec3 inkMean = c * (mix(riseColour, fallColour, off) * uMeans.x + uMeans.y)
+    + (1.0 - c) * (mix(fallColour, riseColour, off) * uMeans.z + uMeans.w);
+  vec2 paperMean = paperAt(min(c * uMeans.x + (1.0 - c) * uMeans.z, 1.0), c * uMeans.y + (1.0 - c) * uMeans.w);
   ink = mix(ink, inkMean, fine);
   paper = mix(paper, paperMean, fine);
   // The ink where the shape takes it; the paper's light and shade round it, where the plate embosses

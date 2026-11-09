@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ARC_BAND, ARC_GROOVE, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
+  ARC_BAND, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
   bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeLight, sampleCurve,
   srgbBytes, withArcImage, withBend, withLineMoved, withPoint, withSpot, withoutSpot,
 } from '../src/lib/arcEnCiel'
@@ -261,14 +261,24 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(rotated.lamp[0]).toBeCloseTo(-Math.sin(LAMP_HEIGHT_DEG * RAD))
     expect(rotated.lamp[1]).toBeCloseTo(0)
     expect(arcLight(arc(), { x: 0, y: 10 }, 1).share).toBe(arcLight(arc(), { x: 0, y: 10 }).share)
-    // Against flat paper seen flat: a crest catches as much light, the bottom of a groove half as much, and the slope
-    // facing up towards the lamp more than the one facing down
-    expect(ridgeLight(flat, 0.5).shade).toBeCloseTo(1)
-    expect(ridgeLight(flat, 0).shade).toBeCloseTo(1 - ARC_GROOVE.dark)
-    expect(ridgeLight(flat, 0.25).shade).toBeGreaterThan(ridgeLight(flat, 0.75).shade)
-    // The sheen off a crest is strongest with the top tipped back by half the lamp's height
+    // Seen flat, a ridge averages as much light as flat paper: the slope facing up towards the lamp more, the one facing
+    // down less, and each groove darkening down to its bottom
+    let up = 0
+    let down = 0
+    for (let i = 0; i < 1000; i++) {
+      up += ridgeLight(flat, (i + 0.5) / 2000).shade / 1000
+      down += ridgeLight(flat, 0.5 + (i + 0.5) / 2000).shade / 1000
+    }
+    expect((up + down) / 2).toBeCloseTo(1, 3)
+    expect(up).toBeGreaterThan(1)
+    expect(down).toBeLessThan(1)
+    expect(ridgeLight(flat, 0).shade).toBeLessThan(ridgeLight(flat, 0.05).shade)
+    expect(ridgeLight(flat, 1).shade).toBeLessThan(ridgeLight(flat, 0.95).shade)
+    expect(ridgeLight(flat, 0.05).shade).toBeLessThan(ridgeLight(flat, 0.15).shade)
+    // The sheen off a crest is strongest with the top tipped back by half the lamp's height, and broad: seen flat, the
+    // crests still catch most of it
     expect(ridgeLight(arcLight(arc(), { x: 0, y: LAMP_HEIGHT_DEG / 2 }), 0.5).sheen).toBeCloseTo(ARC_SHEEN.strength)
-    expect(ridgeLight(flat, 0.5).sheen).toBeLessThan(ARC_SHEEN.strength / 2)
+    expect(ridgeLight(flat, 0.5).sheen).toBeGreaterThan(ARC_SHEEN.strength / 2)
   })
 
   it('averages each slope’s light, for ridges too fine to tell apart', () => {

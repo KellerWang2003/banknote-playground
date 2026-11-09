@@ -1,3 +1,4 @@
+import { PAPER } from './back'
 import { clamp } from './frames'
 import type { Tilt2 } from './lens'
 import { type Size, fitBox, newBox, withBoxAspect } from './placed'
@@ -151,33 +152,60 @@ export function bandColour(colours: Rgb[], phase: number, blur = 0, average = av
  * the slope facing up (↕) or right (↔) the colour half a band further on, the other one the colour half a band back. Flat,
  * each slope shows as much as the other, so every spot mixes two neighbouring colours; tilted across the ridges, the slopes
  * facing the eye take more of each ridge, until by ARC_SLIDE_DEG only they show, and the bands have moved as far as step
- * 1's slide takes them, the same way. The slopes are shaded by how they face magnetic ink's lamp, LAMP_HEIGHT_DEG above the
- * eye, staying where it is as the banknote is rotated, against flat paper seen flat, as nothing else on the banknote is lit:
- * dark in the grooves, with a narrow sheen off each ridge, strongest with the top tipped back by half LAMP_HEIGHT_DEG. The
- * paper inside a rubber band round the shape is embossed too (bandMap.ts), white. The numbers are tuned by eye on the plan's
- * stills (8 November), as magnetic ink's were, and are not settings.
+ * 1's slide takes them, the same way. The ridges are round, steepest down in a groove and flat along the crest, and shaded
+ * by how they face magnetic ink's lamp, LAMP_HEIGHT_DEG above the eye, staying where it is as the banknote is rotated: a
+ * ridge seen flat averages as much light as flat paper (nothing else on the banknote is lit), so the slope facing the lamp
+ * is brighter than paper and the other darker, with a soft shadow down each groove and a broad sheen, strongest on the
+ * crests with the top tipped back by half LAMP_HEIGHT_DEG. The print is ink on paper rather than exact (`ARC_PRINT`;
+ * Keller, 9 November: the first look was "too precise and too computer"): each colour runs into the next through its blend,
+ * the two slopes' colours spread a little into each other where they meet, the print sits a little out of register with
+ * the ridges, which wander a little, the ink is a little uneven and dull, and the paper is grainy and a little cockled.
+ * The paper inside a rubber band round the shape is embossed too (bandMap.ts), white. The numbers are tuned by eye on
+ * stills from a numpy model, as magnetic ink's were (8 November; on 9 November Keller picked the deepest of three softer
+ * reliefs), and are not settings.
  */
 
 /** How far apart the ridges are, mm: 0.4 until Oberthur says how fine their plates emboss */
 export const ARC_RIDGE_MM = 0.4
-/** How steep the ridges' slopes are halfway down, degrees, for how they catch the light */
-export const ARC_RIDGE_SLOPE_DEG = 30
+/** How steep the ridges are at the bottom of a groove, degrees, rounding over to a flat crest, for how they catch the light */
+export const ARC_RIDGE_SLOPE_DEG = 52
 /** The room's light, the lamp's, and how far the lamp's light wraps round a slope turning away from it */
-export const ARC_LIGHT = { room: 0.3, lamp: 0.7, wrap: 0.4 }
+export const ARC_LIGHT = { room: 0.25, lamp: 0.75, wrap: 0.25 }
 /** The grooves between ridges: how much darker at the bottom, and how wide their shadow, as a share of a ridge either side */
-export const ARC_GROOVE = { dark: 0.5, width: 0.07 }
-/** The lamp's sheen off each ridge: how bright, and how narrow (the power of its fall-off) */
-export const ARC_SHEEN = { strength: 0.08, power: 80 }
+export const ARC_GROOVE = { dark: 0.45, width: 0.14 }
+/** The lamp's sheen off each ridge: how bright, and how broad (the power of its fall-off, lower being broader) */
+export const ARC_SHEEN = { strength: 0.14, power: 24 }
+/**
+ * The print as ink on paper. Each unevenness is smooth noise over the paper on a grid `scale` mm apart (`scales`: two
+ * sizes at once, the second weaker); what is finer than a pixel fades out, as the eye averages it
+ */
+export const ARC_PRINT = {
+  /** How far, mm, the two slopes' colours spread into each other where they meet */
+  spread: 0.022,
+  /** How ragged, mm, the line they meet along is */
+  ragged: { mm: 0.006, scale: 0.035 },
+  /** How far the print is out of register with the ridges, as a share of a ridge */
+  register: { ridges: 0.06, scale: 3.5 },
+  /** How far the ridges wander off straight, mm */
+  wander: { mm: 0.02, scale: 1.3 },
+  /** How much thinner the ink is at its thinnest, showing the paper through */
+  uneven: { amount: 0.03, scales: [0.7, 0.16] },
+  /** How far the ink is dulled towards a darker grey of the paper */
+  dull: 0.05,
+  /** How far the paper's grain tilts its surface, radians */
+  grain: { tilt: 0.04, scales: [0.05, 0.09] },
+  /** How far the sheet is cockled, degrees */
+  cockle: { deg: 1.5, scale: 7 },
+} as const
+/** The paper the ink thins to, linear RGB */
+export const ARC_PAPER = linearRgb(PAPER)
 /** Pixels wider than `from` of a ridge start to show the ridges' average, and from `to` show only it, as the eye sees ridges too fine to tell apart */
 export const ARC_RIDGE_FADE = { from: 0.3, to: 0.6 }
 /** Spots across each pixel the ridges are drawn from where they are wide enough to see */
 export const ARC_RIDGE_SAMPLES = 6
 
 const RAD = Math.PI / 180
-const SLOPE = Math.tan(ARC_RIDGE_SLOPE_DEG * RAD)
 const wrapped = (cosine: number) => Math.max(0, (cosine + ARC_LIGHT.wrap) / (1 + ARC_LIGHT.wrap))
-/** The light flat paper catches seen flat, which the slopes' light is measured against */
-export const ARC_FLAT_LIGHT = ARC_LIGHT.room + ARC_LIGHT.lamp * wrapped(Math.cos(LAMP_HEIGHT_DEG * RAD))
 
 type Vec3 = [number, number, number]
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -199,18 +227,31 @@ export interface ArcLight {
   means: [number, number, number, number]
 }
 
+/** Which way a spot `p` of the way across a ridge faces, and the light it catches from the lamp, before it is measured against paper */
+function ridgeFacing(across: [number, number], lamp: Vec3, p: number) {
+  // Steepest at the bottoms of the grooves, flat along the crest
+  const beta = ARC_RIDGE_SLOPE_DEG * RAD * (1 - 2 * p)
+  const n: Vec3 = [-across[0] * Math.sin(beta), -across[1] * Math.sin(beta), Math.cos(beta)]
+  const groove = Math.min(p, 1 - p) / ARC_GROOVE.width
+  return { n, light: (ARC_LIGHT.room + ARC_LIGHT.lamp * wrapped(dot(n, lamp))) * (1 - ARC_GROOVE.dark * Math.exp(-groove * groove)) }
+}
+
+/** A level ridge's light seen flat, averaged across it, which the slopes' light is measured against: so a ridge seen flat averages as much light as flat paper */
+export const ARC_MEAN_LIGHT = (() => {
+  const lamp: Vec3 = [0, -Math.sin(LAMP_HEIGHT_DEG * RAD), Math.cos(LAMP_HEIGHT_DEG * RAD)]
+  let sum = 0
+  for (let i = 0; i < 1024; i++) sum += ridgeFacing([0, 1], lamp, (i + 0.5) / 1024).light
+  return sum / 1024
+})()
+
 /**
  * How a spot `p` of the way across a ridge catches the light (0 and 1 the bottoms of its grooves, ½ its crest): `shade`,
- * from how it faces the lamp, measured against flat paper seen flat and darker down in a groove; `sheen`, how much of the
- * lamp it mirrors to the eye
+ * from how it faces the lamp and how deep in a groove it is, measured so that a ridge seen flat averages 1, as flat paper
+ * does; `sheen`, how much of the lamp it mirrors to the eye
  */
 export function ridgeLight(light: Pick<ArcLight, 'across' | 'lamp' | 'half'>, p: number) {
-  const beta = Math.atan(SLOPE * Math.sin(2 * Math.PI * p))
-  const n: Vec3 = [-light.across[0] * Math.sin(beta), -light.across[1] * Math.sin(beta), Math.cos(beta)]
-  const groove = Math.min(p, 1 - p) / ARC_GROOVE.width
-  const shade = Math.min((ARC_LIGHT.room + ARC_LIGHT.lamp * wrapped(dot(n, light.lamp))) / ARC_FLAT_LIGHT, 1)
-    * (1 - ARC_GROOVE.dark * Math.exp(-groove * groove))
-  return { shade, sheen: ARC_SHEEN.strength * Math.max(0, dot(n, light.half)) ** ARC_SHEEN.power }
+  const { n, light: lit } = ridgeFacing(light.across, light.lamp, p)
+  return { shade: lit / ARC_MEAN_LIGHT, sheen: ARC_SHEEN.strength * Math.max(0, dot(n, light.half)) ** ARC_SHEEN.power }
 }
 
 /** Spots each slope's average light is taken from */
