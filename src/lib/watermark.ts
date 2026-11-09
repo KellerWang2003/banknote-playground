@@ -1,4 +1,5 @@
 import { clamp } from './frames'
+import { keptName } from './layerName'
 import { PLACE_MIN_MM, PLACE_STEP, type Size, dragBoxCorner, fitBox, maxBoxWidth, moveBox, moveBoxTo, newBox, resizeBox, withBoxAspect } from './placed'
 import type { Watermark, WatermarkLevels } from './types'
 
@@ -42,11 +43,11 @@ const finite = (value: unknown, fallback: number) => (typeof value === 'number' 
 
 /**
  * Keeps a watermark on its banknote, as every placed layer is kept (`fitBox`), with depth between 0 and 1 and levels in
- * range. Also repairs a damaged save: Invert is kept only when it is on, levels only when they are levels, and anything
- * unknown is dropped.
+ * range. Also repairs a damaged save: its name is kept only when it is text, Invert only when it is on, levels only when
+ * they are levels, and anything unknown is dropped.
  */
 export function fitWatermark(watermark: Watermark, note: Size): Watermark {
-  const fitted: Watermark = { ...fitBox(watermark, note), depth: clamp(finite(watermark.depth, WATERMARK_DEPTH), 0, 1) }
+  const fitted: Watermark = { ...keptName(watermark.name), ...fitBox(watermark, note), depth: clamp(finite(watermark.depth, WATERMARK_DEPTH), 0, 1) }
   if (watermark.invert === true) fitted.invert = true
   const levels = fitLevels(watermark.levels)
   if (levels) fitted.levels = levels

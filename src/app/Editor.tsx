@@ -363,15 +363,13 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
               <Button size="sm" className="pointer-events-auto shadow-panel" onClick={() => editThread(note.id)}>Edit in Thread Studio</Button>
             </div>
           )}
-          {note && noteRef && <Inspector key={note.id} note={note} noteRef={noteRef} layer={shownLayer} onLayer={(next) => selectLayer(note.id, next)}
+          {note && noteRef && <Inspector key={note.id} note={note} noteRef={noteRef} layer={shownLayer}
             onWindowSelect={(windowId) => {
               if (!windowId) return exitWindows()
               setEditingNoteId(note.id)
               setSelectedWindowId(windowId)
             }}
             onPlace={() => setPlacingNoteId(note.id)}
-            onAdd={(added) => addFrom(note.id, added)}
-            onRemove={(removed) => dropLayer(note.id, removed)}
             windowsTip={windowsTip === note.id} onWindowsTipDone={() => setWindowsTip(undefined)} />}
         </>
       )}

@@ -1,5 +1,6 @@
 import { PAPER, fitBack } from './back'
 import { fitContinuous } from './continuous'
+import { keptName } from './layerName'
 import { defaultPattern, migratePattern } from './pattern'
 import { DEFAULT_PLAYBACK, playbackSettings } from './playback'
 import { migrateWindows, threadLength } from './thread'
@@ -168,6 +169,8 @@ export function migrateProject(raw: unknown): Project {
             : 2 * ((raw.tilt as { rangeDeg?: number }).rangeDeg ?? 15)),
       },
       thread: {
+        // Its own name once it has one (layerName.ts)
+        ...keptName(raw.thread.name),
         // Threads without an explicit background let the banknote show through.
         backgroundColor: raw.thread.backgroundColor,
         widthMm: raw.thread.widthMm,

@@ -50,6 +50,13 @@ export const hasThread = (note: Pick<Note, 'noThread'>) => !note.noThread
 
 export const hasFeature = (note: Note, feature: Feature) => (feature === 'thread' ? hasThread(note) : !!note[feature])
 
+/**
+ * What one of the banknote's features is called on its row in the Banknotes list and at the top of the right panel: the
+ * name it was given there (layerName.ts), else what it is
+ */
+export const featureName = (note: Pick<Note, 'thread' | PlacedLayer>, feature: Feature): string =>
+  (feature === 'thread' ? note.thread.name : note[feature]?.name) ?? FEATURE_NAMES[feature]
+
 const FIT: { [K in PlacedLayer]: (box: Placed[K], note: Size) => Placed[K] } = {
   watermark: fitWatermark,
   arcEnCiel: fitArcEnCiel,

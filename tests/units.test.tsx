@@ -189,7 +189,7 @@ describe('the unit menu', () => {
     expect(screen.queryByRole('alert')).toBeNull()
 
     // The thread's lengths and its windows follow
-    await user.click(screen.getByRole('tab', { name: 'Thread' }))
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     expect(field('W').value).toBe(String(lengthIn(note().thread.widthMm, 'in')))
     expect(field('L').value).toBe(String(lengthIn(note().pattern!.repeatMm, 'in')))
     // The first window runs 0 to 8 mm: switched off and on, it is picked, its measures on the canvas in inches too
@@ -206,7 +206,7 @@ describe('the unit menu', () => {
     // Back to mm from any field: nothing ever moved
     await user.click(screen.getAllByRole('button', { name: 'Unit: Inches' })[0])
     await user.click(await screen.findByRole('menuitemradio', { name: /Millimetres/ }))
-    await user.click(screen.getByRole('tab', { name: 'Banknote' }))
+    await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
     expect(field('W').value).toBe('250')
     expect(note().widthMm).toBe(250)
   })
@@ -220,7 +220,7 @@ describe('the unit menu', () => {
     const demo = useProjects.getState().demoPreview!
     act(() => updateNote(demo.id, demo.notes[0].id, (n) => ({ ...n, watermark: newWatermark(n) })))
     act(() => setLengthUnit('in'))
-    await user.click(screen.getByRole('tab', { name: 'Watermark' }))
+    await user.click(screen.getByRole('button', { name: 'Watermark', exact: true }))
     const x = screen.getByTitle('Watermark position from the left edge').querySelector('input')!
     fireEvent.change(x, { target: { value: '0.5' } })
     fireEvent.blur(x)

@@ -20,11 +20,11 @@ import { runAction, reportError } from '../cloud/notices'
 import { NoteView } from '../components/NoteView'
 import { duplicateNote, removeNote, updateNote, updateProject, undoProject, redoProject } from '../lib/store'
 import { useHistory } from '../lib/history'
-import { FEATURES, LAYER_NAMES, PLACED_LAYERS, hasFeature, hasThread, type Feature } from '../lib/layers'
+import { FEATURES, FEATURE_NAMES, PLACED_LAYERS, featureName, hasFeature, hasThread, type Feature } from '../lib/layers'
 import { useTiltPad } from '../lib/tiltPad'
 import type { Note, Project } from '../lib/types'
 import { AddFeatureMenu, FEATURE_ICONS } from './AddFeatureMenu'
-import type { Layer } from './layerActions'
+import { renameFeature, type Layer } from './layerActions'
 
 const THUMB = 28
 
@@ -190,10 +190,12 @@ export function ProjectPanel({
                     {hasThread(note) && (
                       <LayerRow
                         icon={note.thread.direction === 'vertical' ? <Columns2 /> : <Rows2 />}
-                        name="Security thread"
+                        name={featureName(note, 'thread')}
+                        kind={FEATURE_NAMES.thread}
                         selected={selected && layer === 'thread'}
                         onBlock={picked}
                         onSelect={() => onSelect(note.id, 'thread')}
+                        onRename={(name) => renameFeature({ projectId: project.id, noteId: note.id }, 'thread', name)}
                         onRemove={() => onRemoveLayer(note.id, 'thread')}
                       />
                     )}
@@ -201,10 +203,12 @@ export function ProjectPanel({
                       <LayerRow
                         key={l}
                         icon={FEATURE_ICONS[l]}
-                        name={LAYER_NAMES[l]}
+                        name={featureName(note, l)}
+                        kind={FEATURE_NAMES[l]}
                         selected={selected && layer === l}
                         onBlock={picked}
                         onSelect={() => onSelect(note.id, l)}
+                        onRename={(name) => renameFeature({ projectId: project.id, noteId: note.id }, l, name)}
                         onRemove={() => onRemoveLayer(note.id, l)}
                       />
                     ))}
@@ -249,23 +253,30 @@ export function ProjectPanel({
 /**
  * One part of a banknote, under it in the list, a level in from the banknote's own row and smaller (Keller, 4
  * November): its icon lines up with the banknote's name, 13 px, its highlight starting just before the icon, and its
- * name as close to the icon as on the right panel's tabs (Keller).
+ * name 6 px after the icon (Keller). A double-click renames it, as a banknote's row does (Keller, 9 November): Enter or
+ * clicking away keeps the name, Escape leaves it as it was.
  */
-function LayerRow({ icon, name, selected, onBlock = false, onSelect, onRemove }: {
+function LayerRow({ icon, name, kind, selected, onBlock = false, onSelect, onRename, onRemove }: {
   icon: ReactNode
+  /** Its own name, once it has one, else what it is */
   name: string
+  /** What it is, whatever it is called: Security thread, Watermark… */
+  kind: string
   selected: boolean
   /** On its banknote's grey, the banknote itself being picked: its hover darkens that grey */
   onBlock?: boolean
   onSelect: () => void
+  onRename: (name: string) => void
   onRemove?: () => void
 }) {
+  const [renaming, setRenaming] = useState(false)
   return (
     // The banknote's name starts 60 px in (its row's 24 px padding, 28 px thumbnail and 8 px gap): the icon starts there
     <li className="group/layer relative ml-[52px]">
       <button
         type="button"
         onClick={onSelect}
+        onDoubleClick={() => setRenaming(true)}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-lg py-1 pr-1.5 pl-2 text-left transition-colors',
           onRemove && 'group-hover/layer:pr-8',
@@ -275,11 +286,30 @@ function LayerRow({ icon, name, selected, onBlock = false, onSelect, onRemove }:
         <span className={cn('flex h-5 shrink-0 items-center [&_svg]:size-3.5', selected ? 'text-foreground' : 'text-muted-foreground')}>
           {icon}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px]">{name}</span>
+        {renaming ? (
+          // As tall as the name's line, so the row keeps its height
+          <Input
+            autoFocus
+            aria-label={`${kind} name`}
+            className="-my-0.5 h-6 px-1 py-0 text-[13px] md:text-[13px]"
+            defaultValue={name}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={(e) => {
+              onRename(e.target.value)
+              setRenaming(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Escape') setRenaming(false)
+            }}
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[13px]">{name}</span>
+        )}
       </button>
-      {onRemove && (
+      {onRemove && !renaming && (
         <div className="absolute inset-y-0 right-1 hidden items-center group-hover/layer:flex">
-          <IconButton label={`Remove ${name.toLowerCase()}`} size="icon-xs" onClick={onRemove}>
+          <IconButton label={`Remove ${kind.toLowerCase()}`} size="icon-xs" onClick={onRemove}>
             <Trash2 />
           </IconButton>
         </div>

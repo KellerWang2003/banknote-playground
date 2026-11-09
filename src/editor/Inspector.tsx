@@ -1,11 +1,10 @@
-import { Banknote, Columns2, Droplet, Magnet, Rainbow, RectangleHorizontal, RectangleVertical, Rows2, Shuffle, Trash2, TriangleAlert } from 'lucide-react'
+import { Banknote, Columns2, RectangleHorizontal, RectangleVertical, Rows2, Shuffle, TriangleAlert } from 'lucide-react'
 import { create } from 'zustand'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent } from '@/components/ui/tabs'
-import { Drawer, Group, IconButton, Labeled, LengthField, Panel, PartTab, Section, Segmented, SwitchField, TabStrip } from '../components/controls'
+import { Drawer, Group, IconButton, Labeled, LengthField, Panel, Section, Segmented, SwitchField } from '../components/controls'
 import { sideImageId, type Side } from '../lib/back'
 import { clamp } from '../lib/frames'
-import { FEATURE_NAMES, fitLayers, hasThread, isPlaced, moveLayersTo, type Feature } from '../lib/layers'
+import { featureName, fitLayers, moveLayersTo } from '../lib/layers'
 import { NOTE_SIZE } from '../lib/notes'
 import { mod, patternOf } from '../lib/pattern'
 import { setPatternOffset, shufflePatternOffset, usePatternOffsets } from '../lib/patternOffset'
@@ -14,7 +13,7 @@ import { updateNote } from '../lib/store'
 import { fitSections } from '../lib/thread'
 import type { Note } from '../lib/types'
 import { showsBack, useTilt } from '../tilt/tilt'
-import { AddFeatureMenu } from './AddFeatureMenu'
+import { FEATURE_ICONS } from './AddFeatureMenu'
 import { ArcEnCielPanel } from './ArcEnCielPanel'
 import { ChecksDrawer, ContinuousSection } from './DesignChecks'
 import { EffectSection, LensMenu, LensPreview, ThreadPrint, type SetLens } from './EffectSection'
@@ -32,27 +31,22 @@ import type { Layer } from './layerActions'
 type Change = (note: Note) => Note
 
 /**
- * Right: the selected banknote, one tab per part, as the Banknotes list has its layers: the banknote itself (size,
- * background), its security thread (where it sits and its lens, with the lens's preview in a drawer at the foot; what
- * is printed on it, its artwork and sections, is designed in Thread Studio, which opens from the button under the
- * thread on the canvas) and its watermark, Arc-en-Ciel and magnetic ink once it has them. The tab is the
- * part picked: a click on the canvas or in the list turns to it, and turning to a tab picks that part. One part at a
- * time, so the panel never grows with features. Every control has a small label over it (`Labeled`) unless a word in
- * it or beside it already says what it is.
+ * Right: the part of the selected banknote picked on the canvas or in the Banknotes list, one at a time, so the panel never
+ * grows with features, under a header with its name and icon from the list (Keller, 9 November: no tabs, and a feature's
+ * own name once it is renamed there): the banknote itself (size, its two sides), its security thread (where it sits and
+ * its lens, with the lens's preview in a drawer at the foot; what is printed on it, its artwork and sections, is designed
+ * in Thread Studio, which opens from the button above the timeline) and its watermark, Arc-en-Ciel and magnetic ink once
+ * it has them. Every control has a small label over it (`Labeled`) unless a word in it or beside it already says what it
+ * is.
  */
-export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPlace, onAdd, onRemove, windowsTip, onWindowsTipDone }: {
+export function Inspector({ note, noteRef, layer, onWindowSelect, onPlace, windowsTip, onWindowsTipDone }: {
   note: Note
-  /** Picks a part of the banknote, as its row in the list does */
-  onLayer: (layer: Layer) => void
   noteRef: NoteRef
   layer: Layer
   /** Selecting a window edits it on the canvas; undefined leaves window editing */
   onWindowSelect: (id: string | undefined) => void
   /** Shows the placed layer the panel shows on the canvas, flat, with its box to place it */
   onPlace: () => void
-  /** Adds a security feature from the + at the end of the tabs, the Add menu the Banknotes list has too */
-  onAdd: (feature: Feature) => void
-  onRemove: (feature: Feature) => void
   /** The tip by Windows saying they can be added there (a new project's first banknote), and its end */
   windowsTip?: boolean
   onWindowsTipDone?: () => void
@@ -101,26 +95,19 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
     {/* Under the canvas's corner bar (zoom and Export), at the height Thread Studio's panel starts */}
     <PanelResizer className="top-16" />
     <Panel className="absolute top-16 right-3 bottom-3 flex w-(--panel-w) flex-col overflow-hidden">
-      <Tabs value={layer} onValueChange={(next) => onLayer(next as Layer)} className="min-h-0 flex-1 gap-0">
-      {/* The banknote's parts as pill tabs at the very top, with their icons from the list, scrolling sideways once there
-          are more than fit. No header over them: Export is in the corner bar above the panel */}
-      <div className="flex items-center gap-1 border-b border-border px-4 pt-3 pb-2.5">
-        <TabStrip active={layer}>
-          <PartTab value="note"><Banknote />Banknote</PartTab>
-          {hasThread(note) && <PartTab value="thread">{thread.direction === 'vertical' ? <Columns2 /> : <Rows2 />}Thread</PartTab>}
-          {note.watermark && <PartTab value="watermark"><Droplet />Watermark</PartTab>}
-          {note.arcEnCiel && <PartTab value="arcEnCiel"><Rainbow />Arc-en-Ciel</PartTab>}
-          {note.magneticInk && <PartTab value="magneticInk"><Magnet />Magnetic ink</PartTab>}
-        </TabStrip>
-        {/* Every feature is added from the + after its tabs and removed the same way, by the bin while its tab is open */}
-        <AddFeatureMenu note={note} align="end" onAdd={onAdd} />
-        {((isPlaced(layer) && note[layer]) || (layer === 'thread' && hasThread(note))) && (
-          <IconButton label={`Remove ${FEATURE_NAMES[layer].toLowerCase()}`} size="icon-xs" className="-mr-1 shrink-0 text-muted-foreground"
-            onClick={() => onRemove(layer)}><Trash2 /></IconButton>
-        )}
+      {/* What is picked, with its name and icon from the Banknotes list: the banknote's own name, or a feature's, which is
+          what it is until it is renamed there (Keller, 9 November, in place of a tab for each part). Export is in the
+          corner bar above the panel */}
+      <div className="shrink-0 border-b border-border px-4 pt-3 pb-2.5">
+        <h2 className="flex h-7 items-center gap-1.5 text-[13px] font-semibold [&_svg]:size-3.5 [&_svg]:shrink-0">
+          {layer === 'note' ? <Banknote /> : layer === 'thread' ? (thread.direction === 'vertical' ? <Columns2 /> : <Rows2 />) : FEATURE_ICONS[layer]}
+          <span className="min-w-0 truncate">{layer === 'note' ? note.name : featureName(note, layer)}</span>
+        </h2>
       </div>
 
-      <TabsContent value="note" className="min-h-0 overflow-y-auto">
+      {/* The picked part's own settings, scrolled to their top for each part */}
+      <div key={layer} className="min-h-0 flex-1 overflow-y-auto text-sm">
+      {layer === 'note' && (
       <Group>
       <Section nested>
         <Labeled label="Orientation">
@@ -152,9 +139,9 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
       </Section>
       {hasDesign && <ContinuousSection note={note} noteRef={noteRef} />}
       </Group>
-      </TabsContent>
+      )}
 
-      <TabsContent value="thread" className="min-h-0 overflow-y-auto">
+      {layer === 'thread' && (
       <Group>
       <Section nested>
         <Labeled label="Direction">
@@ -195,26 +182,14 @@ export function Inspector({ note, noteRef, layer, onLayer, onWindowSelect, onPla
       <LensEffect note={note} noteRef={noteRef} />
       <PrintOffset note={note} onWindowSelect={onWindowSelect} />
       </Group>
-      </TabsContent>
+      )}
 
-      {note.watermark && (
-        <TabsContent value="watermark" className="min-h-0 overflow-y-auto">
-          <WatermarkPanel note={note} watermark={note.watermark} noteRef={noteRef} onPlace={onPlace} />
-        </TabsContent>
-      )}
-      {note.arcEnCiel && (
-        <TabsContent value="arcEnCiel" className="min-h-0 overflow-y-auto">
-          <ArcEnCielPanel note={note} arc={note.arcEnCiel} noteRef={noteRef} onPlace={onPlace} />
-        </TabsContent>
-      )}
-      {note.magneticInk && (
-        <TabsContent value="magneticInk" className="min-h-0 overflow-y-auto">
-          <MagneticInkPanel note={note} ink={note.magneticInk} noteRef={noteRef} onPlace={onPlace} />
-        </TabsContent>
-      )}
+      {layer === 'watermark' && note.watermark && <WatermarkPanel note={note} watermark={note.watermark} noteRef={noteRef} onPlace={onPlace} />}
+      {layer === 'arcEnCiel' && note.arcEnCiel && <ArcEnCielPanel note={note} arc={note.arcEnCiel} noteRef={noteRef} onPlace={onPlace} />}
+      {layer === 'magneticInk' && note.magneticInk && <MagneticInkPanel note={note} ink={note.magneticInk} noteRef={noteRef} onPlace={onPlace} />}
+      </div>
       {layer === 'thread' && <PreviewDrawer note={note} />}
       {layer === 'note' && hasDesign && <ChecksDrawer note={note} side={side} />}
-      </Tabs>
     </Panel>
     </>
   )

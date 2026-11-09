@@ -1,4 +1,5 @@
 import { clamp } from './frames'
+import { keptName } from './layerName'
 import type { Tilt2 } from './lens'
 import { offAxisDeg } from './light'
 import { type Size, fitBox, newBox, withBoxAspect } from './placed'
@@ -40,6 +41,7 @@ const colour = (value: unknown, fallback: string) => (typeof value === 'string' 
 export function fitMagneticInk(ink: MagneticInk, note: Size): MagneticInk {
   const barWidth = typeof ink.barWidth === 'number' && Number.isFinite(ink.barWidth) ? ink.barWidth : DEFAULT_INK.barWidth
   const fitted: MagneticInk = {
+    ...keptName(ink.name),
     ...fitBox(ink, note),
     color: colour(ink.color, DEFAULT_INK.color),
     tiltedColor: colour(ink.tiltedColor, DEFAULT_INK.tiltedColor),

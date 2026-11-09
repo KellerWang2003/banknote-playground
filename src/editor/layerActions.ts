@@ -1,6 +1,6 @@
 import { beginHistoryGroup, endHistoryGroup } from '../lib/history'
 import { imageAspect, removeImage, storeImage } from '../lib/images'
-import { type Feature, type PlacedLayer, fitPlaced, hasThread, isPlaced, newPlaced, withPlaced } from '../lib/layers'
+import { FEATURE_NAMES, type Feature, type PlacedLayer, fitPlaced, hasThread, isPlaced, newPlaced, withPlaced } from '../lib/layers'
 import { withNewThread } from '../lib/notes'
 import { withArcImage } from '../lib/arcEnCiel'
 import { withInkImage } from '../lib/magneticInk'
@@ -28,6 +28,21 @@ export function addFeature(ref: NoteRef, feature: Feature) {
 export async function removeFeature(ref: NoteRef, feature: Feature) {
   if (feature !== 'thread') return removeLayer(ref, feature)
   updateNote(ref.projectId, ref.noteId, (n) => (hasThread(n) ? withNewThread(n, true) : n))
+}
+
+/**
+ * Gives a security feature a name of its own, typed on its row in the Banknotes list (layerName.ts). Left empty, or typed
+ * as what it is anyway, it takes the name off, so it goes by what it is again
+ */
+export function renameFeature({ projectId, noteId }: NoteRef, feature: Feature, typed: string) {
+  const given = typed.trim()
+  const name = given && given !== FEATURE_NAMES[feature] ? given : undefined
+  const named = <T extends { name?: string }>({ name: _old, ...rest }: T) => (name ? { ...rest, name } : rest)
+  updateNote(projectId, noteId, (n) => {
+    if (feature === 'thread') return hasThread(n) ? { ...n, thread: named(n.thread) } : n
+    const layer = n[feature]
+    return layer ? withPlaced(n, feature, named(layer)) : n
+  })
 }
 
 /**

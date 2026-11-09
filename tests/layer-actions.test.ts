@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createNote } from '../src/lib/notes'
+import { fitArcEnCiel, newArcEnCiel } from '../src/lib/arcEnCiel'
+import { featureName } from '../src/lib/layers'
+import { fitMagneticInk, newMagneticInk } from '../src/lib/magneticInk'
+import { createNote, createProject, migrateProject } from '../src/lib/notes'
 import type { Note } from '../src/lib/types'
+import { newWatermark } from '../src/lib/watermark'
 
 // One banknote in place of the project store, artwork that stores at once, and a stand-in that draws at once
 const held = vi.hoisted(() => ({ note: undefined as Note | undefined, steps: [] as string[], drawable: true }))
@@ -19,7 +23,7 @@ vi.mock('../src/lib/standIns', () => ({
     return new File(['x'], `${layer}.png`, { type: 'image/png' })
   },
 }))
-const { addLayer } = await import('../src/editor/layerActions')
+const { addFeature, addLayer, removeFeature, renameFeature, updateWatermark } = await import('../src/editor/layerActions')
 
 const ref = { projectId: 'p', noteId: 'n' }
 
@@ -65,5 +69,53 @@ describe('adding a watermark or magnetic ink', () => {
     addLayer(ref, 'magneticInk')
     await vi.waitFor(() => expect(held.steps).toEqual(['begin', 'end']))
     expect(held.note!.magneticInk!.imageId).toBeUndefined()
+  })
+})
+
+describe('renaming a security feature', () => {
+  const reopened = (note: Note) => migrateProject({ ...createProject('Project'), notes: [note] }).notes[0]
+
+  it('keeps the name on the feature itself, through edits and the project opening again', () => {
+    held.note = { ...held.note!, watermark: newWatermark(held.note!) }
+    renameFeature(ref, 'thread', '  Star thread ')
+    renameFeature(ref, 'watermark', 'Bird glow')
+    expect(held.note!.thread.name).toBe('Star thread')
+    expect(featureName(held.note!, 'thread')).toBe('Star thread')
+    expect(featureName(held.note!, 'watermark')).toBe('Bird glow')
+    updateWatermark(ref, (w) => ({ ...w, depth: 0.3 }))
+    expect(held.note!.watermark).toMatchObject({ name: 'Bird glow', depth: 0.3 })
+    const again = reopened(held.note!)
+    expect([again.thread.name, again.watermark!.name]).toEqual(['Star thread', 'Bird glow'])
+    // A name that isn't text with something in it doesn't survive a damaged save; the rest of the feature does
+    const damaged = { ...again, thread: { ...again.thread, name: 42 }, watermark: { ...again.watermark!, name: '  ' } } as unknown as Note
+    const repaired = reopened(damaged)
+    expect('name' in repaired.thread).toBe(false)
+    expect('name' in repaired.watermark!).toBe(false)
+    expect(repaired.watermark!.depth).toBe(0.3)
+  })
+
+  it('goes by what it is again once its name is cleared, typed as what it is, or it is removed and added again', async () => {
+    held.note = { ...held.note!, watermark: newWatermark(held.note!) }
+    renameFeature(ref, 'thread', 'Star thread')
+    renameFeature(ref, 'watermark', 'Bird glow')
+    renameFeature(ref, 'thread', '   ')
+    renameFeature(ref, 'watermark', 'Watermark')
+    expect('name' in held.note!.thread).toBe(false)
+    expect('name' in held.note!.watermark!).toBe(false)
+    expect(featureName(held.note!, 'thread')).toBe('Security thread')
+    renameFeature(ref, 'thread', 'Star thread')
+    await removeFeature(ref, 'thread')
+    addFeature(ref, 'thread')
+    expect(featureName(held.note!, 'thread')).toBe('Security thread')
+    // A feature the banknote doesn't have stays away
+    renameFeature(ref, 'magneticInk', 'Fifteen')
+    expect(held.note!.magneticInk).toBeUndefined()
+  })
+
+  it('keeps Arc-en-Ciel’s and magnetic ink’s names through their fits too', () => {
+    const size = { widthMm: 150, heightMm: 70 }
+    expect(fitArcEnCiel({ ...newArcEnCiel(size), name: 'Petals' }, size).name).toBe('Petals')
+    expect(fitMagneticInk({ ...newMagneticInk(size), name: 'Fifteen' }, size).name).toBe('Fifteen')
+    expect(featureName({ ...held.note!, arcEnCiel: { ...newArcEnCiel(size), name: 'Petals' } }, 'arcEnCiel')).toBe('Petals')
   })
 })

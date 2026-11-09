@@ -80,10 +80,13 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-/** The right panel's open tab, the part of the banknote picked: Banknote, Thread or Watermark */
-const tab = () => screen.queryByRole('tab', { selected: true })?.textContent
+/**
+ * What the right panel shows, by the name at its top: the picked banknote's own, or its picked feature's (Security thread,
+ * Watermark…, until it is renamed)
+ */
+const picked = () => screen.queryByRole('heading', { level: 2 })?.textContent
 /** The colours' hex fields laid out in the right panel, in order (each beside its swatch, which is an input too) */
-/** The Add menu's + on the banknote's row in the list (the tabs end with another) */
+/** The Add menu's + on the banknote's row in the list (the row under its features is another) */
 const addFeature = () => screen.getAllByRole('button', { name: 'Add security feature' })[0]
 const hexFields = () => (screen.getAllByDisplayValue(/^#[0-9a-f]{6}$/i) as HTMLInputElement[]).filter((input) => input.type === 'text')
 
@@ -125,24 +128,25 @@ describe('username workspace editor', () => {
     // It comes as plain light grey paper with no security feature, not even a thread, and shows itself
     const project = () => useProjects.getState().projects.find((p) => p.name === 'Tip project')!
     expect(project().notes[0]).toMatchObject({ color: '#E5E5E5', noThread: true })
-    expect(tab()).toBe('Banknote')
-    expect(screen.queryByRole('tab', { name: 'Thread' })).toBeNull()
+    // The right panel names what it shows at its top, with no tabs to other parts (Keller, 9 November)
+    expect(picked()).toBe('Banknote 1')
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Security thread', exact: true })).toBeNull()
     expect(document.querySelector('[data-thread]')).toBeNull()
     expect(screen.queryByText('You can add windows here')).toBeNull()
 
-    // Every feature is added from one Add menu, on the banknote's row, the row under the selected banknote's features and
-    // at the end of the tabs, each with a line on what it is. The project's first thread opens on its tab, without
-    // windows, with the tip by Windows until the next click
+    // Every feature is added from one Add menu, on the banknote's row and the row under the selected banknote's features,
+    // each with a line on what it is. The project's first thread shows itself, without windows, with the tip by Windows
+    // until the next click
     const add = () => screen.getAllByRole('button', { name: 'Add security feature' })
-    expect(add()).toHaveLength(3)
+    expect(add()).toHaveLength(2)
     expect(add()[1].textContent).toBe('Add security feature')
     await user.click(add()[1])
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
       expect.stringMatching(/^Security thread/), expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
     await user.click(screen.getByRole('menuitem', { name: /^Security thread/ }))
     expect(project().notes[0].noThread).toBeUndefined()
-    expect(screen.getByRole('tab', { name: 'Thread' }).getAttribute('aria-selected')).toBe('true')
+    expect(picked()).toBe('Security thread')
     expect(document.querySelector('[data-thread]')).not.toBeNull()
     const windows = screen.getByRole('switch', { name: 'Windows' })
     expect(windows.getAttribute('aria-checked')).toBe('false')
@@ -152,17 +156,17 @@ describe('username workspace editor', () => {
     expect(windows.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(screen.queryByText('You can add windows here')).toBeNull())
 
-    // It is removed as every feature is, from the bin by its tab, and the banknote itself shows again
-    await user.click(screen.getAllByRole('button', { name: 'Remove security thread' }).at(-1)!)
+    // It is removed as every feature is, from the bin on its row in the list, and the banknote itself shows again
+    await user.click(screen.getByRole('button', { name: 'Remove security thread' }))
     expect(project().notes[0].noThread).toBe(true)
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Banknote 1')
     expect(document.querySelector('[data-thread]')).toBeNull()
 
     // The next banknote shows itself, with no tip
     await user.click(screen.getByRole('button', { name: 'Add banknote', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Add', exact: true }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Banknote 2')
     expect(screen.queryByText('You can add windows here')).toBeNull()
   })
   it('edits windows on the canvas with their measures, undoes deletion, and preserves sections when windows are off', async () => {
@@ -227,7 +231,7 @@ describe('username workspace editor', () => {
     fireEvent.pointerDown(document.querySelector('[data-note-body]')!, { button: 0, pointerId: 1 })
     fireEvent.pointerUp(document.querySelector('[data-note-body]')!, { button: 0, pointerId: 1 })
     expect(screen.queryByRole('group', { name: 'Edit thread windows' })).toBeNull()
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
     // Off and on again, the windows are as they were
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     await user.click(screen.getByRole('switch', { name: 'Windows' }))
@@ -270,47 +274,87 @@ describe('username workspace editor', () => {
 
     // The thread, then another banknote: that banknote itself, not its thread
     click(body(0).querySelector('[data-thread]')!)
-    expect(tab()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
     click(body(1))
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Other')
     expect(width()).toBe('100')
 
     // Tilting the selected banknote by dragging it leaves its layer showing; a click picks the banknote itself
     click(body(1).querySelector('[data-thread]')!)
-    expect(tab()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
     fireEvent.pointerDown(body(1), { button: 0, buttons: 1, pointerId: 1, clientX: 100, clientY: 100 })
     fireEvent.pointerMove(body(1), { buttons: 1, pointerId: 1, clientX: 100, clientY: 60 })
     fireEvent.pointerUp(body(1), { button: 0, pointerId: 1, clientX: 100, clientY: 60 })
-    expect(tab()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
     click(body(1))
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Other')
 
     // The watermark, then the banknote under it, then the other banknote: each time just what was clicked
     click(body(0).querySelector('[data-watermark]')!)
-    expect(tab()).toBe('Watermark')
+    expect(picked()).toBe('Watermark')
     click(body(0))
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
     expect(width()).toBe('150')
     click(body(0).querySelector('[data-watermark]')!)
     click(body(1))
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Other')
     expect(width()).toBe('100')
 
     // The same in the list: a layer row, then another banknote's row
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
-    expect(tab()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
     await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
     expect(width()).toBe('150')
 
-    // And the other way round: turning to a tab picks that part, on the canvas too
-    await user.click(screen.getByRole('tab', { name: 'Thread' }))
+    // A layer's row picks it on the canvas too: the panel has no tabs of its own to turn to it (Keller, 9 November)
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     expect(screen.getByRole('button', { name: 'Security thread', exact: true }).classList.contains('bg-muted')).toBe(true)
     expect(body(0).querySelector('[data-outline="selected"]')).not.toBeNull()
-    await user.click(screen.getByRole('tab', { name: 'Watermark' }))
+    await user.click(screen.getByRole('button', { name: 'Watermark', exact: true }))
     expect(screen.getByRole('group', { name: 'Place watermark' })).toBeDefined()
-    await user.click(screen.getByRole('tab', { name: 'Banknote' }))
+    await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
     expect(body(0).classList.contains('outline-2')).toBe(true)
+    expect(saves).not.toHaveBeenCalled()
+  })
+  it('renames a security feature from its row in the list, as a banknote is renamed, and the panel’s header follows', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('of-thread-workspace', 'rename-feature-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    const note = () => useProjects.getState().demoPreview!.notes[0]
+    const rename = async (row: string, field: string, typed: string) => {
+      await user.dblClick(screen.getByRole('button', { name: row, exact: true }))
+      await user.clear(screen.getByRole('textbox', { name: field }))
+      await user.type(screen.getByRole('textbox', { name: field }), typed)
+    }
+
+    // A double-click on the thread's row makes its name a field; Enter keeps the new name, on the row and at the top of the
+    // panel, and its bin still says what it is
+    await rename('Security thread', 'Security thread name', 'Star thread{Enter}')
+    expect(note().thread.name).toBe('Star thread')
+    expect(picked()).toBe('Star thread')
+    expect(screen.getByRole('button', { name: 'Star thread', exact: true })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Remove security thread' })).toBeDefined()
+    // Escape leaves it as it was
+    await rename('Star thread', 'Security thread name', 'Moon thread{Escape}')
+    expect(note().thread.name).toBe('Star thread')
+    expect(picked()).toBe('Star thread')
+
+    // A placed layer renames the same way, and keeps its name as it is edited
+    await user.click(addFeature())
+    await user.click(await screen.findByRole('menuitem', { name: /^Watermark/ }))
+    await rename('Watermark', 'Watermark name', 'Bird glow{Enter}')
+    expect(picked()).toBe('Bird glow')
+    fireEvent.change(screen.getByTitle('How strongly the watermark shows at its clearest, tilted or held to the light').querySelector('input')!, { target: { value: '30' } })
+    expect(note().watermark).toMatchObject({ name: 'Bird glow', depth: 0.3 })
+
+    // Emptied, a name goes, and the feature is called what it is again
+    await rename('Star thread', 'Security thread name', '{Enter}')
+    expect(note().thread.name).toBeUndefined()
+    expect(picked()).toBe('Security thread')
     expect(saves).not.toHaveBeenCalled()
   })
   it('handles frames on the timeline: a click goes to one, a drag reorders, × deletes, the pencil edits its fill, the line scrubs', async () => {
@@ -330,11 +374,10 @@ describe('username workspace editor', () => {
     await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
-    const open = () => screen.getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.textContent
     const clip = (id: string) => document.querySelector<HTMLElement>(`[data-frame-clip="${id}"]`)!
     const tilted = () => [useTilt.getState().angle, useTilt.getState().angleX, useTilt.getState().target, useTilt.getState().targetX]
     const [a, b] = note().frames.map((f) => f.id)
-    expect(open()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
 
     // A click on a clip shows that frame without tilting the banknote, and working on the frames turns the panel to the
     // thread (Keller: the timeline follows manual tilt, never the other way round)
@@ -345,7 +388,7 @@ describe('username workspace editor', () => {
       expect(clip(id).classList.contains('ring-1')).toBe(true)
       expect(tilted()).toEqual(still)
     }
-    expect(open()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
     // Tilting by hand hands the frames back to the tilt, and the timeline follows it again
     expect(useTilt.getState().frameTilts[note().id]).toBeDefined()
     act(() => setTilt({ source: 'drag', target: 10 }))
@@ -370,9 +413,9 @@ describe('username workspace editor', () => {
     expect(note().frames.map((f) => f.id)).toEqual([b, a])
 
     // The pencil edits a frame's fill, in the same panel as the right panel's, and turns to the thread too
-    await user.click(screen.getByRole('tab', { name: 'Banknote' }))
+    await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Edit frame 2' }))
-    expect(open()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
     const hex = document.querySelector<HTMLInputElement>('[data-slot="popover-content"] input:not([type="color"])')!
     fireEvent.change(hex, { target: { value: '#123456' } })
     expect(note().frames[1].color).toBe('#123456')
@@ -462,7 +505,7 @@ describe('username workspace editor', () => {
     expect(screen.getByText('Tile pattern', { exact: true })).toBeDefined()
     expect(screen.queryByText('Place', { exact: true })).toBeNull()
   })
-  it('shows one tab per part, labels every control, and the thread’s lens with its preview in a drawer at the foot', async () => {
+  it('shows only the picked part under its name, labels every control, and the thread’s lens with its preview in a drawer at the foot', async () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'panel-lens-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
@@ -470,13 +513,14 @@ describe('username workspace editor', () => {
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
-    // A tab per part, as the list has them (Watermark only once added); the banknote's own settings are a tab away
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Banknote', 'Thread'])
-    expect(tab()).toBe('Thread')
+    // Only the part picked, named at the top, no tabs (Keller, 9 November): the banknote's own settings are its row away
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(picked()).toBe('Security thread')
     expect(screen.queryByText('H', { exact: true })).toBeNull()
-    await user.click(screen.getByRole('tab', { name: 'Banknote' }))
+    await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
+    expect(picked()).toBe('Demo banknote')
     expect(screen.getByText('H', { exact: true })).toBeDefined()
-    await user.click(screen.getByRole('tab', { name: 'Thread' }))
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
 
     // Small labels say what each control is
     for (const label of ['Direction', 'Width', 'Tile length', 'Position', 'Effect', 'Seen flat']) expect(screen.getByText(label, { exact: true })).toBeDefined()
@@ -732,7 +776,7 @@ describe('username workspace editor', () => {
     // Escape only cancels it: the banknote stays selected
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(useTilt.getState().recording).toBe(false)
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
     // The pad stays open, as the browser remembers
     expect(screen.getByRole('group', { name: 'Tilt pad' })).toBeDefined()
     setTiltPadOpen(false)
@@ -973,7 +1017,7 @@ describe('username workspace editor', () => {
     expect(useTilt.getState().source).toBe('drag')
     fireEvent.pointerUp(canvas(), { button: 0, pointerId: 1, clientX: 100, clientY: 60 })
     expect(target()).toEqual({ y: 0, x: 0 })
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
 
     // A middle or right drag pans, on the banknote too, without tilting it; the right button opens no browser menu
     for (const button of [1, 2]) {
@@ -983,7 +1027,7 @@ describe('username workspace editor', () => {
       expect(target()).toEqual({ y: 0, x: 0 })
     }
     expect(fireEvent.contextMenu(body())).toBe(false)
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
 
     // Held down, Space is the hand: a drag anywhere on the canvas pans, and letting go of Space then doesn't play
     fireEvent.keyDown(window, { code: 'Space', key: ' ' })
@@ -997,13 +1041,13 @@ describe('username workspace editor', () => {
     expect(canvas().className).not.toContain('cursor-grab')
     expect(target()).toEqual({ y: 0, x: 0 })
     expect(useTilt.getState().source).not.toBe('wobble')
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
 
     // A click on the empty canvas clears the selection and leaves playback playing
     act(() => togglePlayback())
     fireEvent.pointerDown(canvas(), { button: 0, buttons: 1, pointerId: 1, clientX: 100, clientY: 100 })
     fireEvent.pointerUp(canvas(), { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
-    expect(tab()).toBeUndefined()
+    expect(picked()).toBeUndefined()
     expect(useTilt.getState().source).toBe('wobble')
     act(() => togglePlayback())
 
@@ -1032,16 +1076,16 @@ describe('username workspace editor', () => {
     const placing = () => screen.queryByRole('group', { name: 'Place watermark' })
     const watermark = () => useProjects.getState().demoPreview!.notes[0].watermark
 
-    // The banknote's own row opens the Banknote tab; each layer under it opens its own
-    expect(tab()).toBe('Banknote')
+    // The banknote's own row shows the banknote itself; each layer under it shows its own
+    expect(picked()).toBe('Demo banknote')
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
-    expect(tab()).toBe('Thread')
+    expect(picked()).toBe('Security thread')
 
     // Adding the watermark selects it and shows the banknote flat with it clear, with its box to place; the tilt pad steps aside
     await user.click(addFeature())
     await user.click(await screen.findByRole('menuitem', { name: /^Watermark/ }))
     expect(watermark()).toBeDefined()
-    expect(tab()).toBe('Watermark')
+    expect(picked()).toBe('Watermark')
     expect(placing()).not.toBeNull()
     expect(screen.queryByRole('group', { name: 'Tilt' })).toBeNull()
     const { xMm } = watermark()!
@@ -1053,7 +1097,7 @@ describe('username workspace editor', () => {
     // Escape ends placing and keeps the watermark selected
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(placing()).toBeNull()
-    expect(tab()).toBe('Watermark')
+    expect(picked()).toBe('Watermark')
     expect(screen.getByRole('group', { name: 'Tilt' })).toBeDefined()
 
     // A tap of L holds every banknote to the light, as the lamp on the pad shows; typing an L doesn't
@@ -1183,7 +1227,7 @@ describe('username workspace editor', () => {
     fireEvent.pointerUp(shown('[data-watermark]')!, { button: 0, pointerId: 1, clientX: 140, clientY: 100 })
     const moved = note().watermark!
     expect(moved.xMm).toBeLessThan(start.xMm)
-    expect(tab()).toBe('Watermark')
+    expect(picked()).toBe('Watermark')
     const placing = screen.getByRole('group', { name: 'Place watermark' })
     fireEvent.keyDown(placing, { key: 'ArrowRight' })
     expect(note().watermark!.xMm).toBe(moved.xMm - 0.5)
@@ -1199,7 +1243,7 @@ describe('username workspace editor', () => {
     // Turned over again, the thread can't stay picked: the banknote itself is
     await user.click(side('Back'))
     expect(useTilt.getState().flipped).toBe(true)
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote')
     expect(clips()).toBe(0)
     finishTurn()
 
@@ -1326,19 +1370,16 @@ describe('username workspace editor', () => {
     expect(notes()[1].watermark).toEqual(original)
 
     // The copy is selected as a banknote, not on the layer picked before; removing its watermark leaves the original alone
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote copy')
     await user.click(screen.getByRole('button', { name: 'Watermark', exact: true }))
-    expect(tab()).toBe('Watermark')
-    // From its row in the list (the panel has one beside the tabs too)
-    const [fromList, besideTabs] = screen.getAllByRole('button', { name: 'Remove watermark' })
-    expect(besideTabs).toBeDefined()
-    await user.click(fromList)
+    expect(picked()).toBe('Watermark')
+    // From its row in the list, the one place it is removed (the panel's header only names it)
+    await user.click(screen.getByRole('button', { name: 'Remove watermark' }))
     expect(notes()[1].watermark).toBeUndefined()
     expect(notes()[0].watermark).toEqual(original)
     expect(screen.queryByRole('button', { name: 'Watermark', exact: true })).toBeNull()
-    expect(screen.queryByRole('tab', { name: 'Watermark' })).toBeNull()
     // The banknote itself stays selected
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote copy')
 
     await user.click(screen.getByRole('button', { name: 'Undo', exact: true }))
     expect(notes()[1].watermark).toEqual(original)
@@ -1370,7 +1411,7 @@ describe('username workspace editor', () => {
       .toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
     await user.click(screen.getByRole('menuitem', { name: /^Magnetic ink/ }))
     expect(ink()).toBeDefined()
-    expect(tab()).toBe('Magnetic ink')
+    expect(picked()).toBe('Magnetic ink')
     expect(screen.getByRole('button', { name: 'Magnetic ink', exact: true }).classList.contains('bg-muted')).toBe(true)
     expect(placing()).not.toBeNull()
     expect(screen.queryByRole('group', { name: 'Tilt' })).toBeNull()
@@ -1400,7 +1441,7 @@ describe('username workspace editor', () => {
     // Escape ends placing and keeps it selected
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(placing()).toBeNull()
-    expect(tab()).toBe('Magnetic ink')
+    expect(picked()).toBe('Magnetic ink')
 
     // Once it has an image it shows on the banknote, under the thread, and drags there as the watermark does: a press
     // picks it, with its box, and a drag moves it in 0.5 mm steps instead of tilting the banknote
@@ -1466,10 +1507,9 @@ describe('username workspace editor', () => {
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Arc-en-Ciel/)])
     await user.click(screen.getByRole('menuitem', { name: /^Arc-en-Ciel/ }))
     expect(screen.queryAllByRole('button', { name: 'Add security feature' })).toHaveLength(0)
-    // Listed under the thread in the order they draw, as tabs in the same order
+    // Listed under the thread in the order they draw
     expect(within(screen.getByRole('list', { name: 'Layers of Demo banknote' })).getAllByRole('listitem').map((row) => row.textContent))
       .toEqual(['Security thread', 'Watermark', 'Arc-en-Ciel', 'Magnetic ink'])
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Banknote', 'Thread', 'Watermark', 'Arc-en-Ciel', 'Magnetic ink'])
     const original = notes()[0].magneticInk
 
     await user.click(screen.getByRole('button', { name: 'Duplicate', exact: true }))
@@ -1478,11 +1518,11 @@ describe('username workspace editor', () => {
 
     // On the copy: picking its ink places it, and Delete removes it, leaving the banknote itself selected and the original alone
     await user.click(screen.getByRole('button', { name: 'Magnetic ink', exact: true }))
-    expect(tab()).toBe('Magnetic ink')
+    expect(picked()).toBe('Magnetic ink')
     fireEvent.keyDown(window, { key: 'Delete' })
     expect(notes()[1].magneticInk).toBeUndefined()
     expect(notes()[0].magneticInk).toEqual(original)
-    expect(tab()).toBe('Banknote')
+    expect(picked()).toBe('Demo banknote copy')
     // The + is back, for the ink alone
     await user.click(addFeature())
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Magnetic ink/)])
@@ -1490,9 +1530,9 @@ describe('username workspace editor', () => {
 
     await user.click(screen.getByRole('button', { name: 'Undo', exact: true }))
     expect(notes()[1].magneticInk).toEqual(original)
-    // The remove button beside the tabs names it
+    // Its row's bin names it
     await user.click(screen.getByRole('button', { name: 'Magnetic ink', exact: true }))
-    expect(screen.getAllByRole('button', { name: 'Remove magnetic ink' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Remove magnetic ink' })).toHaveLength(1)
     expect(saves).not.toHaveBeenCalled()
   })
 })

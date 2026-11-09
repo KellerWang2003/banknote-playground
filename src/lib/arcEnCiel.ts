@@ -1,5 +1,6 @@
 import { PAPER } from './back'
 import { clamp } from './frames'
+import { keptName } from './layerName'
 import type { Tilt2 } from './lens'
 import { type Size, fitBox, newBox, withBoxAspect } from './placed'
 import { LAMP_HEIGHT_DEG, tiltMatrix } from './realisticInk'
@@ -104,6 +105,7 @@ export function ridgeAcross(arc: Pick<ArcEnCiel, 'angleDeg'>): [number, number] 
 export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
   const colors = (Array.isArray(arc.colors) ? arc.colors : []).filter((c) => typeof c === 'string' && HEX.test(c)).slice(0, ARC_COLOURS.max)
   const fitted: ArcEnCiel = {
+    ...keptName(arc.name),
     ...fitBox(arc, note),
     flow: ARC_FLOWS.includes(arc.flow) ? arc.flow : DEFAULT_ARC.flow,
     points: fitSpots(arc.points, 1, ARC_POINTS, DEFAULT_ARC.points),

@@ -28,6 +28,8 @@ export interface ImagePlace {
 }
 
 export interface ThreadSettings {
+  /** Its own name, given in the Banknotes list; absent, it is called Security thread (layerName.ts) */
+  name?: string
   /** Optional colour behind the frame artwork; omitted for transparency */
   backgroundColor?: string
   widthMm: number
@@ -144,6 +146,8 @@ export interface PlaybackMove {
  * Placed by its top-left corner in mm from the banknote's top-left; its height follows the image's proportions.
  */
 export interface Watermark {
+  /** Its own name, given in the Banknotes list; absent, it is called Watermark (layerName.ts) */
+  name?: string
   /** Absent until an image is uploaded */
   imageId?: string
   xMm: number
@@ -188,6 +192,8 @@ export interface ContinuousDesign {
  * top-left corner in mm from the banknote's top-left; its height follows the image's proportions.
  */
 export interface MagneticInk {
+  /** Its own name, given in the Banknotes list; absent, it is called Magnetic ink (layerName.ts) */
+  name?: string
   /** Absent until an image is uploaded */
   imageId?: string
   xMm: number
@@ -223,6 +229,8 @@ export type ArcFlow = 'edge' | 'holes' | 'point' | 'line'
  * them where they were.
  */
 export interface ArcEnCiel {
+  /** Its own name, given in the Banknotes list; absent, it is called Arc-en-Ciel (layerName.ts) */
+  name?: string
   /** Absent until an image is uploaded */
   imageId?: string
   xMm: number
