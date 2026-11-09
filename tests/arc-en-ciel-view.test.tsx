@@ -119,11 +119,11 @@ describe("a NoteView's Arc-en-Ciel", () => {
   it('with Realistic on, draws its ridges lit and embossed, turning from the lamp as the banknote tilts, rotates and turns over', () => {
     gpu.bands = true
     held.shape = embossed
-    const note = withArc({ flow: 'point', realistic: true })
+    const note = withArc({ flow: 'point' })
     let renders = 0
     function Counted() {
       renders++
-      return <NoteView note={note} scale={2} live perspective />
+      return <NoteView note={note} scale={2} live perspective realistic />
     }
     const { container } = render(<Counted />)
     // Its shape's maps are read for the outline it embosses, though Point needs none
@@ -148,8 +148,8 @@ describe("a NoteView's Arc-en-Ciel", () => {
 
   it('with Realistic on but no WebGL, shows its bands as without it', () => {
     held.shape = embossed
-    const note = withArc({ flow: 'point', realistic: true })
-    render(<NoteView note={note} scale={2} live perspective />)
+    const note = withArc({ flow: 'point' })
+    render(<NoteView note={note} scale={2} live perspective realistic />)
     expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }))
     expect(lastPaint().look).not.toHaveProperty('lit')
   })
@@ -357,9 +357,11 @@ describe('the Arc-en-Ciel panel', () => {
     held.shape = solid
     show()
     const text = document.body.textContent!
-    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle', 'Realistic'].map((words) => text.indexOf(words))
+    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle'].map((words) => text.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
+    // Realistic isn't one of its own: it is the canvas's, beside the lamp, for every banknote
+    expect(screen.queryByRole('switch', { name: 'Realistic' })).toBeNull()
   })
 
   it('greys out Holes on a shape without any, and Point and Line show their handles on the canvas', async () => {
@@ -394,12 +396,6 @@ describe('the Arc-en-Ciel panel', () => {
     expect(panel.arc!.angleDeg).toBe(30)
     fireEvent.change(field, { target: { value: '-90' } })
     expect(panel.arc!.angleDeg).toBe(-90)
-  })
-
-  it('ends with Realistic, saved only when on', async () => {
-    show({ flow: 'point' })
-    await userEvent.click(screen.getByRole('switch', { name: 'Realistic' }))
-    expect(panel.arc!.realistic).toBe(true)
   })
 
   it('offers Invert only once it has an image', () => {

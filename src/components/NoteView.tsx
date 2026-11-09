@@ -265,10 +265,10 @@ type LiveState = { angle: number; angleX: number; light: number; turn: number; f
  * the note also turns in 3D, and `sheen` adds a highlight that travels along the thread. Its watermark, in the
  * note's own colours under the thread, is only a hint flat, comes out clearly as the note tilts, and shows flat
  * held to the light. Its magnetic ink, over the watermark and under the thread, shifts colour as the note turns away
- * and rolls its bright bar on one tilt, or with Realistic on is lit as metal flakes. Its Arc-en-Ciel, under the ink, shows
- * its colour bands sliding as the note tilts across its ridges. Its back (`side`, or for a live note the shared turn)
- * shows the back's own background and the watermark through it, mirrored, and nothing else: no thread, no Arc-en-Ciel, no
- * magnetic ink.
+ * and rolls its bright bar on one tilt, or with `realistic` is lit as metal flakes. Its Arc-en-Ciel, under the ink, shows
+ * its colour bands sliding as the note tilts across its ridges, or with `realistic` its embossed ridges lit. Its back
+ * (`side`, or for a live note the shared turn) shows the back's own background and the watermark through it, mirrored,
+ * and nothing else: no thread, no Arc-en-Ciel, no magnetic ink.
  */
 export function NoteView({
   note,
@@ -278,6 +278,7 @@ export function NoteView({
   live = false,
   perspective = false,
   sheen = false,
+  realistic = false,
   reveal,
   showWindowCuts = false,
   showFrameNumber = false,
@@ -295,6 +296,11 @@ export function NoteView({
   live?: boolean
   perspective?: boolean
   sheen?: boolean
+  /**
+   * Realistic, the canvas's switch beside the lamp (`src/lib/realistic.ts`): magnetic ink lit as metal flakes and
+   * Arc-en-Ciel drawn as embossed ridges in the lamp's light, where the browser can (WebGL)
+   */
+  realistic?: boolean
   /**
    * How clearly the watermark shows, 0 (faint) to 1 (clear), fixed. Without it a live note follows the shared light
    * and tilt, and a still note shows it as at its tilt in reflected light.
@@ -346,8 +352,8 @@ export function NoteView({
   const inkBar: InkBar | undefined = magneticInk && { barAxis: magneticInk.barAxis, barWidth: magneticInk.barWidth }
   // Realistic, it is lit as metal into a canvas of its own, as many pixels as it shows with, where the browser can (WebGL);
   // elsewhere it keeps its flat look
-  const realistic = magneticInk?.realistic === true && litInkAvailable()
-  const inkPx = realistic && magneticInk ? inkPixels(magneticInk.widthMm * scale, magneticInk.heightMm * scale, devicePx(1)) : undefined
+  const inkLit = realistic && magneticInk !== undefined && litInkAvailable()
+  const inkPx = inkLit && magneticInk ? inkPixels(magneticInk.widthMm * scale, magneticInk.heightMm * scale, devicePx(1)) : undefined
   const inkCanvas = useRef<HTMLCanvasElement>(null)
   const paintInk = (tilt: Tilt2, quarter: Quarter) => {
     const canvas = inkCanvas.current
@@ -360,8 +366,8 @@ export function NoteView({
   // its bands move, or with Realistic on its ridges turn from the lamp (where the browser can draw them: WebGL), the canvas
   // then reaching past the box all round for the outline
   const arcMask = useInkMask(arcEnCiel, arcEnCiel && devicePx(Math.max(arcEnCiel.widthMm, arcEnCiel.heightMm) * scale))
-  const arcShape = useBandShape(arcEnCiel && needsShape(arcEnCiel) ? arcEnCiel : undefined)
-  const arcLit = arcEnCiel?.realistic === true && bandsAvailable()
+  const arcShape = useBandShape(arcEnCiel && needsShape(arcEnCiel, realistic) ? arcEnCiel : undefined)
+  const arcLit = realistic && arcEnCiel !== undefined && bandsAvailable()
   const arcOutset = arcEnCiel && arcLit ? embossOutset(arcEnCiel, arcShape?.emboss) : 0
   const arcPx = arcEnCiel
     ? inkPixels((arcEnCiel.widthMm + 2 * arcOutset) * scale, (arcEnCiel.heightMm + 2 * arcOutset) * scale, devicePx(1))
@@ -394,7 +400,7 @@ export function NoteView({
       // that changes, not with the light or the timeline
       const view = { x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }
       const quarter = quarterOf(state.quarterTurns ?? 0)
-      if (realistic) paintInk(view, quarter)
+      if (inkLit) paintInk(view, quarter)
       // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen; Realistic, its ridges
       // turn from the lamp as the ink does
       paintArc({ x: angleX, y: angle }, view, quarter)
@@ -404,7 +410,7 @@ export function NoteView({
   // A still note's realistic ink and Arc-en-Ciel, as at its own tilt
   useLayoutEffect(() => {
     if (live) return
-    if (realistic) paintInk({ x: angleX, y: angle }, 0)
+    if (inkLit) paintInk({ x: angleX, y: angle }, 0)
     paintArc({ x: angleX, y: angle }, { x: angleX, y: angle }, 0)
   })
   useLayoutEffect(() => {

@@ -204,11 +204,6 @@ export interface MagneticInk {
   barAxis: 'y' | 'x'
   /** How wide the bar is, as a share of the shape the way it rolls (INK_BAR) */
   barWidth: number
-  /**
-   * Lit as metal flakes, with the same colours and bar (realisticInk.ts): the lamp's reflection with a soft glow round it,
-   * the colour shifting across the shape as each flake is seen, and sparkle. Saved only when on
-   */
-  realistic?: boolean
 }
 
 /** A spot on a placed layer, as shares of its box: 0, 0 its top-left corner and 1, 1 its bottom-right. It may lie off the box */
@@ -252,12 +247,6 @@ export interface ArcEnCiel {
    * between both (Keller, 9 November, in place of Moves on's ↕ or ↔)
    */
   angleDeg: number
-  /**
-   * Drawn as embossed ridges lit by magnetic ink's lamp (arcEnCiel.ts), printed as Oberthur's is: every ridge carries all
-   * the colours as fine lines, so flat the design nearly hides and tilting brings it out, and the paper round the print is
-   * embossed too. Saved only when on
-   */
-  realistic?: boolean
 }
 
 /**

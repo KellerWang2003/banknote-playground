@@ -47,8 +47,9 @@ function FlowPicker({ value, holes, onChange }: { value: ArcFlow; holes: boolean
  * Right, under the Arc-en-Ciel tab: the selected banknote's Arc-en-Ciel, in the order Keller asked for (8 November): where
  * it sits, then its image, whose shape takes the bands (whatever stands out from its background), or the bands go round it
  * with Invert, then the bands: where they start, their colours in order, how wide each is, and the ridges' angle, the tilt
- * across them sliding the bands, and last Realistic, which draws the embossed ridges themselves in the lamp's light. Points,
- * Line and the ridges' angle are placed on the canvas too (ArcHandles.tsx). Removing it is beside the tabs.
+ * across them sliding the bands. Drawing the embossed ridges themselves in the lamp's light is Realistic, beside the lamp,
+ * for every banknote (`RealisticToggle` in TiltRail.tsx). Points, Line and the ridges' angle are placed on the canvas too
+ * (ArcHandles.tsx). Removing it is beside the tabs.
  */
 export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
   note: Note
@@ -110,8 +111,6 @@ export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
               min={ARC_ANGLE.min} max={ARC_ANGLE.max} unit="°" onChange={(angleDeg) => change((a) => ({ ...a, angleDeg: ridgeAngle(angleDeg) }))} />
           </Labeled>
         </div>
-        <SwitchField label="Realistic" title="Drawn as embossed ridges in the lamp's light, each printed with every colour: flat hides the design, tilting brings it out"
-          checked={arc.realistic === true} onChange={(on) => change((a) => ({ ...a, realistic: on }))} />
       </Section>
     </Group>
   )

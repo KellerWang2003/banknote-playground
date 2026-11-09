@@ -8,7 +8,7 @@ import {
 import type { MagneticInk } from '../src/lib/types'
 
 const RAD = Math.PI / 180
-const ink = (change: Partial<MagneticInk> = {}): MagneticInk => ({ xMm: 96, yMm: 8, widthMm: 14, heightMm: 54, ...DEFAULT_INK, realistic: true, ...change })
+const ink = (change: Partial<MagneticInk> = {}): MagneticInk => ({ xMm: 96, yMm: 8, widthMm: 14, heightMm: 54, ...DEFAULT_INK, ...change })
 const note = { widthMm: 150, heightMm: 70 }
 const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 const unit = (a: number[]): [number, number, number] => {
@@ -108,7 +108,7 @@ describe('realistic magnetic ink', () => {
     const half = LAMP_HEIGHT_DEG / 2
     for (const at of [{}, { xMm: 4, yMm: 3 }, { xMm: 60, yMm: 25 }]) {
       for (const barAxis of ['y', 'x'] as const) {
-        const lit = { ...placed, ...at, ...DEFAULT_INK, barAxis, realistic: true }
+        const lit = { ...placed, ...at, ...DEFAULT_INK, barAxis }
         const tilt = (deg: number) => (barAxis === 'x' ? { x: deg, y: half } : { x: 0, y: half + deg })
         const rest = barSeen(lit, tilt(0))
         expect(Math.abs(rest - 0.5)).toBeLessThan(0.015)

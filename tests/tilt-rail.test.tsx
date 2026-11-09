@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import { TiltRail } from '../src/editor/TiltRail'
 import { padToTilt, tiltToPad } from '../src/lib/pad'
+import { setRealistic, useRealistic } from '../src/lib/realistic'
 import { setTiltPadOpen, useTiltPad } from '../src/lib/tiltPad'
 import { setTilt, springToFlat, useTilt } from '../src/tilt/tilt'
 
@@ -82,6 +83,28 @@ describe('tilt pad', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fold the tilt pad away' }))
     expect(screen.queryByRole('group', { name: 'Tilt pad' })).toBeNull()
     expect(localStorage.getItem('of-playground.tilt-pad')).toBe('folded')
+  })
+
+  it('switches Realistic for every banknote from beside the lamp, remembered per browser', async () => {
+    setRealistic(false)
+    render(<TooltipProvider><TiltRail /></TooltipProvider>)
+    const toggle = screen.getByRole('button', { name: 'Realistic' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    // On the lamp's row, just after it
+    const lamp = screen.getByRole('button', { name: 'Hold up to the light' })
+    expect(lamp.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(useRealistic.getState().on).toBe(true)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(localStorage.getItem('of-playground.realistic')).toBe('on')
+    // A new visit starts as it was left
+    vi.resetModules()
+    expect((await import('../src/lib/realistic')).useRealistic.getState().on).toBe(true)
+    fireEvent.click(toggle)
+    expect(useRealistic.getState().on).toBe(false)
+    expect(localStorage.getItem('of-playground.realistic')).toBe('off')
+    vi.resetModules()
+    expect((await import('../src/lib/realistic')).useRealistic.getState().on).toBe(false)
   })
 
   it('ignores a right-click', () => {

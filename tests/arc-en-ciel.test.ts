@@ -292,9 +292,8 @@ describe('placing where Arc-en-Ciel’s bands start', () => {
 })
 
 describe('Arc-en-Ciel, Realistic', () => {
-  it('is saved only when on', () => {
-    expect(fitArcEnCiel({ ...arc(), realistic: true }, note).realistic).toBe(true)
-    expect(fitArcEnCiel({ ...arc(), realistic: false }, note)).not.toHaveProperty('realistic')
+  it('is not saved on it: Realistic is the canvas’s own switch now, beside the lamp, and an older save’s is dropped', () => {
+    expect(fitArcEnCiel({ ...arc(), realistic: true } as ArcEnCiel, note)).not.toHaveProperty('realistic')
     expect(fitArcEnCiel({ ...arc(), realistic: 'yes' } as unknown as ArcEnCiel, note)).not.toHaveProperty('realistic')
   })
 
@@ -417,8 +416,8 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(pointed).toMatchObject({ from: 'point', lit: light })
     expect(pointed).not.toHaveProperty('emboss')
     // So it needs the shape's maps with Realistic on, whatever the bands start from
-    expect(needsShape({ flow: 'point' })).toBe(false)
-    expect(needsShape({ flow: 'point', realistic: true })).toBe(true)
-    expect(needsShape({ flow: 'holes' })).toBe(true)
+    expect(needsShape({ flow: 'point' }, false)).toBe(false)
+    expect(needsShape({ flow: 'point' }, true)).toBe(true)
+    expect(needsShape({ flow: 'holes' }, false)).toBe(true)
   })
 })

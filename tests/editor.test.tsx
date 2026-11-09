@@ -11,6 +11,7 @@ import { createDemoProject } from '../src/lib/demo'
 import { newWatermark } from '../src/lib/watermark'
 import { presetPattern } from '../src/lib/patternPresets'
 import { setTiltPadOpen } from '../src/lib/tiltPad'
+import { useRealistic } from '../src/lib/realistic'
 import { setTilt, togglePlayback, useTilt } from '../src/tilt/tilt'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 
@@ -1437,12 +1438,15 @@ describe('username workspace editor', () => {
     expect(ink()).toEqual({ ...moved, invert: true })
     await user.click(screen.getByRole('switch', { name: 'Invert' }))
     expect(ink()).toEqual(moved)
-    // Realistic lights it as metal (here, without WebGL, it keeps its flat look); switched off, it is left unsaid too
-    await user.click(screen.getByRole('switch', { name: 'Realistic' }))
-    expect(ink()).toEqual({ ...moved, realistic: true })
-    expect(hit().hasAttribute('data-realistic')).toBe(false)
-    await user.click(screen.getByRole('switch', { name: 'Realistic' }))
+    // Realistic isn't on the tab: it is the toggle beside the lamp, for every banknote, and saves nothing on the ink (here,
+    // without WebGL, the ink keeps its flat look)
+    expect(screen.queryByRole('switch', { name: 'Realistic' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Realistic' }))
+    expect(useRealistic.getState().on).toBe(true)
     expect(ink()).toEqual(moved)
+    expect(hit().hasAttribute('data-realistic')).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Realistic' }))
+    expect(useRealistic.getState().on).toBe(false)
     expect(saves).not.toHaveBeenCalled()
   })
 

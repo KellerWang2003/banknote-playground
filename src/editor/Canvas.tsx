@@ -13,6 +13,7 @@ import { playbackPlan } from '../lib/moves'
 import { usePanelWidth } from '../lib/panelWidth'
 import { playbackLens, playbackTilt } from '../lib/pattern'
 import { usePatternOffsets } from '../lib/patternOffset'
+import { useRealistic } from '../lib/realistic'
 import { type Guide, snapBox } from '../lib/snap'
 import { updateNote } from '../lib/store'
 import type { Note } from '../lib/types'
@@ -161,6 +162,8 @@ export function Canvas({
   const perspective = useTilt((s) => s.perspective)
   const sheen = useTilt((s) => s.sheen)
   const frameNumbers = useTilt((s) => s.frameNumbers)
+  // Realistic (beside the lamp): every banknote's magnetic ink lit as metal and Arc-en-Ciel as embossed ridges
+  const realistic = useRealistic((s) => s.on)
   // Turned over, the banknotes show their backs (from halfway round, as NoteView does)
   const back = useTilt(showsBack)
   // Rotated (Rotate left and right beside Front | Back), every banknote turns about its own middle, counted on either way
@@ -678,7 +681,7 @@ export function Canvas({
                   )}
                 >
                   {/* Editing windows shows the banknote flat with its watermark faint; placing a layer, flat (the watermark clear) */}
-                  <NoteView note={note} scale={scale} live perspective={perspective && !editingThis && !placingThis} sheen={sheen}
+                  <NoteView note={note} scale={scale} live perspective={perspective && !editingThis && !placingThis} sheen={sheen} realistic={realistic}
                     reveal={editingThis ? 0 : placingThis === 'watermark' ? 1 : undefined} showWindowCuts={editingThis} showFrameNumber={frameNumbers} offsetMm={offsets[note.id]}
                     selected={picked === 'note' || editingThis || placingThis || quiet ? undefined : picked} hovered={hovered === 'note' ? undefined : hovered}
                     faceShiftMm={drift && (drift.x || drift.y) ? drift : undefined} />

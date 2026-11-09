@@ -37,9 +37,8 @@ describe('placing magnetic ink', () => {
     expect(fitMagneticInk(damaged, note)).toEqual({ imageId: 'img', xMm: 0, yMm: 0, widthMm: 20, heightMm: 20, ...DEFAULT_INK, barWidth: 1 })
     expect(fitMagneticInk(ink({ invert: true, barAxis: 'x', barWidth: 0.01 }), note)).toEqual(ink({ invert: true, barAxis: 'x', barWidth: 0.05 }))
     expect(fitMagneticInk(ink({ invert: false }), note)).toEqual(ink())
-    // Realistic is kept as Invert is: only while it is on
-    expect(fitMagneticInk(ink({ realistic: true }), note)).toEqual(ink({ realistic: true }))
-    expect(fitMagneticInk(ink({ realistic: false }), note)).toEqual(ink())
+    // Realistic is the canvas's own switch now, beside the lamp: an older save's, kept on the ink, is dropped
+    expect(fitMagneticInk({ ...ink(), realistic: true } as MagneticInk, note)).toEqual(ink())
   })
 
   it("takes a new image's proportions about its middle, keeping the rest", () => {

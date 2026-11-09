@@ -165,9 +165,10 @@ export function framePx(note: Note, frame: Frame, scale: number) {
 /**
  * A banknote's images, ready to draw at the full resolution they were uploaded at (Keller): the originals, never display
  * copies, and the watermark, Arc-en-Ciel and magnetic ink read from the whole image, an SVG's at least as big as `scale`
- * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark.
+ * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark. With
+ * `realistic`, Arc-en-Ciel's maps for the area it embosses too.
  */
-export async function loadNoteAssets(note: Note, scale = 0, back = false): Promise<NoteAssets> {
+export async function loadNoteAssets(note: Note, scale = 0, back = false, realistic = false): Promise<NoteAssets> {
   const frames = new Map<string, HTMLImageElement>()
   const drawnPx = (box: { widthMm: number; heightMm: number }) => Math.max(box.widthMm, box.heightMm) * scale
   const { watermark } = note
@@ -177,7 +178,7 @@ export async function loadNoteAssets(note: Note, scale = 0, back = false): Promi
   const [face, relief, arc, ink] = await Promise.all([
     design ? loadArtwork(design) : undefined,
     watermark?.imageId ? exportRelief({ imageId: watermark.imageId, invert: watermark.invert, levels: watermark.levels }, drawnPx(watermark)) : undefined,
-    arcEnCiel?.imageId ? loadArc(arcEnCiel, arcEnCiel.imageId, drawnPx(arcEnCiel)) : undefined,
+    arcEnCiel?.imageId ? loadArc(arcEnCiel, arcEnCiel.imageId, drawnPx(arcEnCiel), realistic) : undefined,
     magneticInk?.imageId ? exportInkMask(magneticInk.imageId, magneticInk.invert, drawnPx(magneticInk)) : undefined,
     ...(back ? [] : note.frames).map(async (frame) => {
       if (frame.kind !== 'image' || !frame.imageId) return
@@ -192,10 +193,10 @@ export async function loadNoteAssets(note: Note, scale = 0, back = false): Promi
  * Arc-en-Ciel's mask from the whole image, and the maps its bands start from or Realistic embosses, which need no more
  * detail than the canvas's
  */
-async function loadArc(arc: ArcEnCiel, imageId: string, px: number): Promise<NoteAssets['arc']> {
+async function loadArc(arc: ArcEnCiel, imageId: string, px: number, realistic: boolean): Promise<NoteAssets['arc']> {
   const [mask, shape] = await Promise.all([
     exportInkMask(imageId, arc.invert, px),
-    needsShape(arc) ? loadBandShape(imageId, arc.invert) : undefined,
+    needsShape(arc, realistic) ? loadBandShape(imageId, arc.invert) : undefined,
   ])
   return mask && { mask, ...(shape ? { shape } : {}) }
 }
@@ -210,6 +211,8 @@ function roundedRect(ctx: Ctx, width: number, height: number, radius: number) {
 export interface FaceOptions {
   sheen: boolean
   perspective: boolean
+  /** Magnetic ink lit as metal and Arc-en-Ciel drawn as embossed ridges, as Realistic shows them on the canvas */
+  realistic?: boolean
   frameNumbers?: boolean
   /** How clearly the watermark shows, 0 (faint) to 1; without it, as at this tilt in reflected light */
   reveal?: number
@@ -272,11 +275,13 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.restore()
     return
   }
+  // Realistic, lit as the canvas lights them, turned over (only as it shows turning, in perspective) and rotated as the banknote shows
+  const turn = options.perspective ? options.turn : 0
   if (arcEnCiel && assets.arc) {
-    drawArc(ctx, arcEnCiel, assets.arc, mm, { x: angleX, y: angle }, { turn: options.perspective ? options.turn : 0, quarter: options.quarter })
+    drawArc(ctx, arcEnCiel, assets.arc, mm, { x: angleX, y: angle }, options.realistic ? { turn, quarter: options.quarter } : undefined)
   }
   if (magneticInk && assets.ink) {
-    drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle }, { note, turn: options.perspective ? options.turn : 0, quarter: options.quarter, grain: options.grain })
+    drawInk(ctx, magneticInk, assets.ink, mm, { x: angleX, y: angle }, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain } : undefined)
   }
   // A banknote without a thread ends there too (Keller, 4 November: the thread is added like any other feature)
   if (note.noThread) {
@@ -413,8 +418,8 @@ function drawShade(ctx: Ctx, width: number, height: number, tilt: Tilt2, perspec
 
 /**
  * Magnetic ink as NoteView draws it, over the watermark and under the thread: its Flat colour, the Tilted one over it as
- * far as the note has turned away, and the bright bar where it has rolled, all through the ink's mask. Realistic, on its
- * banknote (`lit`), it is lit as metal by the canvas's renderer instead, turned over and rotated as the banknote shows
+ * far as the note has turned away, and the bright bar where it has rolled, all through the ink's mask. Realistic (`lit`,
+ * on its banknote), it is lit as metal by the canvas's renderer instead, turned over and rotated as the banknote shows
  * (`lit.turn`, `lit.quarter`), where the browser can.
  */
 export function drawInk(
@@ -427,7 +432,7 @@ export function drawInk(
 ) {
   const width = Math.max(1, Math.round(mm(ink.widthMm)))
   const height = Math.max(1, Math.round(mm(ink.heightMm)))
-  if (ink.realistic && lit) {
+  if (lit) {
     const view = { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }
     const light = inkLight(ink, lit.note, view, perspectiveFor(lit.note, 1), lit.quarter)
     const box = { x: mm(ink.xMm), y: mm(ink.yMm), width: mm(ink.widthMm), height: mm(ink.heightMm) }
@@ -463,9 +468,8 @@ export function drawInk(
 
 /**
  * Arc-en-Ciel as NoteView draws it, over the watermark and under magnetic ink: its bands slid as far as the tilt takes
- * them, through its mask, on the canvas's renderer, or at rest where the browser has no WebGL. Realistic, on its banknote
- * (`lit`), its ridges are lit as the canvas lights them, turned over and rotated as the banknote shows (`lit.turn`,
- * `lit.quarter`).
+ * them, through its mask, on the canvas's renderer, or at rest where the browser has no WebGL. Realistic (`lit`), its
+ * ridges are lit as the canvas lights them, turned over and rotated as the banknote shows (`lit.turn`, `lit.quarter`).
  */
 export function drawArc(
   ctx: Ctx,
@@ -475,7 +479,7 @@ export function drawArc(
   tilt: Tilt2,
   lit?: { turn?: number; quarter?: Quarter },
 ) {
-  const light = arc.realistic && lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter) : undefined
+  const light = lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter) : undefined
   const look = bandLook(arc, assets.shape, tilt, light)
   if (!look) return
   // Realistic's embossed outline reaches past the box all round

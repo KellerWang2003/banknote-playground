@@ -41,14 +41,14 @@ afterEach(() => {
 
 const withInk = (change: Partial<MagneticInk> = {}): Note & { magneticInk: MagneticInk } => ({
   ...createNote({ name: 'Live', x: 0, y: 0, widthMm: 150, heightMm: 70, color: '#112233' }),
-  magneticInk: { imageId: 'ink', xMm: 10, yMm: 10, widthMm: 30, heightMm: 20, color: '#c60057', tiltedColor: '#2e8b57', barAxis: 'y', barWidth: 0.3, realistic: true, ...change },
+  magneticInk: { imageId: 'ink', xMm: 10, yMm: 10, widthMm: 30, heightMm: 20, color: '#c60057', tiltedColor: '#2e8b57', barAxis: 'y', barWidth: 0.3, ...change },
 })
 const lastPaint = () => gpu.painted.at(-1)!
 
 describe("a NoteView's realistic magnetic ink", () => {
   it('lights it into a canvas of its own in its box, as many pixels as it shows with, in place of the flat look', () => {
     const note = withInk()
-    const { container } = render(<NoteView note={note} scale={2} live perspective />)
+    const { container } = render(<NoteView note={note} scale={2} live perspective realistic />)
     const box = container.querySelector<HTMLElement>('[data-magnetic-ink]')!
     expect(box.hasAttribute('data-realistic')).toBe(true)
     expect([box.style.left, box.style.top, box.style.width, box.style.height]).toEqual(['20px', '20px', '60px', '40px'])
@@ -65,7 +65,7 @@ describe("a NoteView's realistic magnetic ink", () => {
     let renders = 0
     function Counted() {
       renders++
-      return <NoteView note={note} scale={1} live perspective />
+      return <NoteView note={note} scale={1} live perspective realistic />
     }
     render(<Counted />)
     const before = renders
@@ -83,21 +83,21 @@ describe("a NoteView's realistic magnetic ink", () => {
 
   it('leaves out turning over when the banknote is shown flat, and a still note lights it as at its own tilt', () => {
     const note = withInk()
-    const { rerender } = render(<NoteView note={note} scale={1} live />)
+    const { rerender } = render(<NoteView note={note} scale={1} live realistic />)
     act(() => setTilt({ angle: 6, turn: 0.2 }))
     expect(lastPaint().light).toEqual(inkLight(note.magneticInk, note, { x: 0, y: 6 }, perspectiveFor(note, 1)))
-    rerender(<NoteView note={note} scale={3} angle={-9} angleX={4} />)
+    rerender(<NoteView note={note} scale={3} angle={-9} angleX={4} realistic />)
     expect(lastPaint().light).toEqual(inkLight(note.magneticInk, note, { x: 4, y: -9 }, perspectiveFor(note, 1)))
     expect([lastPaint().canvas.width, lastPaint().canvas.height]).toEqual([90, 60])
   })
 
   it('keeps the flat look where the browser has no WebGL, and with Realistic off', () => {
     gpu.available = false
-    const { container, rerender } = render(<NoteView note={withInk()} scale={1} live />)
+    const { container, rerender } = render(<NoteView note={withInk()} scale={1} live realistic />)
     expect(container.querySelector('[data-realistic]')).toBeNull()
     expect(container.querySelector('[data-tilt="ink-bar"]')).not.toBeNull()
     gpu.available = true
-    rerender(<NoteView note={withInk({ realistic: undefined })} scale={1} live />)
+    rerender(<NoteView note={withInk()} scale={1} live />)
     expect(container.querySelector('[data-realistic]')).toBeNull()
     expect(container.querySelector('[data-tilt="ink-bar"]')).not.toBeNull()
     expect(gpu.painted).toEqual([])

@@ -33,8 +33,9 @@ const colour = (value: unknown, fallback: string) => (typeof value === 'string' 
 
 /**
  * Keeps magnetic ink on its banknote, as every placed layer is kept (`fitBox`), with its bar's width in range. Also
- * repairs a damaged save: colours that aren't #rrggbb and an unknown bar axis go back to the defaults, Invert and
- * Realistic are kept only when they are on, and anything unknown is dropped.
+ * repairs a damaged save: colours that aren't #rrggbb and an unknown bar axis go back to the defaults, Invert is kept
+ * only when it is on, and anything unknown is dropped, Realistic included, which older saves kept on the ink (it is the
+ * canvas's own switch now, `src/lib/realistic.ts`).
  */
 export function fitMagneticInk(ink: MagneticInk, note: Size): MagneticInk {
   const barWidth = typeof ink.barWidth === 'number' && Number.isFinite(ink.barWidth) ? ink.barWidth : DEFAULT_INK.barWidth
@@ -46,7 +47,6 @@ export function fitMagneticInk(ink: MagneticInk, note: Size): MagneticInk {
     barWidth: clamp(barWidth, INK_BAR.min, INK_BAR.max),
   }
   if (ink.invert === true) fitted.invert = true
-  if (ink.realistic === true) fitted.realistic = true
   return typeof ink.imageId === 'string' ? { imageId: ink.imageId, ...fitted } : fitted
 }
 

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Lamp, Lock, LockOpen, RotateCcw } from 'lucide-react'
+import { ChevronDown, ChevronUp, Lamp, Lock, LockOpen, RotateCcw, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -8,6 +8,7 @@ import { TILT_LIMIT, clamp } from '../lib/frames'
 import { padToTilt, tiltToPad } from '../lib/pad'
 import type { LensState } from '../lib/lens'
 import { moveFromRecording, nextRecordingName, planLitPaths, planPath, playbackPlan, recordingFromSamples } from '../lib/moves'
+import { setRealistic, useRealistic } from '../lib/realistic'
 import { setTiltPadOpen, useTiltPad } from '../lib/tiltPad'
 import type { RecordedPoint, TiltSettings } from '../lib/types'
 import { setRecording, setTilt, useTilt } from '../tilt/tilt'
@@ -21,7 +22,7 @@ export const TILT_PANEL_PX = PAD_PX + 2 * 6 + 2
 /** Keys pressed while a dialog or menu is open are its own */
 const POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
-/** The lamp, on the card's top row */
+/** The lamp and Realistic, on the card's top row */
 const ROW_TOGGLE = 'size-6 min-w-6 rounded-[min(var(--radius-md),10px)] bg-background/95 p-0 aria-pressed:bg-primary aria-pressed:text-primary-foreground'
 
 type Axis = 'x' | 'y'
@@ -46,8 +47,9 @@ function holdAt(next: { x?: number; y?: number }, limit: number, respectLocks = 
  * that keeps the pad and canvas drag off it. The chevron at the right of the card's top row opens a pad you press and
  * drag in any direction to tilt them (up/down vertically, side to side horizontally), held where you let go; the pad
  * folds away by default (Keller), and the browser remembers which. On that row, so they work folded, the lamp holds every
- * banknote up to the light, and back to flat, just left of the chevron, shows once tilted. Turning the banknotes over
- * is the Front | Back switch at the top of the canvas (`SideSwitch`).
+ * banknote up to the light, Realistic beside it lights every magnetic ink as metal and every Arc-en-Ciel as embossed
+ * ridges, and back to flat, just left of the chevron, shows once tilted. Turning the banknotes over is the Front | Back
+ * switch at the top of the canvas (`SideSwitch`).
  */
 export function TiltRail({ limit = TILT_LIMIT, playback }: {
   limit?: number
@@ -72,9 +74,12 @@ export function TiltRail({ limit = TILT_LIMIT, playback }: {
   return (
     <Panel className="absolute bottom-[108px] left-3 p-1.5">
       <div role="group" aria-label="Tilt" className="flex flex-col gap-1.5" style={{ width: PAD_PX }}>
-        {/* The lamp on the left; back to flat on the right, then the chevron at the row's end (Keller) */}
+        {/* The lamp and Realistic on the left; back to flat on the right, then the chevron at the row's end (Keller) */}
         <div className="flex h-6 items-center justify-between">
-          <LampToggle />
+          <div className="flex items-center gap-1">
+            <LampToggle />
+            <RealisticToggle />
+          </div>
           <div className="flex items-center gap-1">
             <BackToFlat />
             <IconButton label={open ? 'Fold the tilt pad away' : 'Open the tilt pad'} size="icon-xs" className="text-muted-foreground"
@@ -120,6 +125,24 @@ function LampToggle() {
         <Lamp className="size-3" />
       </TooltipTrigger>
       <TooltipContent>{backlit ? 'Back to reflected light (tap L, or hold to peek)' : 'Hold up to the light (tap L, or hold to peek)'}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * Realistic, beside the lamp (Keller, 9 November: one toggle for every banknote, in place of a switch on each layer's
+ * tab): every magnetic ink lit as metal flakes and every Arc-en-Ciel drawn as embossed ridges, until pressed again
+ */
+function RealisticToggle() {
+  const on = useRealistic((s) => s.on)
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Toggle aria-label="Realistic" variant="outline" size="sm" pressed={on} onPressedChange={(next) => setRealistic(next)} className={ROW_TOGGLE} />}
+      >
+        <Sparkles className="size-3" />
+      </TooltipTrigger>
+      <TooltipContent>{on ? 'Turn Realistic off' : 'Realistic: magnetic ink lit as metal, Arc-en-Ciel as embossed ridges'}</TooltipContent>
     </Tooltip>
   )
 }

@@ -11,6 +11,7 @@ import type { ExportFormat } from '../lib/exportMedia'
 import { RESOLUTIONS, exportSize, turnsOver } from '../lib/exportRender'
 import type { Project } from '../lib/types'
 import { usePatternOffsets } from '../lib/patternOffset'
+import { useRealistic } from '../lib/realistic'
 import { ROTATION_NAMES, quarterOf } from '../lib/rotate'
 import { useTilt } from '../tilt/tilt'
 
@@ -66,9 +67,10 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
   const sheen = useTilt((s) => s.sheen)
   const perspective = useTilt((s) => s.perspective)
   const frameNumbers = useTilt((s) => s.frameNumbers)
-  // The lamp switch left on holds the whole video up to the light, as # carries frame numbers into it, banknotes
-  // turned over export their backs, and rotated ones export rotated
+  // The lamp switch left on holds the whole video up to the light, as # carries frame numbers into it, Realistic its lit
+  // inks and ridges, banknotes turned over export their backs, and rotated ones export rotated
   const backlit = useTilt((s) => s.backlit)
+  const realistic = useRealistic((s) => s.on)
   const back = useTilt((s) => s.flipped)
   const quarter = useTilt((s) => quarterOf(s.quarterTurns))
   const offsets = usePatternOffsets((s) => s.offsets)
@@ -76,8 +78,8 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
   const notes = project.notes.filter((n) => chosen.has(n.id))
   const several = notes.length > 1
   const allChosen = notes.length === project.notes.length
-  const options = { format, notes, separate: several && separate, height, fps, loops: format === 'gif' ? 1 : loops, sheen, perspective, frameNumbers, backlit, back,
-    quarter, background: format === 'gif' && transparent ? undefined : background, offsets }
+  const options = { format, notes, separate: several && separate, height, fps, loops: format === 'gif' ? 1 : loops, sheen, perspective, realistic, frameNumbers, backlit,
+    back, quarter, background: format === 'gif' && transparent ? undefined : background, offsets }
   const size = exportSize(notes, options)
   // Turned over, the banknotes export their backs, or start on them when Flip moves turn them over
   const sides = !back ? '' : notes.length > 0 && turnsOver(notes[0]) ? ' · from the backs' : ' · backs'

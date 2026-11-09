@@ -448,8 +448,8 @@ export function useBandShape(arc: Pick<ArcEnCiel, 'imageId' | 'invert'> | undefi
 /** Whether the bands start from the shape (Edge, Holes), so they need its maps */
 export const fromShape = (arc: Pick<ArcEnCiel, 'flow'>) => arc.flow === 'edge' || arc.flow === 'holes'
 
-/** Whether Arc-en-Ciel needs its shape's maps: for bands from the shape, or with Realistic on for the area it embosses */
-export const needsShape = (arc: Pick<ArcEnCiel, 'flow' | 'realistic'>) => fromShape(arc) || arc.realistic === true
+/** Whether Arc-en-Ciel needs its shape's maps: for bands from the shape, or with Realistic on (`realistic`) for the area it embosses */
+export const needsShape = (arc: Pick<ArcEnCiel, 'flow'>, realistic: boolean) => fromShape(arc) || realistic
 
 /** Everything Arc-en-Ciel is drawn from at a tilt, the canvas and the export alike, on the GPU or not */
 export interface BandLook {

@@ -96,9 +96,10 @@ export function ridgeAcross(arc: Pick<ArcEnCiel, 'angleDeg'>): [number, number] 
  * Keeps Arc-en-Ciel on its banknote, as every placed layer is kept (`fitBox`), with three or four colours, its band width in
  * range, at least one point and a line with its two ends, all within ARC_REACH of its box, and its ridges' angle within
  * ARC_ANGLE. Also repairs a damaged save: colours that aren't #rrggbb are dropped (missing ones come from the defaults), an
- * unknown flow goes back to the default, Invert and Realistic are kept only when they are on, and anything unknown is
- * dropped. A save from before the angle (8 November) had Moves on's ↕ or ↔ (`axis`), read as level or upright ridges
- * sliding the same way (0° or −90°).
+ * unknown flow goes back to the default, Invert is kept only when it is on, and anything unknown is dropped, Realistic
+ * included, which older saves kept on Arc-en-Ciel (it is the canvas's own switch now, `src/lib/realistic.ts`). A save
+ * from before the angle (8 November) had Moves on's ↕ or ↔ (`axis`), read as level or upright ridges sliding the same
+ * way (0° or −90°).
  */
 export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
   const colors = (Array.isArray(arc.colors) ? arc.colors : []).filter((c) => typeof c === 'string' && HEX.test(c)).slice(0, ARC_COLOURS.max)
@@ -112,7 +113,6 @@ export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
     angleDeg: finite(arc.angleDeg) ? ridgeAngle(arc.angleDeg) : (arc as { axis?: unknown }).axis === 'x' ? -90 : DEFAULT_ARC.angleDeg,
   }
   if (arc.invert === true) fitted.invert = true
-  if (arc.realistic === true) fitted.realistic = true
   return typeof arc.imageId === 'string' ? { imageId: arc.imageId, ...fitted } : fitted
 }
 

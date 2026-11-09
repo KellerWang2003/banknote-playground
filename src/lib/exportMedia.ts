@@ -22,6 +22,8 @@ export interface ExportOptions {
   background?: string
   sheen: boolean
   perspective: boolean
+  /** Magnetic ink lit as metal and Arc-en-Ciel drawn as embossed ridges, as Realistic (beside the lamp) shows them on the canvas */
+  realistic?: boolean
   /** Draws the visible frame's number on each thread, as the # toggle does on the canvas */
   frameNumbers?: boolean
   /** The whole video held up to the light (the watermark clear throughout), as the lamp switch on the canvas; otherwise only Hold to light moves are */
@@ -116,7 +118,7 @@ export async function exportTilt(projectName: string, options: ExportOptions, on
   const sides: Side[] = turnsOver(notes[0]) ? ['front', 'back'] : [options.back ? 'back' : 'front']
   const loadSides = async (note: Note) => {
     const loaded: SideAssets = {}
-    await Promise.all(sides.map(async (side) => { loaded[side] = await loadNoteAssets(note, scales.get(note.id), side === 'back') }))
+    await Promise.all(sides.map(async (side) => { loaded[side] = await loadNoteAssets(note, scales.get(note.id), side === 'back', options.realistic) }))
     return loaded
   }
   const assets = new Map(await Promise.all(notes.map(async (n) => [n.id, await loadSides(n)] as const)))

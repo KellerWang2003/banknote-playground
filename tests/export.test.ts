@@ -17,6 +17,9 @@ import type { Note, PlaybackMove } from '../src/lib/types'
 
 const loadImageUrl = vi.hoisted(() => vi.fn(async (_id: string, _px?: number): Promise<string | undefined> => undefined))
 vi.mock('../src/lib/images', () => ({ loadImageUrl }))
+// Arc-en-Ciel's maps are worked out from its image, which jsdom can't read: a test asks only whether they were
+const loadBandShape = vi.hoisted(() => vi.fn(async (_id: string, _invert?: boolean) => undefined))
+vi.mock('../src/lib/bandMap', async (importOriginal) => ({ ...(await importOriginal<typeof import('../src/lib/bandMap')>()), loadBandShape }))
 
 // jsdom has no WebGL: realistic magnetic ink's renderer, and Arc-en-Ciel's, note what they were asked to draw, and draw
 // it or not as told
@@ -199,7 +202,7 @@ describe('magnetic ink in an export', () => {
     gpu.drawn = []
     gpu.lights = true
     const note = makeNote(150, 70)
-    const ink = { xMm: 10, yMm: 5, widthMm: 30.2, heightMm: 20, ...DEFAULT_INK, realistic: true }
+    const ink = { xMm: 10, yMm: 5, widthMm: 30.2, heightMm: 20, ...DEFAULT_INK }
     const face = { drawImage: vi.fn() }
     const mask = { canvas: 'mask' as unknown as HTMLCanvasElement }
     drawInk(face as unknown as CanvasRenderingContext2D, ink, mask, (mm) => mm * 2, { x: 3, y: 12 }, { note, turn: 0.2, quarter: 1, grain: 2 })
@@ -208,7 +211,7 @@ describe('magnetic ink in an export', () => {
     ]])
     expect(face.drawImage).not.toHaveBeenCalled()
 
-    // Without WebGL, or off the banknote, it keeps the flat look
+    // Without WebGL, or with Realistic off (nothing to light it on), it keeps the flat look
     gpu.lights = false
     const layer = new Proxy({}, { get: (_target, key) => (key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}), set: () => true })
     vi.stubGlobal('OffscreenCanvas', class {
@@ -233,12 +236,20 @@ describe('magnetic ink in an export', () => {
         return true
       },
     }) as unknown as CanvasRenderingContext2D
-    const note = { ...makeNote(150, 70), noThread: true, magneticInk: { imageId: 'i', xMm: 100, yMm: 10, widthMm: 20, heightMm: 20, ...DEFAULT_INK, realistic: true } }
+    const note = { ...makeNote(150, 70), noThread: true, magneticInk: { imageId: 'i', xMm: 100, yMm: 10, widthMm: 20, heightMm: 20, ...DEFAULT_INK } }
     const assets = { frames: new Map(), ink: { canvas: 'mask' } as unknown as InkMask }
-    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3, grain: 2 })
-    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, turn: 0.3, quarter: 3 })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, realistic: true, turn: 0.3, quarter: 3, grain: 2 })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, turn: 0.3, quarter: 3 })
     const lit = (x: number) => inkLight(note.magneticInk, note, { x, y: 10 }, perspectiveFor(note, 1), 3)
     expect(gpu.drawn.map((args) => [args[3], args[5]])).toEqual([[lit(turnDeg(0.3)), 2], [lit(0), 1]])
+    // With Realistic off it is drawn flat, on a scratch canvas of its own
+    vi.stubGlobal('OffscreenCanvas', class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return ctx }
+    })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
+    vi.unstubAllGlobals()
+    expect(gpu.drawn).toHaveLength(2)
 
     // An export frame passes its turn, its rotation and a grain cell a px of a 1080p video
     gpu.drawn = []
@@ -249,7 +260,7 @@ describe('magnetic ink in an export', () => {
       constructor(public width: number, public height: number) {}
       getContext() { return ctx }
     })
-    drawExportFrame(ctx, layout, new Map([[note.id, { front: assets }]]), faces, 12, { x: 0, y: 4 }, { sheen: false, perspective: true, quarter: 1 }, 0, 0.1)
+    drawExportFrame(ctx, layout, new Map([[note.id, { front: assets }]]), faces, 12, { x: 0, y: 4 }, { sheen: false, perspective: true, realistic: true, quarter: 1 }, 0, 0.1)
     vi.unstubAllGlobals()
     expect(gpu.drawn.map((args) => args[3])).toEqual([inkLight(note.magneticInk, note, { x: turnDeg(0.1), y: 4 }, perspectiveFor(note, 1), 1)])
     expect(gpu.drawn[0][5]).toBe(Math.max(1, Math.round(layout.height / 1080)))
@@ -269,16 +280,29 @@ describe('Arc-en-Ciel in an export', () => {
     const base = makeNote(150, 70)
     const arc = { ...newArcEnCiel(base), imageId: 'a', flow: 'point' as const }
     const assets = { frames: new Map(), arc: { mask: { canvas: 'mask' } as unknown as InkMask } }
-    drawFace(ctx, { ...base, noThread: true, arcEnCiel: arc }, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
-    const realistic = { ...arc, realistic: true }
-    drawFace(ctx, { ...base, noThread: true, arcEnCiel: realistic }, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
-    drawFace(ctx, { ...base, noThread: true, arcEnCiel: realistic }, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, turn: 0.3, quarter: 3 })
+    const note = { ...base, noThread: true, arcEnCiel: arc }
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, realistic: true, turn: 0.3, quarter: 3 })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, turn: 0.3, quarter: 3 })
     const looks = gpu.bands.map((args) => args[3] as BandLook)
     expect(looks[0]).toMatchObject({ slide: bandSlide(arc, { x: 0, y: 10 }) })
     expect(looks[0]).not.toHaveProperty('lit')
     expect(looks[1]).toMatchObject({ slide: 0, lit: arcLight(arc, { x: turnDeg(0.3), y: 10 }, 3) })
     // Without perspective, turning over leaves it lit as it was, as realistic ink is
     expect(looks[2]).toMatchObject({ lit: arcLight(arc, { x: 0, y: 10 }, 3) })
+  })
+
+  it('reads the maps for the area it embosses only with Realistic on, unless its bands start from the shape', async () => {
+    const base = makeNote(150, 70)
+    const note = { ...base, arcEnCiel: { ...newArcEnCiel(base), imageId: 'a', flow: 'point' as const } }
+    loadBandShape.mockClear()
+    await loadNoteAssets(note, 10)
+    expect(loadBandShape).not.toHaveBeenCalled()
+    await loadNoteAssets(note, 10, false, true)
+    expect(loadBandShape).toHaveBeenCalledWith('a', undefined)
+    loadBandShape.mockClear()
+    await loadNoteAssets({ ...note, arcEnCiel: { ...note.arcEnCiel, flow: 'edge' } }, 10)
+    expect(loadBandShape).toHaveBeenCalledTimes(1)
   })
 })
 
