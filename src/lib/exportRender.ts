@@ -777,9 +777,19 @@ export function scaleForHeight(notes: Note[], angles: (Tilt2 | number)[], perspe
 /** The file groups an export makes: one with every banknote side by side, or one per banknote */
 export const exportGroups = (notes: Note[], separate: boolean) => (separate && notes.length > 1 ? notes.map((n) => [n]) : [notes])
 
-export function exportSize(notes: Note[], options: { height: number; fps: number; loops: number; perspective: boolean; separate: boolean; back?: boolean; quarter?: Quarter }) {
+/**
+ * The side of every banknote an export shows (Keller, 9 November: "make sure I can also export the back"), picked in the
+ * Export dialog, which starts on the side the canvas shows, or both, a file of each
+ */
+export type ExportSide = Side | 'both'
+
+/** The sides an export makes files of, the front first */
+export const exportSides = (side: ExportSide = 'front'): Side[] => (side === 'both' ? ['front', 'back'] : [side])
+
+export function exportSize(notes: Note[], options: { height: number; fps: number; loops: number; perspective: boolean; separate: boolean; side?: ExportSide; quarter?: Quarter }) {
   if (notes.length === 0) return { width: 0, height: 0, seconds: 0 }
-  const angles = playbackViews(notes[0], options.fps, options.loops, options.back)
+  // A video from the backs turns through the same angles as one from the fronts, so either side's is the size of both
+  const angles = playbackViews(notes[0], options.fps, options.loops, options.side === 'back')
   const layouts = exportGroups(notes, options.separate).map((group) =>
     exportLayout(group, scaleForHeight(group, angles, options.perspective, options.height, options.quarter), angles, options.perspective, options.quarter))
   return { width: Math.max(...layouts.map((l) => l.width)), height: Math.max(...layouts.map((l) => l.height)), seconds: angles.length / options.fps }

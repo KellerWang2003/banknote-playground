@@ -1286,9 +1286,11 @@ describe('username workspace editor', () => {
     expect(useTilt.getState().flipped).toBe(true)
     finishTurn()
 
-    // An export of the banknotes turned over is of their backs
+    // An export of the banknotes turned over starts on their backs
     await user.click(screen.getByRole('button', { name: 'Export', exact: true }))
-    expect(await screen.findByText(/· backs/)).toBeDefined()
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'Back' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(dialog).getByRole('button', { name: 'Front' }).getAttribute('aria-pressed')).toBe('false')
     expect(saves).not.toHaveBeenCalled()
   })
 

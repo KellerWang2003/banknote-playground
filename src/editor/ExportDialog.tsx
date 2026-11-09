@@ -9,10 +9,10 @@ import { CheckboxField, ColorField, InlineField, ScrubField, Segmented } from '.
 import { reportError } from '../cloud/notices'
 import { sideImageId } from '../lib/back'
 import type { ExportFormat } from '../lib/exportMedia'
-import { RESOLUTIONS, artworkSize, exportSize, imageScale, imageSize, turnsOver } from '../lib/exportRender'
+import { RESOLUTIONS, artworkSize, exportGroups, exportSides, exportSize, imageScale, imageSize, type ExportSide } from '../lib/exportRender'
 import { TILT_LIMIT } from '../lib/frames'
 import type { Tilt2 } from '../lib/lens'
-import type { Note, Project } from '../lib/types'
+import type { Project } from '../lib/types'
 import { usePatternOffsets } from '../lib/patternOffset'
 import { useRealistic } from '../lib/realistic'
 import { ROTATION_NAMES, quarterOf } from '../lib/rotate'
@@ -20,6 +20,7 @@ import { useTilt } from '../tilt/tilt'
 
 type Mode = 'video' | 'image'
 const MODES = [{ value: 'video' as const, label: 'Video' }, { value: 'image' as const, label: 'Image' }]
+const SIDES: { value: ExportSide; label: string }[] = [{ value: 'front', label: 'Front' }, { value: 'back', label: 'Back' }, { value: 'both', label: 'Both' }]
 const FORMATS = [{ value: 'mp4' as const, label: 'MP4' }, { value: 'gif' as const, label: 'GIF' }]
 const FRAME_RATES: Record<ExportFormat, number[]> = { mp4: [24, 30, 60], gif: [10, 15, 20, 25] }
 const DEFAULTS: Record<ExportFormat, { height: number; fps: number }> = { mp4: { height: 1080, fps: 30 }, gif: { height: 480, fps: 20 } }
@@ -73,7 +74,8 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
   onOpenChange: (open: boolean) => void
 }) {
   const [mode, setMode] = useState<Mode>(lastMode)
-  // An image starts at the angle the canvas shows, so what is seen is what comes out
+  // The side and an image's angle start where the canvas is, so what is seen is what comes out
+  const [side, setSide] = useState<ExportSide>(() => (useTilt.getState().flipped ? 'back' : 'front'))
   const [angle, setAngle] = useState<Tilt2>(canvasTilt)
   // Each design's own pixels by image id, once read (null where it couldn't be), which an image's size follows
   const [designs, setDesigns] = useState<Record<string, { width: number; height: number } | null>>({})
@@ -91,10 +93,9 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
   const perspective = useTilt((s) => s.perspective)
   const frameNumbers = useTilt((s) => s.frameNumbers)
   // The lamp switch left on holds the whole video up to the light, as # carries frame numbers into it, Realistic its lit
-  // inks and ridges, banknotes turned over export their backs, and rotated ones export rotated
+  // inks and ridges, and rotated banknotes export rotated
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
-  const back = useTilt((s) => s.flipped)
   const quarter = useTilt((s) => quarterOf(s.quarterTurns))
   const offsets = usePatternOffsets((s) => s.offsets)
 
@@ -103,24 +104,22 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
   const allChosen = notes.length === project.notes.length
   const image = mode === 'image'
   const options = { format, notes, separate: several && separate, height, fps, loops: format === 'gif' ? 1 : loops, sheen, perspective, realistic, frameNumbers, backlit,
-    back, quarter, background: format === 'gif' && transparent ? undefined : background, offsets }
-  const imageOptions = { notes, tilt: angle, sheen, realistic, frameNumbers, back, quarter, offsets }
+    side, quarter, background: format === 'gif' && transparent ? undefined : background, offsets }
+  const imageOptions = { notes, tilt: angle, sheen, realistic, frameNumbers, side, quarter, offsets }
   const size = exportSize(notes, options)
-  // Turned over, the banknotes export their backs, or a video starts on them when Flip moves turn them over
-  const sides = !back ? '' : !image && notes.length > 0 && turnsOver(notes[0]) ? ' · from the backs' : ' · backs'
+  const sides = exportSides(side)
   const rotated = quarter ? ` · ${ROTATION_NAMES[quarter]}` : ''
   const busy = progress !== undefined
-  // An image is one file per banknote
-  const files = image ? notes.length : options.separate ? notes.length : 1
+  // A file of each side: for an image, one per banknote; for a video, one per group
+  const files = (image ? notes.length : exportGroups(notes, options.separate).length) * sides.length
 
-  // Each image's size, the banknote's own at its design's full resolution, once that design's pixels are known
-  const designOf = (note: Note) => sideImageId(note, back ? 'back' : 'front')
-  const imageSizes = notes.map((note) => {
-    const id = designOf(note)
+  // Each image's size, the banknote's own at its side's design's full resolution, once that design's pixels are known
+  const imageSizes = notes.flatMap((note) => sides.map((s) => {
+    const id = sideImageId(note, s)
     const design = id ? designs[id] : null
     return design === undefined ? undefined : imageSize(note, imageScale(note, design ?? undefined), quarter)
-  })
-  const unread = image ? [...new Set(notes.flatMap((note) => designOf(note) ?? []))].filter((id) => !(id in designs)).join('\n') : ''
+  }))
+  const unread = image ? [...new Set(notes.flatMap((note) => sides.flatMap((s) => sideImageId(note, s) ?? [])))].filter((id) => !(id in designs)).join('\n') : ''
   useEffect(() => {
     if (!unread) return
     let live = true
@@ -132,11 +131,11 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
     return () => { live = false }
   }, [unread])
   const shown = imageSizes.filter((s) => s !== undefined)
-  const sameSize = shown.length === notes.length && shown.every((s) => s.width === shown[0].width && s.height === shown[0].height)
+  const sameSize = shown.length === imageSizes.length && shown.every((s) => s.width === shown[0].width && s.height === shown[0].height)
   const imageSummary = notes.length === 0 ? '' : [
     ...(sameSize ? [`${shown[0].width} × ${shown[0].height}`] : []),
     files > 1 ? `${files} PNGs` : 'PNG',
-  ].join(' · ') + sides + rotated
+  ].join(' · ') + rotated
 
   const changeMode = (next: Mode) => {
     lastMode = next
@@ -199,10 +198,14 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
                 <CheckboxField key={n.id} label={n.name} checked={chosen.has(n.id)} onChange={(on) => toggle(n.id, on)} />
               ))}
             </div>
+            <InlineField label="Side" title="Which side of each banknote to export, or both, a file of each; a video with Flip moves starts on it">
+              <Segmented value={side} options={SIDES} onChange={setSide} />
+            </InlineField>
             {several && !image && <CheckboxField label="Export as separate files" checked={separate} onChange={setSeparate} />}
           </SettingsGroup>
 
-          {image ? (
+          {/* Nothing on the back moves with the angle: it shows only its design and the watermark, held to the light */}
+          {image ? side !== 'back' && (
             <SettingsGroup title="Image">
               <InlineField label="Angle" title="The tilt the security features are seen at; the banknote itself stays flat">
                 <div className="flex gap-2">
@@ -249,7 +252,7 @@ export function ExportDialog({ project, selectedId, open, onOpenChange }: {
             <Progress className="flex-1" value={Math.round(progress * 100)} />
           ) : (
             <span className="text-xs text-muted-foreground tabular-nums">
-              {image ? imageSummary : notes.length > 0 && `${size.width} × ${size.height} · ${size.seconds.toFixed(1)} s${files > 1 ? ` · ${files} files` : ''}${sides}${rotated}${backlit ? ' · held to the light' : ''}`}
+              {image ? imageSummary : notes.length > 0 && `${size.width} × ${size.height} · ${size.seconds.toFixed(1)} s${files > 1 ? ` · ${files} files` : ''}${rotated}${backlit ? ' · held to the light' : ''}`}
             </span>
           )}
           <div className="flex shrink-0 gap-2">

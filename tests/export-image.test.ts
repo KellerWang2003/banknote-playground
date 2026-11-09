@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { unzipSync } from 'fflate'
 import { IMAGE_MIN_PX_PER_MM, MAX_IMAGE_PX, drawFace, drawStill, imageScale, imageSize, perspectiveFor, type NoteAssets } from '../src/lib/exportRender'
-import { exportImages, tiltName } from '../src/lib/exportMedia'
+import { exportImages, fileTags } from '../src/lib/exportMedia'
 import type { InkMask } from '../src/lib/inkMask'
 import type { Relief } from '../src/lib/relief'
 import { DEFAULT_INK } from '../src/lib/magneticInk'
@@ -183,19 +184,20 @@ describe('exporting still images', () => {
     return sizes
   }
 
-  it('names the tilt as the angle fields have it, saying nothing when flat', () => {
-    expect(tiltName({ x: 0, y: 0 })).toBe('')
-    expect(tiltName({ x: 0, y: 20 })).toBe(' (20° up)')
-    expect(tiltName({ x: 15, y: -10 })).toBe(' (10° down, 15° right)')
-    expect(tiltName({ x: -30, y: 0 })).toBe(' (30° left)')
+  it('names the side, then the tilt as the angle fields have it, saying nothing of it when flat', () => {
+    expect(fileTags('front', { x: 0, y: 0 })).toBe(' (front)')
+    expect(fileTags('front', { x: 0, y: 20 })).toBe(' (front, 20° up)')
+    expect(fileTags('front', { x: 15, y: -10 })).toBe(' (front, 10° down, 15° right)')
+    expect(fileTags('front', { x: -30, y: 0 })).toBe(' (front, 30° left)')
+    expect(fileTags('back')).toBe(' (back)')
   })
 
-  it('makes a PNG of a banknote at full resolution, named for it and its angle', async () => {
+  it('makes a PNG of a banknote at full resolution, named for it, its side and its angle', async () => {
     const sizes = canvases()
     const note = { ...makeNote(150, 75), name: 'Front: test' }
     const progress: number[] = []
     const file = await exportImages('Project', { notes: [note], tilt: { x: 0, y: 20 }, sheen: true }, (p) => progress.push(p), new AbortController().signal)
-    expect(file.name).toBe('Project - Front- test (20° up).png')
+    expect(file.name).toBe('Project - Front- test (front, 20° up).png')
     expect(file.blob.type).toBe('image/png')
     expect(sizes).toEqual([[1772, 886]])
     expect(progress.at(-1)).toBe(1)
@@ -208,6 +210,51 @@ describe('exporting still images', () => {
     expect(file.name).toBe('Project - Banknotes.zip')
     expect(file.blob.type).toBe('application/zip')
     expect(sizes).toEqual([[886, 1772], [1583, 803]])
+  })
+
+  it('makes a PNG of the back, or of each side, each at its own design’s full resolution, the back’s named without the angle', async () => {
+    // Keller's FIFTEEN on the front, 40 px a mm, and a 1× export of its back, 10 px a mm, which comes out at 300 dpi
+    const pixels: Record<string, [number, number]> = { 'url:front-15': [2720, 5360], 'url:back-15': [680, 1340] }
+    loadImageUrl.mockImplementation(async (id: string) => `url:${id}`)
+    vi.stubGlobal('Image', class {
+      naturalWidth = 0
+      naturalHeight = 0
+      onload?: () => void
+      set src(url: string) {
+        ;[this.naturalWidth, this.naturalHeight] = pixels[url]
+        queueMicrotask(() => this.onload?.())
+      }
+    })
+    try {
+      const note: Note = { ...makeNote(68, 134), name: 'Fifteen', background: 'image', faceImageId: 'front-15',
+        back: { background: 'image', color: '#ffffff', imageId: 'back-15' } }
+      const tilt = { x: 0, y: 20 }
+      let sizes = canvases()
+      const back = await exportImages('Project', { notes: [note], tilt, sheen: true, side: 'back' }, () => {}, new AbortController().signal)
+      expect(back.name).toBe('Project - Fifteen (back).png')
+      expect(sizes).toEqual([[803, 1583]])
+
+      sizes = canvases()
+      const progress: number[] = []
+      const both = await exportImages('Project', { notes: [note], tilt, sheen: true, side: 'both' }, (p) => progress.push(p), new AbortController().signal)
+      // A zip named for the banknote, its front then its back
+      expect(both.name).toBe('Project - Fifteen.zip')
+      expect(Object.keys(unzipSync(new Uint8Array(await both.blob.arrayBuffer())))).toEqual(['Project - Fifteen (front, 20° up).png', 'Project - Fifteen (back).png'])
+      expect(sizes).toEqual([[2720, 5360], [803, 1583]])
+      expect(progress).toEqual([0.25, 0.5, 0.75, 1])
+    } finally {
+      loadImageUrl.mockImplementation(async () => undefined)
+    }
+  })
+
+  it('zips the front and back of every banknote, named for each', async () => {
+    canvases()
+    const notes = [{ ...makeNote(150, 75), name: 'One' }, { ...makeNote(150, 75), name: 'Two' }]
+    const file = await exportImages('Project', { notes, tilt: { x: 0, y: 0 }, sheen: true, side: 'both' }, () => {}, new AbortController().signal)
+    expect(file.name).toBe('Project - Banknotes.zip')
+    expect(Object.keys(unzipSync(new Uint8Array(await file.blob.arrayBuffer())))).toEqual([
+      'Project - One (front).png', 'Project - One (back).png', 'Project - Two (front).png', 'Project - Two (back).png',
+    ])
   })
 
   it('stops when cancelled', async () => {

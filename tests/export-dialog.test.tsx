@@ -29,6 +29,7 @@ const banknote = (name: string, widthMm: number, heightMm: number, design?: stri
 })
 const projectOf = (...notes: Note[]): Project => ({ ...createProject('Project'), notes })
 const angle = (title: string) => screen.getByTitle(title).querySelector('input')!
+const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed') === 'true'
 
 describe('exporting an image', () => {
   it('exports a banknote flat at its design’s full resolution, its security features at the angle picked, starting from the canvas’s', async () => {
@@ -54,7 +55,7 @@ describe('exporting an image', () => {
     await user.click(screen.getByRole('button', { name: 'Export' }))
     await waitFor(() => expect(media.downloadFile).toHaveBeenCalledWith({ name: 'image.png', blob: expect.any(Blob) }))
     expect(media.exportTilt).not.toHaveBeenCalled()
-    expect(media.exportImages).toHaveBeenCalledWith('Project', expect.objectContaining({ notes: [note], tilt: { x: -5, y: 20 } }), expect.any(Function), expect.any(AbortSignal))
+    expect(media.exportImages).toHaveBeenCalledWith('Project', expect.objectContaining({ notes: [note], tilt: { x: -5, y: 20 }, side: 'front' }), expect.any(Function), expect.any(AbortSignal))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
@@ -63,15 +64,62 @@ describe('exporting an image', () => {
     setTilt({ quarterTurns: 1, flipped: true })
     const project = projectOf(banknote('One', 150, 75), banknote('Two', 150, 75))
     render(<ExportDialog project={project} open onOpenChange={() => {}} />)
-    // The last export was an image, so it opens on Image
-    expect(angle('Up/down tilt').value).toBe('0')
+    // The last export was an image, so it opens on Image, and on the backs the canvas shows, where nothing moves with the
+    // angle
+    expect(pressed('Back')).toBe(true)
+    expect(screen.queryByTitle('Up/down tilt')).toBeNull()
     // Without designs, 300 dpi, on their sides
-    expect(screen.getByText('886 × 1772 · 2 PNGs · backs · rotated 90° right')).toBeDefined()
+    expect(screen.getByText('886 × 1772 · 2 PNGs · rotated 90° right')).toBeDefined()
     expect(screen.queryByText('Export as separate files')).toBeNull()
 
     // Back to Video, its settings and side by side return
     await user.click(screen.getByRole('button', { name: 'Video' }))
     expect(screen.getByText('Frame rate')).toBeDefined()
     expect(screen.getByText('Export as separate files')).toBeDefined()
+  })
+})
+
+describe('exporting the back', () => {
+  it('exports an image of each banknote’s front, back or both, starting on the side the canvas shows', async () => {
+    const user = userEvent.setup()
+    // The front's design is Keller's FIFTEEN; the back has none, so it comes out at 300 dpi
+    const note = banknote('Fifteen', 68, 134, 'design')
+    render(<ExportDialog project={projectOf(note)} open onOpenChange={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Image' }))
+    expect(pressed('Front')).toBe(true)
+    expect(angle('Up/down tilt').value).toBe('0')
+    expect(await screen.findByText('2720 × 5360 · PNG')).toBeDefined()
+
+    // The back alone: nothing on it moves with the angle
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.queryByTitle('Up/down tilt')).toBeNull()
+    expect(screen.getByText('803 × 1583 · PNG')).toBeDefined()
+
+    // Both: an image of each, of their own sizes; the angle is the front's
+    await user.click(screen.getByRole('button', { name: 'Both' }))
+    expect(angle('Up/down tilt').value).toBe('0')
+    expect(screen.getByText('2 PNGs')).toBeDefined()
+    media.exportImages.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Export' }))
+    await waitFor(() => expect(media.exportImages).toHaveBeenCalledWith('Project', expect.objectContaining({ notes: [note], side: 'both' }), expect.any(Function), expect.any(AbortSignal)))
+  })
+
+  it('exports a video from the backs, or a video of each side, saying how many files', async () => {
+    const user = userEvent.setup()
+    setTilt({ flipped: true })
+    const project = projectOf(banknote('One', 150, 75), banknote('Two', 150, 75))
+    render(<ExportDialog project={project} open onOpenChange={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Video' }))
+    expect(pressed('Back')).toBe(true)
+    expect(screen.queryByText(/ · \d+ files$/)).toBeNull()
+
+    // Both: the banknotes side by side, from the fronts and from the backs; separate, a file of each banknote's each side
+    await user.click(screen.getByRole('button', { name: 'Both' }))
+    expect(screen.getByText(/ · 2 files$/)).toBeDefined()
+    await user.click(screen.getByText('Export as separate files'))
+    expect(screen.getByText(/ · 4 files$/)).toBeDefined()
+    media.exportTilt.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Export' }))
+    await waitFor(() => expect(media.exportTilt).toHaveBeenCalledWith('Project', expect.objectContaining({ side: 'both', separate: true }), expect.any(Function), expect.any(AbortSignal)))
   })
 })

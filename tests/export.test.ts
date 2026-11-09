@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
+import { unzipSync } from 'fflate'
 import {
-  drawExportFrame, drawFace, drawInk, exportLayout, exportSize, framePx, loadNoteAssets, perspectiveFor, playbackAngles, playbackTurns, playbackViews, projectRow, rotatedReach,
-  sourceRow, tiltedBounds, turnsOver,
+  drawExportFrame, drawFace, drawInk, exportLayout, exportSides, exportSize, framePx, loadNoteAssets, perspectiveFor, playbackAngles, playbackTilts, playbackTurns,
+  playbackViews, projectRow, rotatedReach, sourceRow, tiltedBounds, turnsOver,
 } from '../src/lib/exportRender'
+import { exportTilt } from '../src/lib/exportMedia'
 import type { InkMask } from '../src/lib/inkMask'
 import type { Relief } from '../src/lib/relief'
 import { DEFAULT_INK, INK_BAR_LIGHT, INK_ROLL_DEG, barCentre, inkShift } from '../src/lib/magneticInk'
@@ -473,5 +475,59 @@ describe('rotating in an export', () => {
     calls.length = 0
     drawExportFrame(ctx, exportLayout([note], 2, [0], false), assets, faces, 2, 0, { sheen: false, perspective: false }, 0, 0)
     expect(calls.filter((c) => c[0] !== 'clearRect').map((c) => c[0])).toEqual(['drawImage'])
+  })
+})
+
+describe('exporting each side', () => {
+  it('lists the sides an export makes files of, the front first', () => {
+    expect(exportSides()).toEqual(['front'])
+    expect(exportSides('back')).toEqual(['back'])
+    expect(exportSides('both')).toEqual(['front', 'back'])
+  })
+
+  it('makes a video from the fronts and one from the backs, named for their sides, the back’s starting on the backs', async () => {
+    // Every canvas notes the designs drawn on it and reads back blank; images take their size from nothing
+    const drawn: string[] = []
+    const context = () => new Proxy({}, {
+      get: (_target, key) => {
+        if (key === 'createLinearGradient') return () => ({ addColorStop() {} })
+        if (key === 'getImageData') return (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) })
+        if (key === 'drawImage') return (image: { src?: string }) => { if (image.src) drawn.push(image.src) }
+        return () => {}
+      },
+      set: () => true,
+    })
+    vi.stubGlobal('OffscreenCanvas', class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return context() }
+    })
+    vi.stubGlobal('Image', class {
+      naturalWidth = 300
+      naturalHeight = 150
+      src = ''
+      onload?: () => void
+      constructor() { queueMicrotask(() => this.onload?.()) }
+    })
+    // The pause between GIF frames, without leaving message ports open
+    vi.stubGlobal('MessageChannel', class {
+      port1: { onmessage?: () => void } = {}
+      port2 = { postMessage: () => queueMicrotask(() => this.port1.onmessage?.()) }
+    })
+    loadImageUrl.mockImplementation(async (id: string) => `url:${id}`)
+    try {
+      const note: Note = { ...makeNote(150, 75), name: 'Fifteen', background: 'image', faceImageId: 'front', back: { background: 'image', color: '#ffffff', imageId: 'back' } }
+      const progress: number[] = []
+      const file = await exportTilt('Project', { format: 'gif', notes: [note], separate: false, height: 36, fps: 5, loops: 1, sheen: false, perspective: false, side: 'both' },
+        (p) => progress.push(p), new AbortController().signal)
+      expect(file.name).toBe('Project - Fifteen.zip')
+      expect(Object.keys(unzipSync(new Uint8Array(await file.blob.arrayBuffer())))).toEqual(['Project - Fifteen (front).gif', 'Project - Fifteen (back).gif'])
+      const frames = playbackTilts(note, 5).length
+      expect(drawn).toEqual([...Array(frames).fill('url:front'), ...Array(frames).fill('url:back')])
+      expect(progress).toHaveLength(2 * frames)
+      expect(progress.at(-1)).toBe(1)
+    } finally {
+      loadImageUrl.mockImplementation(async () => undefined)
+      vi.unstubAllGlobals()
+    }
   })
 })
