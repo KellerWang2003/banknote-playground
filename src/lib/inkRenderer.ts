@@ -117,8 +117,9 @@ const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
 // bandMap.ts's, which draws it without the GPU. With Realistic on (uLit), the ridges instead: each spot across a ridge on
 // the slope the eye sees there, in the line of colour printed where it sees the paper (every ridge carries them all, as
 // Oberthur's brochure shows), lit by the lamp (arcEnCiel.ts's `arcLight` and `ARC_PRINT`). With the white edge on, bare
-// paper round the shape, uOutset wide, covering whatever is printed beneath: flat, or with Realistic on embossed with the
-// ridges and lit the same way. The print's finest unevenness needs high precision, and is left out without it
+// paper round the shape, or the colour picked for it (uEdgeColour), uOutset wide, covering whatever is printed beneath:
+// flat, or with Realistic on embossed with the ridges and lit the same way. The print's finest unevenness needs high
+// precision, and is left out without it
 const RAD = Math.PI / 180
 const [PAPER_R, PAPER_G, PAPER_B] = ARC_PAPER.map(glsl)
 const BANDS_FRAGMENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -151,6 +152,8 @@ uniform vec2 uEmbossSize;
 uniform float uEmbossMax;
 uniform float uEmbossPad;
 uniform float uOutset;
+// The white edge's colour, linear: the paper's, or the one picked for it
+uniform vec3 uEdgeColour;
 uniform float uRidge;
 uniform vec2 uAcross;
 uniform float uShare;
@@ -329,7 +332,7 @@ void main() {
     float blend;
     float i = bandAt(d / uBand - uSlide, blend);
     vec3 colour = mix(mix(colourAt(i), nextColour(i), blend), uAverage, blur);
-    gl_FragColor = vec4(encode(colour) * m + encode(PAPER) * bare, m + bare);
+    gl_FragColor = vec4(encode(colour) * m + encode(uEdgeColour) * bare, m + bare);
     return;
   }
   // The paper and the print as they are (ARC_PRINT): a sheet a little cockled and grainy, ridges wandering a little off
@@ -405,12 +408,12 @@ void main() {
   ink = mix(ink, inkMean, fine);
   paper = mix(paper, paperMean, fine);
   // The ink where the shape takes it, and round it the white edge, each no brighter than white (premultiplied, as drawn)
-  gl_FragColor = vec4(encode(min(ink, 1.0)) * m + encode(min(PAPER * paper.x + paper.y, 1.0)) * bare, m + bare);
+  gl_FragColor = vec4(encode(min(ink, 1.0)) * m + encode(min(uEdgeColour * paper.x + paper.y, 1.0)) * bare, m + bare);
 }`
 
 const BAND_UNIFORMS = [
   'uMask', 'uMap', 'uMapSize', 'uMapMax', 'uFrom', 'uBox', 'uSpots', 'uSpotCount', 'uBand', 'uSlide', 'uColours', 'uColourCount', 'uAverage', 'uPixel',
-  'uLit', 'uEmboss', 'uEmbossSize', 'uEmbossMax', 'uEmbossPad', 'uOutset', 'uRidge', 'uAcross', 'uShare', 'uLamp', 'uHalf', 'uMeans',
+  'uLit', 'uEmboss', 'uEmbossSize', 'uEmbossMax', 'uEmbossPad', 'uOutset', 'uEdgeColour', 'uRidge', 'uAcross', 'uShare', 'uLamp', 'uHalf', 'uMeans',
 ] as const
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext
@@ -781,6 +784,7 @@ export function drawBands(
   // The white edge, as wide as the drawing reaches past the box all round
   const outset = embossed ? look.outset ?? 0 : 0
   gl.uniform1f(u('uOutset'), outset)
+  gl.uniform3f(u('uEdgeColour'), ...(look.edgeColour ?? ARC_PAPER))
   gl.uniform1f(u('uPixel'), (look.box[0] + 2 * outset) / width)
   gl.uniform2f(u('uEmbossSize'), embossed?.width ?? 1, embossed?.height ?? 1)
   gl.uniform1f(u('uEmbossMax'), embossed?.max ?? 0)

@@ -256,11 +256,16 @@ export interface ArcEnCiel {
   /** How wide one colour band is, mm */
   bandMm: number
   /**
-   * How wide, mm, the white edge round the shape is: bare paper, as Oberthur's brochure shows round its own, embossed with
-   * the ridges with Realistic on (Keller, 9 November: whether to have it, and how wide, is the designer's to set). Saved
-   * only when on
+   * How wide, mm, the edge round the shape is: bare paper, as Oberthur's brochure shows round its own, or the colour picked
+   * for it (`edgeColor`), embossed with the ridges with Realistic on (Keller, 9 November: whether to have it, and how wide,
+   * is the designer's to set). Saved only when on
    */
   edgeMm?: number
+  /**
+   * The edge's colour, #rrggbb (Keller, 9 November: "make it so that I can also customize color"); without one it is the
+   * paper's own (`edgeColorOf`). Saved only once picked, and only with the edge
+   */
+  edgeColor?: string
   /**
    * The ridges' angle from the banknote's horizontal, degrees, −90 to 90, rising to the right as it grows: the tilt across
    * them slides the bands, so level ridges (0) answer tipping the top away, upright ones (90) turning a side away, and any

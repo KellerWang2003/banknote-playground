@@ -16,10 +16,11 @@ import type { ArcEnCiel, ArcFlow, BoxSpot } from './types'
  * on the canvas (`flow`), run through its colours in order and repeat, each Band width wide. The ridges run at any angle
  * (`angleDeg`), and the tilt across them slides the bands. How far they slide, and over what tilt, are fixed numbers tuned
  * by eye, as magnetic ink's were, not settings. With Realistic on (Keller, 8 November: a realistic mode for it too) it is
- * drawn as the ridges themselves instead, in magnetic ink's lamp (`arcLight`), printed as Oberthur's brochure shows it. A
- * white edge of bare paper can go round the shape, as wide as the designer sets (`edgeMm`), embossed with the ridges with
- * Realistic on. The canvas and the export both use them; the distance maps Edge and Holes start from, rounded deeper in,
- * and the one the white edge is drawn from, are in bandMap.ts, and the drawing on the GPU in inkRenderer.ts.
+ * drawn as the ridges themselves instead, in magnetic ink's lamp (`arcLight`), printed as Oberthur's brochure shows it. An
+ * edge of bare paper can go round the shape, as wide as the designer sets (`edgeMm`), or in a colour they pick
+ * (`edgeColor`), embossed with the ridges with Realistic on. The canvas and the export both use them; the distance maps
+ * Edge and Holes start from, rounded deeper in, and the one the edge is drawn from, are in bandMap.ts, and the drawing on
+ * the GPU in inkRenderer.ts.
  */
 
 export const ARC_FLOWS: readonly ArcFlow[] = ['edge', 'holes', 'point', 'line']
@@ -37,6 +38,8 @@ export const ARC_REACH = 1
 export const ARC_ANGLE = { min: -90, max: 90 }
 /** How wide the white edge round the shape is, mm, and how wide when it is first switched on (Oberthur's brochure's) */
 export const ARC_EDGE = { min: 0.5, max: 3, step: 0.1, initial: 1 }
+/** The colour of the edge round the shape: the one picked for it, or the paper's own, bare paper, as it starts */
+export const edgeColorOf = (arc: Pick<ArcEnCiel, 'edgeColor'>) => arc.edgeColor ?? PAPER
 /** Tilt across the ridges, either way, that slides the bands all the way */
 export const ARC_SLIDE_DEG = 20
 /** How far the bands slide from flat to either end, in bands: half a band each way, one band in all, the most two slopes give */
@@ -101,12 +104,14 @@ export function ridgeAcross(arc: Pick<ArcEnCiel, 'angleDeg'>): [number, number] 
  * range, at least one point and a line with its two ends, all within ARC_REACH of its box, its ridges' angle within
  * ARC_ANGLE, and its white edge, when it has one, within ARC_EDGE. Also repairs a damaged save: colours that aren't #rrggbb
  * are dropped (missing ones come from the defaults), an unknown flow goes back to the default, Invert is kept only when it
- * is on, a white edge only when it is a number, and anything unknown is dropped, Realistic included, which older saves
- * kept on Arc-en-Ciel (it is the canvas's own switch now, `src/lib/realistic.ts`). A save from before the angle
- * (8 November) had Moves on's ↕ or ↔ (`axis`), read as level or upright ridges sliding the same way (0° or −90°).
+ * is on, a white edge only when it is a number, its colour only with it and when it is #rrggbb, and anything unknown is
+ * dropped, Realistic included, which older saves kept on Arc-en-Ciel (it is the canvas's own switch now,
+ * `src/lib/realistic.ts`). A save from before the angle (8 November) had Moves on's ↕ or ↔ (`axis`), read as level or
+ * upright ridges sliding the same way (0° or −90°).
  */
 export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
   const colors = (Array.isArray(arc.colors) ? arc.colors : []).filter((c) => typeof c === 'string' && HEX.test(c)).slice(0, ARC_COLOURS.max)
+  const edge = finite(arc.edgeMm) ? { edgeMm: clamp(arc.edgeMm, ARC_EDGE.min, ARC_EDGE.max) } : undefined
   const fitted: ArcEnCiel = {
     ...keptName(arc.name),
     ...fitBox(arc, note),
@@ -116,7 +121,8 @@ export function fitArcEnCiel(arc: ArcEnCiel, note: Size): ArcEnCiel {
     colors: colors.length >= ARC_COLOURS.min ? colors : [...colors, ...DEFAULT_ARC.colors.slice(colors.length)],
     bandMm: clamp(finite(arc.bandMm) ? arc.bandMm : DEFAULT_ARC.bandMm, ARC_BAND.min, ARC_BAND.max),
     angleDeg: finite(arc.angleDeg) ? ridgeAngle(arc.angleDeg) : (arc as { axis?: unknown }).axis === 'x' ? -90 : DEFAULT_ARC.angleDeg,
-    ...(finite(arc.edgeMm) ? { edgeMm: clamp(arc.edgeMm, ARC_EDGE.min, ARC_EDGE.max) } : {}),
+    ...edge,
+    ...(edge && typeof arc.edgeColor === 'string' && HEX.test(arc.edgeColor) ? { edgeColor: arc.edgeColor } : {}),
   }
   if (arc.invert === true) fitted.invert = true
   return typeof arc.imageId === 'string' ? { imageId: arc.imageId, ...fitted } : fitted
@@ -201,7 +207,8 @@ export function bandColour(colours: Rgb[], phase: number, blur = 0, average = av
  * (`ARC_PRINT`; Keller, 9 November: the first look was "too precise and too computer"): each line spreads a little into
  * the next, along a slightly ragged edge, the print sits a little out of register with the ridges, which wander a
  * little, the ink is a little uneven and dull, and the paper is grainy and a little cockled. The white edge round the
- * shape, when it has one (`edgeMm`), is bare paper embossed with the same ridges and lit the same way (inkRenderer.ts).
+ * shape, when it has one (`edgeMm`), is bare paper, or the colour picked for it (`edgeColor`), embossed with the same
+ * ridges and lit the same way (inkRenderer.ts).
  * The numbers are tuned by eye on stills from a numpy model, as magnetic ink's were (8 November; on 9 November Keller
  * picked the deepest of three softer reliefs, then the softer of two lights), and are not settings.
  */

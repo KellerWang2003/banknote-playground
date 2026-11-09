@@ -8,7 +8,7 @@ import { ArcEnCielPanel } from '../src/editor/ArcEnCielPanel'
 import { ArcHandles, RidgeDial } from '../src/editor/ArcHandles'
 import { ColourList } from '../src/editor/ColourList'
 import { PlacingBox } from '../src/editor/PlacingBox'
-import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
+import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, linearRgb, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
 import { turnDeg } from '../src/lib/back'
 import { bandLook, type BandShape } from '../src/lib/bandMap'
 import { createNote } from '../src/lib/notes'
@@ -154,6 +154,9 @@ describe("a NoteView's Arc-en-Ciel", () => {
     expect(lastPaint().look).not.toHaveProperty('lit')
     const canvas = () => container.querySelector<HTMLCanvasElement>('[data-arc-en-ciel] canvas')!
     expect([canvas().style.left, canvas().style.width, canvas().width, canvas().height]).toEqual(['-4px', '68px', 68, 48])
+    // In the colour picked for it
+    rerender(<NoteView note={withArc({ flow: 'point', edgeMm: 2, edgeColor: '#c8a24a' })} scale={2} live perspective />)
+    expect(lastPaint().look).toMatchObject({ outset: 2, edgeColour: linearRgb('#c8a24a') })
     // Off, it keeps to its box
     rerender(<NoteView note={withArc({ flow: 'point' })} scale={2} live perspective />)
     expect(lastPaint().look).not.toHaveProperty('emboss')
@@ -371,10 +374,13 @@ describe('the Arc-en-Ciel panel', () => {
     held.shape = solid
     show()
     const text = document.body.textContent!
-    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle', 'White edge']
+    const order = ['From left', 'From top', 'Width', 'Image', 'Invert', 'Bands from', 'Colours', 'Band width', 'Ridge angle']
       .map((words) => text.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
+    // The edge last
+    const edge = screen.getByRole('switch', { name: 'Edge' })
+    expect(screen.getByText('Ridge angle').compareDocumentPosition(edge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Realistic isn't one of its own: it is the canvas's, beside the lamp, for every banknote
     expect(screen.queryByRole('switch', { name: 'Realistic' })).toBeNull()
   })
@@ -413,18 +419,28 @@ describe('the Arc-en-Ciel panel', () => {
     expect(panel.arc!.angleDeg).toBe(-90)
   })
 
-  it('ends with the white edge, off at first, saved only when on, with its width from 0.5 to 3 mm', async () => {
+  it('ends with the edge, off at first, saved only when on, its width from 0.5 to 3 mm and its colour the paper’s until one is picked', async () => {
     const { again } = show({ flow: 'point' })
-    expect(screen.queryByTitle(/How wide the white edge/)).toBeNull()
-    await userEvent.click(screen.getByRole('switch', { name: 'White edge' }))
+    expect(screen.queryByTitle(/How wide the edge/)).toBeNull()
+    expect(screen.queryByTitle('The edge\'s colour')).toBeNull()
+    await userEvent.click(screen.getByRole('switch', { name: 'Edge' }))
     expect(panel.arc!.edgeMm).toBe(1)
+    expect(panel.arc!).not.toHaveProperty('edgeColor')
     again()
-    const field = within(screen.getByTitle(/How wide the white edge/)).getByRole('textbox')
+    const field = within(screen.getByTitle(/How wide the edge/)).getByRole('textbox')
     fireEvent.change(field, { target: { value: '2.5' } })
     expect(panel.arc!.edgeMm).toBe(2.5)
     again()
-    await userEvent.click(screen.getByRole('switch', { name: 'White edge' }))
+    const colour = within(screen.getByTitle('The edge\'s colour'))
+    expect((colour.getByRole('textbox') as HTMLInputElement).value).toBe('#E5E5E5')
+    fireEvent.change(colour.getByLabelText('Pick colour'), { target: { value: '#c8a24a' } })
+    expect(panel.arc!.edgeColor).toBe('#c8a24a')
+    again()
+    expect((within(screen.getByTitle('The edge\'s colour')).getByRole('textbox') as HTMLInputElement).value).toBe('#c8a24a')
+    // Off, it forgets both, so it starts again as bare paper 1 mm wide
+    await userEvent.click(screen.getByRole('switch', { name: 'Edge' }))
     expect(panel.arc!).not.toHaveProperty('edgeMm')
+    expect(panel.arc!).not.toHaveProperty('edgeColor')
   })
 
   it('offers Invert only once it has an image', () => {

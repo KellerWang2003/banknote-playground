@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
-  ARC_ROUNDING, type ArcLight, type MmPoint, type Rgb, averageRgb, bandColour, bandSlide, curveControls, lineDistance, linearRgb,
-  pointsDistance, sampleCurve, spotMm, srgbBytes,
+  ARC_ROUNDING, type ArcLight, type MmPoint, type Rgb, averageRgb, bandColour, bandSlide, curveControls, edgeColorOf, lineDistance,
+  linearRgb, pointsDistance, sampleCurve, spotMm, srgbBytes,
 } from './arcEnCiel'
 import { inkCoverage } from './inkMask'
 import { type MaskSource, drawBands, paintBands } from './inkRenderer'
@@ -474,6 +474,8 @@ export interface BandLook {
   emboss?: BandField
   /** How wide, mm, the white edge is, the drawing reaching as far past the box all round (`embossOutset`); none without it */
   outset?: number
+  /** With the white edge on, its colour in linear light: the paper's, or the one picked for it (`edgeColorOf`) */
+  edgeColour?: Rgb
 }
 
 /**
@@ -495,7 +497,7 @@ export function bandLook(arc: ArcEnCiel, shape: BandShape | null | undefined, ti
     slide: light ? 0 : bandSlide(arc, tilt),
     colours: arc.colors.map(linearRgb),
     ...(light ? { lit: light } : {}),
-    ...(outset > 0 && shape?.emboss ? { emboss: shape.emboss, outset } : {}),
+    ...(outset > 0 && shape?.emboss ? { emboss: shape.emboss, outset, edgeColour: linearRgb(edgeColorOf(arc)) } : {}),
   }
 }
 

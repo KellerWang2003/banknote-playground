@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Group, IconButton, Labeled, LengthField, ScrubField, Section, SwitchField } from '../components/controls'
-import { ARC_ANGLE, ARC_BAND, ARC_COLOURS, ARC_EDGE, DEFAULT_ARC, ridgeAngle } from '../lib/arcEnCiel'
+import { ColorField, Group, IconButton, Labeled, LengthField, ScrubField, Section, SwitchField } from '../components/controls'
+import { ARC_ANGLE, ARC_BAND, ARC_COLOURS, ARC_EDGE, DEFAULT_ARC, edgeColorOf, ridgeAngle } from '../lib/arcEnCiel'
 import { useBandShape } from '../lib/bandMap'
 import { beginHistoryGroup, endHistoryGroup } from '../lib/history'
 import type { ArcEnCiel, ArcFlow, Note } from '../lib/types'
@@ -47,10 +47,10 @@ function FlowPicker({ value, holes, onChange }: { value: ArcFlow; holes: boolean
  * Right, under the Arc-en-Ciel tab: the selected banknote's Arc-en-Ciel, in the order Keller asked for (8 November): where
  * it sits, then its image, whose shape takes the bands (whatever stands out from its background), or the bands go round it
  * with Invert, then the bands: where they start, their colours in order, how wide each is, and the ridges' angle, the tilt
- * across them sliding the bands; last the white edge of bare paper round the shape, and how wide it is (Keller,
- * 9 November). Drawing the embossed ridges themselves in the lamp's light is Realistic, beside the lamp, for every
- * banknote (`RealisticToggle` in TiltRail.tsx). Points, Line and the ridges' angle are placed on the canvas too
- * (ArcHandles.tsx). Removing it is beside the tabs.
+ * across them sliding the bands; last the edge round the shape, how wide it is and its colour, bare paper's until one is
+ * picked (Keller, 9 November; called Edge, as it needn't be white). Drawing the embossed ridges themselves in the lamp's
+ * light is Realistic, beside the lamp, for every banknote (`RealisticToggle` in TiltRail.tsx). Points, Line and the
+ * ridges' angle are placed on the canvas too (ArcHandles.tsx). Removing it is beside the tabs.
  */
 export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
   note: Note
@@ -115,13 +115,19 @@ export function ArcEnCielPanel({ note, arc, noteRef, onPlace }: {
       </Section>
 
       <Section nested>
-        <SwitchField label="White edge" title="Bare paper round the shape, embossed with the ridges when Realistic is on" checked={arc.edgeMm !== undefined}
-          onChange={(on) => change(({ edgeMm: _edge, ...a }) => (on ? { ...a, edgeMm: ARC_EDGE.initial } : a))} />
+        <SwitchField label="Edge" title="An edge round the shape, bare paper or any colour, embossed with the ridges when Realistic is on"
+          checked={arc.edgeMm !== undefined}
+          onChange={(on) => change(({ edgeMm: _edge, edgeColor: _colour, ...a }) => (on ? { ...a, edgeMm: ARC_EDGE.initial } : a))} />
         {arc.edgeMm !== undefined && (
-          <Labeled label="Edge width">
-            <LengthField label="E" title="How wide the white edge round the shape is" value={arc.edgeMm} min={ARC_EDGE.min} max={ARC_EDGE.max}
-              step={ARC_EDGE.step} onChange={(edgeMm) => change((a) => ({ ...a, edgeMm }))} />
-          </Labeled>
+          <>
+            <Labeled label="Edge width">
+              <LengthField label="E" title="How wide the edge round the shape is" value={arc.edgeMm} min={ARC_EDGE.min} max={ARC_EDGE.max}
+                step={ARC_EDGE.step} onChange={(edgeMm) => change((a) => ({ ...a, edgeMm }))} />
+            </Labeled>
+            <Labeled label="Edge colour" title="The edge's colour">
+              <ColorField value={edgeColorOf(arc)} onChange={(edgeColor) => change((a) => ({ ...a, edgeColor }))} />
+            </Labeled>
+          </>
         )}
       </Section>
     </Group>

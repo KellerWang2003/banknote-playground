@@ -4,6 +4,7 @@ import {
   bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeAcross, ridgeAngle,
   ridgeLight, sampleCurve, srgbBytes, withArcImage, withBend, withLineMoved, withPoint, withSpot, withoutSpot,
 } from '../src/lib/arcEnCiel'
+import { PAPER } from '../src/lib/back'
 import { bandDistance, bandLook, bandPixels, boxIn, embossOutset, needsShape, outlineField, shapeMaps, squaredDistances } from '../src/lib/bandMap'
 import { LAMP_HEIGHT_DEG } from '../src/lib/realisticInk'
 import { onFront } from '../src/lib/layers'
@@ -439,6 +440,22 @@ describe('Arc-en-Ciel’s white edge', () => {
     expect(fitArcEnCiel({ ...arc(), edgeMm: Number.NaN }, note)).not.toHaveProperty('edgeMm')
     expect(fitArcEnCiel({ ...arc(), edgeMm: 'wide' } as unknown as ArcEnCiel, note)).not.toHaveProperty('edgeMm')
     expect(fitArcEnCiel(arc(), note)).not.toHaveProperty('edgeMm')
+  })
+
+  it('keeps a colour picked for it, only with the edge, and is the paper’s own until one is', () => {
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 1, edgeColor: '#c8a24a' }, note).edgeColor).toBe('#c8a24a')
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 1, edgeColor: '#C8A24A' }, note).edgeColor).toBe('#C8A24A')
+    // A damaged save's colour is dropped, and so is one left without its edge
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 1, edgeColor: 'gold' }, note)).not.toHaveProperty('edgeColor')
+    expect(fitArcEnCiel({ ...arc(), edgeMm: 1, edgeColor: 7 } as unknown as ArcEnCiel, note)).not.toHaveProperty('edgeColor')
+    expect(fitArcEnCiel({ ...arc(), edgeColor: '#c8a24a' }, note)).not.toHaveProperty('edgeColor')
+    // Drawn in it, in linear light as the bands' colours are, and in the paper's without one
+    const shape = shapeMaps(new Uint8ClampedArray(16).fill(255), 4, 4)
+    expect(bandLook(arc({ edgeMm: 1, edgeColor: '#c8a24a' }), shape, { x: 0, y: 0 })!.edgeColour).toEqual(linearRgb('#c8a24a'))
+    expect(bandLook(arc({ edgeMm: 1 }), shape, { x: 0, y: 0 })!.edgeColour).toEqual(linearRgb(PAPER))
+    expect(bandLook(arc({ edgeMm: 1, edgeColor: '#c8a24a' }), shape, { x: 0, y: 10 }, arcLight(arc(), { x: 0, y: 10 })))
+      .toMatchObject({ edgeColour: linearRgb('#c8a24a') })
+    expect(bandLook(arc(), shape, { x: 0, y: 0 })).not.toHaveProperty('edgeColour')
   })
 
   it('is drawn whether or not Realistic is on', () => {
