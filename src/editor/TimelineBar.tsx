@@ -46,8 +46,8 @@ const ZOOM = { min: 3, max: 40, initial: 10 }
 
 /**
  * Bottom of the canvas: play and pause with the project's playback controls stacked beside it, always, as wide
- * as the tilt pad's panel above them; with a banknote selected the panel widens to show that banknote's frames, on
- * the front only, where its thread is.
+ * as the tilt pad's panel above them; while a banknote's thread is picked the panel widens to show its frames, on
+ * the front only, where the thread is.
  */
 export function TimelineBar({
   projectId,
@@ -56,24 +56,23 @@ export function TimelineBar({
   noteRef,
   besidePanel,
   sectionId,
-  onScrub,
 }: {
   projectId: string
   notes: Note[]
+  /** The banknote whose lens the playback settings follow (else the first), and whose frames the track shows */
   note?: Note
+  /** Where its frames are edited: the track shows only with it, which the canvas passes only while the thread is picked */
   noteRef?: NoteRef
   besidePanel: boolean
   /** The thread section whose lens the track follows, in the thread editor */
   sectionId?: string
-  /** Scrubbing the frames or opening a frame's fill, a sign of working on the thread: the canvas turns to its tab (Keller) */
-  onScrub?: () => void
 }) {
   const source = useTilt((state) => state.source)
   const playing = source === 'wobble'
   // The thread is only on the front: turned over, even a selected banknote has no frames to show, so the bar stays
   // as it is with nothing selected (Keller). It follows the switch rather than the turn, so they go as Back is pressed
   const flipped = useTilt((state) => state.flipped)
-  const trackNote = flipped ? undefined : note
+  const trackNote = flipped || !noteRef ? undefined : note
 
   return (
     <Panel
@@ -94,7 +93,7 @@ export function TimelineBar({
         </IconButton>
         <FrameSettings projectId={projectId} note={note ?? notes.at(0)} />
       </div>
-      {trackNote && noteRef && <FrameTrack note={trackNote} noteRef={noteRef} sectionId={sectionId} onScrub={onScrub} />}
+      {trackNote && noteRef && <FrameTrack note={trackNote} noteRef={noteRef} sectionId={sectionId} />}
     </Panel>
   )
 }
@@ -167,7 +166,7 @@ type ClipDrag = { frameId: string; from: number; dx: number; to: number }
  * frames (a band above them is kept for it), to scrub. Scroll to move along,
  * ⌘-scroll to zoom.
  */
-function FrameTrack({ note, noteRef, sectionId, onScrub }: { note: Note; noteRef: NoteRef; sectionId?: string; onScrub?: () => void }) {
+function FrameTrack({ note, noteRef, sectionId }: { note: Note; noteRef: NoteRef; sectionId?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
   const track = useRef<HTMLDivElement>(null)
   const gesture = useRef<
@@ -286,7 +285,6 @@ function FrameTrack({ note, noteRef, sectionId, onScrub }: { note: Note; noteRef
               // line during playback is hard to catch, and a press there stops it
               gesture.current = { mode: 'scrub' }
               scrubTo(e.clientX)
-              onScrub?.()
             }
             e.currentTarget.setPointerCapture(e.pointerId)
           }}
@@ -319,7 +317,6 @@ function FrameTrack({ note, noteRef, sectionId, onScrub }: { note: Note; noteRef
             // A click goes to the frame; a drag puts it where it was let go
             if (!g.moved) goTo(g.from)
             else moveFrameTo(noteRef, g.frameId, landing(g.from, e.clientX - g.startX))
-            onScrub?.()
           }}
           onPointerCancel={() => {
             gesture.current = null
@@ -373,9 +370,7 @@ function FrameTrack({ note, noteRef, sectionId, onScrub }: { note: Note; noteRef
                 {/* The pencil at the top right edits its fill, in the same panel as the right panel's, going to the frame */}
                 <FrameFillPanel note={note} noteRef={noteRef} frame={frame} side="top" align="center"
                   onOpenChange={(open) => {
-                    if (!open) return
-                    goTo(i)
-                    onScrub?.()
+                    if (open) goTo(i)
                   }}
                   trigger={
                     <Button variant="secondary" size="icon-xs" aria-label={`Edit frame ${i + 1}`}

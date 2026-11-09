@@ -357,6 +357,35 @@ describe('username workspace editor', () => {
     expect(picked()).toBe('Security thread')
     expect(saves).not.toHaveBeenCalled()
   })
+  it('shows the thread’s frames on the timeline only while the thread itself is picked', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('of-thread-workspace', 'timeline-thread-only-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    const demo = useProjects.getState().demoPreview!
+    act(() => updateNote(demo.id, demo.notes[0].id, (n) => ({ ...n, watermark: { ...newWatermark(n), imageId: 'fixture-watermark' } })))
+    const clips = () => document.querySelectorAll('[data-frame-clip]').length
+    const play = () => screen.queryByRole('button', { name: 'Play', exact: true })
+    expect(clips()).toBe(0)
+    expect(play()).not.toBeNull()
+
+    // The timeline is the thread's (Keller, 9 November: a banknote holds so many security features now): the banknote
+    // itself shows none of its frames, its thread all of them, and another feature none again, play staying throughout
+    await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    expect(picked()).toBe('Demo banknote')
+    expect(clips()).toBe(0)
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
+    expect(clips()).toBe(demo.notes[0].frames.length)
+    await user.click(screen.getByRole('button', { name: 'Watermark', exact: true }))
+    expect(picked()).toBe('Watermark')
+    expect(clips()).toBe(0)
+    expect(play()).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
+    expect(clips()).toBe(demo.notes[0].frames.length)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(picked()).toBeUndefined()
+    expect(clips()).toBe(0)
+  })
   it('handles frames on the timeline: a click goes to one, a drag reorders, × deletes, the pencil edits its fill, the line scrubs', async () => {
     // The canvas needs a size to draw the banknotes
     vi.stubGlobal('ResizeObserver', class {
@@ -377,10 +406,11 @@ describe('username workspace editor', () => {
     const clip = (id: string) => document.querySelector<HTMLElement>(`[data-frame-clip="${id}"]`)!
     const tilted = () => [useTilt.getState().angle, useTilt.getState().angleX, useTilt.getState().target, useTilt.getState().targetX]
     const [a, b] = note().frames.map((f) => f.id)
-    expect(picked()).toBe('Demo banknote')
+    // The frames show while the thread is picked
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
 
-    // A click on a clip shows that frame without tilting the banknote, and working on the frames turns the panel to the
-    // thread (Keller: the timeline follows manual tilt, never the other way round)
+    // A click on a clip shows that frame without tilting the banknote (Keller: the timeline follows manual tilt, never
+    // the other way round)
     const still = tilted()
     for (const id of [a, b]) {
       fireEvent.pointerDown(clip(id), { button: 0, buttons: 1, clientX: 50, pointerId: 1 })
@@ -412,10 +442,8 @@ describe('username workspace editor', () => {
     await user.click(screen.getByRole('button', { name: 'Delete frame 3' }))
     expect(note().frames.map((f) => f.id)).toEqual([b, a])
 
-    // The pencil edits a frame's fill, in the same panel as the right panel's, and turns to the thread too
-    await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
+    // The pencil edits a frame's fill, in the same panel as the right panel's
     await user.click(screen.getByRole('button', { name: 'Edit frame 2' }))
-    expect(picked()).toBe('Security thread')
     const hex = document.querySelector<HTMLInputElement>('[data-slot="popover-content"] input:not([type="color"])')!
     fireEvent.change(hex, { target: { value: '#123456' } })
     expect(note().frames[1].color).toBe('#123456')
@@ -454,6 +482,7 @@ describe('username workspace editor', () => {
     render(<TooltipProvider><App /></TooltipProvider>)
     await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const demo = useProjects.getState().demoPreview!
     act(() => addNote(demo.id, createNote({ name: 'Other', x: 200, y: 0, widthMm: 100, heightMm: 50, color: '#654321' })))
     act(() => setTilt({ source: 'hold', angle: 0, target: 0, angleX: 0, targetX: 0, frameNumbers: true }))
@@ -790,6 +819,7 @@ describe('username workspace editor', () => {
     render(<TooltipProvider><App /></TooltipProvider>)
     await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const demo = useProjects.getState().demoPreview!
     const tilt = () => useProjects.getState().demoPreview!.notes[0].tilt
     // Five equal frames, flat in the middle of 3: side tilt can hide frames 1 and 5, or every frame but 3
@@ -1202,10 +1232,11 @@ describe('username workspace editor', () => {
     const finishTurn = () => act(() => setTilt({ turn: useTilt.getState().flipped ? 1 : 0 }))
     // Front | Back at the top of the canvas (Keller, 4 November: on the tilt card it was too hidden)
     const side = (name: 'Front' | 'Back') => screen.getByRole('button', { name, exact: true })
-    // The selected banknote's frames, as clips on the timeline
+    // The selected banknote's frames, as clips on the timeline while its thread is picked
     const clips = () => document.querySelectorAll('[data-frame-clip]').length
     expect(screen.queryByRole('button', { name: 'Show the back' })).toBeNull()
     expect(side('Front').getAttribute('aria-pressed')).toBe('true')
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     expect(clips()).toBeGreaterThan(0)
 
     // F turns every banknote over, as the switch shows: the back has no thread, the watermark mirrored
@@ -1214,6 +1245,7 @@ describe('username workspace editor', () => {
     expect(side('Back').getAttribute('aria-pressed')).toBe('true')
     // The back has no thread, so the timeline shows no frames, though the banknote is still selected (Keller)
     expect(clips()).toBe(0)
+    expect(picked()).toBe('Demo banknote')
     finishTurn()
     expect(shown('[data-back]')).not.toBeNull()
     expect(shown('[data-thread]')).toBeNull()

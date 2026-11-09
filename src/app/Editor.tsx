@@ -351,11 +351,10 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
           <ProjectPanel isDemo={isDemo} project={project} selectedId={note?.id} layer={shownLayer} onSelect={selectFromList} onAdd={() => setAdding(true)} aboveTilt={tiltPad}
             onAddLayer={addFrom} onRemoveLayer={dropLayer} />
           {!isEmpty && (
-            // A banknote without a thread has no frames to show, so the bar stays as it is with nothing selected
+            // The timeline is the thread's: its frames show only while the thread itself is picked (Keller, 9 November, as a
+            // banknote now holds so many security features); otherwise the bar stays as it is with nothing selected
             <TimelineBar projectId={project.id} notes={project.notes} note={note && hasThread(note) ? note : undefined}
-              noteRef={note && hasThread(note) ? noteRef : undefined} besidePanel={note !== undefined}
-              // Scrubbing the frames is working on the thread, so the panel turns to it (Keller)
-              onScrub={() => note && shownLayer !== 'thread' && selectLayer(note.id, 'thread')} />
+              noteRef={note && shownLayer === 'thread' ? noteRef : undefined} besidePanel={note !== undefined} />
           )}
           {/* The way into Thread Studio while a thread is picked: above the timeline, in the middle of the workspace (Keller) */}
           {note && shownLayer === 'thread' && (
