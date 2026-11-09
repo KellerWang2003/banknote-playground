@@ -163,7 +163,13 @@ export function ScrubField({
   trailing?: ReactNode
   className?: string
 }) {
-  const [scrub, setScrub] = useState<{ x: number; start: number } | null>(null)
+  // The scrub under way: where it was pressed, the value then, and the pointer pressing
+  const [scrub, setScrub] = useState<{ x: number; start: number; pointerId: number } | null>(null)
+  /** Ends the scrub, letting go of the pointer if the label still holds it */
+  const endScrub = (label: HTMLElement) => {
+    if (scrub && label.hasPointerCapture(scrub.pointerId)) label.releasePointerCapture(scrub.pointerId)
+    setScrub(null)
+  }
   const { input, snap, error } = useNumberInput({ value, onChange, min, max, step, format, parse, limitErrors })
   const errorId = useId()
   const sm = size === 'sm'
@@ -183,14 +189,26 @@ export function ScrubField({
           'flex h-full shrink-0 cursor-ew-resize touch-none items-center justify-center text-xs text-muted-foreground select-none',
           sm ? 'w-4 pl-0.5' : 'min-w-7 px-2',
         )}
+        // A scrub lasts only while the main button that began it is held. Its release can go missing, so anything that
+        // says the press is over ends it too: the browser cancelling the pointer or the label losing it, a context menu
+        // (Ctrl-click on a Mac opens one on the press, and the menu keeps the release from the page) or a move with no
+        // button held. Ended by the release alone, a scrub could stay attached, the value following the pointer whenever
+        // it came back over the label with no button held (Keller, 9 November)
         onPointerDown={(e) => {
+          // A secondary click (two fingers on a trackpad) opens the context menu instead
+          if (e.button !== 0) return
           e.currentTarget.setPointerCapture(e.pointerId)
-          setScrub({ x: e.clientX, start: value })
+          setScrub({ x: e.clientX, start: value, pointerId: e.pointerId })
         }}
         onPointerMove={(e) => {
-          if (scrub) onChange(snap(scrub.start + ((e.clientX - scrub.x) / 2) * step))
+          if (!scrub || e.pointerId !== scrub.pointerId) return
+          if ((e.buttons & 1) === 0) endScrub(e.currentTarget)
+          else onChange(snap(scrub.start + ((e.clientX - scrub.x) / 2) * step))
         }}
-        onPointerUp={() => setScrub(null)}
+        onPointerUp={(e) => endScrub(e.currentTarget)}
+        onPointerCancel={(e) => endScrub(e.currentTarget)}
+        onLostPointerCapture={(e) => endScrub(e.currentTarget)}
+        onContextMenu={(e) => endScrub(e.currentTarget)}
       >
         {label}
       </span>
