@@ -17,6 +17,7 @@ import { SideSwitch } from '../editor/SideSwitch'
 import { TiltRail } from '../editor/TiltRail'
 import { useSettleArtwork } from '../editor/useSettleArtwork'
 import { addFeature, layerOf, removeFeature, removeLayer, type Layer } from '../editor/layerActions'
+import { useFeatureClipboard } from '../editor/featureClipboard'
 import { pressSpace, releaseSpace, useSpaceHand } from '../editor/spaceHand'
 import { hasThread, isPlaced, onFront, type Feature, type PlacedLayer } from '../lib/layers'
 
@@ -218,6 +219,10 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     window.addEventListener('keydown', onDown)
     return () => window.removeEventListener('keydown', onDown)
   }, [inStudio])
+
+  // ⌘C copies the picked security feature and ⌘V pastes it onto the selected banknote, picking it there (Keller, 9
+  // November: "if i copy one from one banknote, and paste it at another, it should work"); not in Thread Studio
+  useFeatureClipboard({ projectId: project.id, note, layer: shownLayer, enabled: !inStudio, onPasted: (noteId, feature) => selectLayer(noteId, feature) })
 
   // Space: a tap plays or pauses, and held down it is the hand, a press on the canvas panning (Figma's). So playback
   // toggles when Space comes up, and only if no pan started meanwhile; never while editing windows or placing a layer,
