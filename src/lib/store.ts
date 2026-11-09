@@ -109,6 +109,20 @@ export function settleNote(projectId: string, noteId: string, change: (note: Not
 export const addNote = (projectId: string, note: Note) =>
   updateProject(projectId, (p) => ({ ...p, notes: [...p.notes, note] }))
 
+/**
+ * Moves a banknote to `to` in the project's list, the others keeping their order. The list's order is saved with the
+ * project; where each banknote sits on the canvas doesn't change.
+ */
+export const moveNote = (projectId: string, noteId: string, to: number) =>
+  updateProject(projectId, (p) => {
+    const from = p.notes.findIndex((n) => n.id === noteId)
+    const at = Math.max(0, Math.min(p.notes.length - 1, to))
+    if (from < 0 || at === from) return p
+    const notes = [...p.notes]
+    notes.splice(at, 0, ...notes.splice(from, 1))
+    return { ...p, notes }
+  })
+
 /** Inserts the copy right after the original and returns its id */
 export async function duplicateNote(projectId: string, noteId: string) {
   const source = findNote(projectId, noteId)

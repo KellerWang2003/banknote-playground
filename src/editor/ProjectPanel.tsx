@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronLeft, ChevronRight, Columns2, Copy, Plus, Redo2, Rows2, Trash2, Undo2 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronLeft, ChevronRight, Columns2, Copy, GripVertical, Plus, Redo2, Rows2, Trash2, Undo2 } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +18,7 @@ import { IconButton, Panel } from '../components/controls'
 import { CloudStatus } from '../components/CloudStatus'
 import { runAction, reportError } from '../cloud/notices'
 import { NoteView } from '../components/NoteView'
-import { duplicateNote, removeNote, updateNote, updateProject, undoProject, redoProject } from '../lib/store'
+import { duplicateNote, moveNote, removeNote, updateNote, updateProject, undoProject, redoProject } from '../lib/store'
 import { useHistory } from '../lib/history'
 import { FEATURES, FEATURE_NAMES, PLACED_LAYERS, featureName, hasFeature, hasThread, type Feature } from '../lib/layers'
 import { useTiltPad } from '../lib/tiltPad'
@@ -28,11 +28,57 @@ import { renameFeature, type Layer } from './layerActions'
 
 const THUMB = 28
 
+/** A banknote's block being dragged up or down the list by its grip, measured from the list's top as the drag began */
+interface NoteDrag {
+  id: string
+  from: number
+  /** Every block's top and height, in the list's order */
+  tops: number[]
+  heights: number[]
+  /** Where the pointer took hold */
+  grabY: number
+  /** How far the block has come since */
+  dy: number
+}
+
+/** How far the dragged block has come with the pointer `y` px below the list's top: as far as the pointer, within the list */
+function dragAlong({ from, tops, heights, grabY }: NoteDrag, y: number) {
+  const last = tops.length - 1
+  return Math.max(tops[0] - tops[from], Math.min(tops[last] + heights[last] - tops[from] - heights[from], y - grabY))
+}
+
+/**
+ * Where the dragged block lands: the place nearest to where it is, of those it would take with the others making room
+ * (its top at the top of the block it takes the place of, or after it, its bottom at that one's bottom), so the top and
+ * bottom of the list are first and last whatever the blocks' heights
+ */
+function landing({ from, tops, heights, dy }: NoteDrag) {
+  const at = tops[from] + dy
+  const place = (k: number) => (k <= from ? tops[k] : tops[k] + heights[k] - heights[from])
+  let to = 0
+  for (let k = 1; k < tops.length; k++) if (Math.abs(place(k) - at) < Math.abs(place(to) - at)) to = k
+  return to
+}
+
+/** How far the block at `i` moves meanwhile: the dragged one with the pointer, those it has passed out of its way */
+function shiftOf(drag: NoteDrag, i: number) {
+  if (i === drag.from) return drag.dy
+  const to = landing(drag)
+  // The dragged block's height and the gap after it
+  const room = drag.heights[drag.from] + drag.tops[1] - drag.tops[0] - drag.heights[0]
+  if (drag.from < i && i <= to) return -room
+  if (to <= i && i < drag.from) return room
+  return 0
+}
+
 /**
  * Top-left: back to the projects, the project's name, and its banknotes as a collapsible list. Each banknote opens
  * to its security features (its thread, watermark and magnetic ink, as it has them: each added from the Add menu, on
  * the + on its row or, for the selected one, the "Add security feature" row under its features, and removed from the
- * bin on its own row); the selected one opens by itself.
+ * bin on its own row); the selected one opens by itself. A grip at the left of a banknote's row, on hover, drags it up
+ * or down the list (Keller, 9 November: "should be able to re-arrange these"), its features with it, the others making
+ * room, and it lands where it is let go, one undo step saved with the project; with the grip focused, the up and down
+ * arrow keys move it too.
  */
 export function ProjectPanel({
   project,
@@ -68,6 +114,16 @@ export function ProjectPanel({
   const isOpen = (id: string) => overrides[id] ?? id === selectedId
   // Above the tilt pad's card it stops short of it, whose height depends on whether the pad is open
   const padOpen = useTiltPad((s) => s.open)
+  const list = useRef<HTMLUListElement>(null)
+  const [drag, setDrag] = useState<NoteDrag>()
+  // Only while the list is still as it was when the drag began
+  const dragging = drag && drag.tops.length === project.notes.length && project.notes[drag.from]?.id === drag.id ? drag : undefined
+  const endDrag = (drop: boolean) => {
+    setDrag(undefined)
+    if (!drop || !dragging) return
+    const to = landing(dragging)
+    if (to !== dragging.from) moveNote(project.id, dragging.id, to)
+  }
 
   return (
     <Panel className={cn('absolute top-3 left-3 flex w-[224px]', aboveTilt ? cn(padOpen ? 'max-h-[calc(100%-342px)]' : 'max-h-[calc(100%-200px)]', 'min-h-12') : 'max-h-[calc(100%-120px)]', 'flex-col')}>
@@ -110,16 +166,27 @@ export function ProjectPanel({
           </IconButton>
         </div>
         <CollapsibleContent className="min-h-0 overflow-y-auto">
-          <ul className="flex flex-col gap-0.5 px-1.5 pb-1.5">
-            {project.notes.map((note) => {
+          <ul ref={list} className="flex flex-col gap-0.5 px-1.5 pb-1.5">
+            {project.notes.map((note, index) => {
               const selected = note.id === selectedId
               // The banknote itself picked: its grey runs on behind its features, as they are part of it (Keller)
               const picked = selected && layer === 'note'
               const expanded = isOpen(note.id)
               // The + lists only the features the banknote doesn't have yet, and goes once it has them all
               const canAdd = FEATURES.some((f) => !hasFeature(note, f))
+              const dragged = dragging?.id === note.id
+              const shift = dragging ? shiftOf(dragging, index) : 0
               return (
-              <li key={note.id} className={cn('rounded-lg', picked && 'bg-muted')}>
+              <li
+                key={note.id}
+                className={cn(
+                  'rounded-lg',
+                  picked && 'bg-muted',
+                  // Lifted while dragged, solid so the rows it passes don't show through it; the others glide out of its way
+                  dragging && (dragged ? cn('z-10 shadow-md', picked ? 'bg-muted' : 'bg-background') : 'transition-transform'),
+                )}
+                style={shift ? { transform: `translateY(${shift}px)` } : undefined}
+              >
                 <div className="group relative">
                 <button
                   type="button"
@@ -164,6 +231,47 @@ export function ProjectPanel({
                 >
                   <ChevronRight className={cn('size-3.5 transition-transform', expanded && 'rotate-90')} />
                 </button>
+                {project.notes.length > 1 && renaming !== note.id && (
+                  // In the gap left of the chevron, so the row keeps its layout; shown on hover, as the row's actions are
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    data-note-grip={note.id}
+                    aria-label={`Move ${note.name}`}
+                    title="Drag to reorder"
+                    className={cn(
+                      'absolute inset-y-0 -left-1.5 flex w-4 touch-none items-center justify-end rounded-sm text-muted-foreground/70 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50',
+                      dragged ? 'cursor-grabbing text-foreground' : 'cursor-grab opacity-0 group-hover:opacity-100',
+                    )}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0 || !list.current) return
+                      e.preventDefault()
+                      e.currentTarget.setPointerCapture(e.pointerId)
+                      const top = list.current.getBoundingClientRect().top
+                      const blocks = [...list.current.children].map((block) => block.getBoundingClientRect())
+                      setDrag({ id: note.id, from: index, tops: blocks.map((b) => b.top - top), heights: blocks.map((b) => b.height), grabY: e.clientY - top, dy: 0 })
+                    }}
+                    onPointerMove={(e) => {
+                      if (dragging?.id !== note.id || !list.current) return
+                      // Its release went missing
+                      if (e.buttons === 0) return endDrag(true)
+                      setDrag({ ...dragging, dy: dragAlong(dragging, e.clientY - list.current.getBoundingClientRect().top) })
+                    }}
+                    onPointerUp={() => endDrag(true)}
+                    onPointerCancel={() => endDrag(false)}
+                    onLostPointerCapture={() => endDrag(false)}
+                    onKeyDown={(e) => {
+                      const to = index + (e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0)
+                      if (to === index || to < 0 || to >= project.notes.length) return
+                      e.preventDefault()
+                      moveNote(project.id, note.id, to)
+                      // The grip goes with its banknote
+                      requestAnimationFrame(() => list.current?.querySelector<HTMLElement>(`[data-note-grip="${note.id}"]`)?.focus())
+                    }}
+                  >
+                    <GripVertical className="size-3" />
+                  </span>
+                )}
                 {renaming !== note.id && (
                   <div className="absolute inset-y-0 right-1 hidden items-center group-hover:flex has-[[data-popup-open]]:flex">
                     <AddFeatureMenu note={note} onAdd={(feature) => onAddLayer(note.id, feature)} />
