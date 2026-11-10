@@ -32,8 +32,8 @@ export function EditorSkeleton({ isDemo = false }: { isDemo?: boolean }) {
         <NoteSkeleton widthMm={150} heightMm={70} scale={SCALE} />
       </div>
 
-      {/* Top middle: Front | Back */}
-      <div className="pointer-events-none absolute top-3 right-3 left-3 flex justify-center">
+      {/* Top middle: Front | Back, centred between the Banknotes panel and the corner bar, as `SideSwitch` is */}
+      <div className="pointer-events-none absolute top-3 right-[calc(var(--panel-w)+20px)] left-[244px] flex justify-center">
         <Panel className="flex h-11 items-center p-1.5">
           <Skeleton className="h-8 w-44 rounded-lg" />
         </Panel>
