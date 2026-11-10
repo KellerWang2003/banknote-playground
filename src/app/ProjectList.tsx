@@ -181,7 +181,7 @@ function AccountMenu() {
       <DropdownMenuTrigger
         render={
           <Button variant="ghost" size="sm" className="gap-2 px-1.5" aria-label={`Account: ${workspace}`}>
-            <span className="flex size-6 items-center justify-center rounded-full bg-foreground text-[11px] font-medium text-background uppercase">
+            <span className="flex size-6 items-center justify-center rounded-full bg-brand text-[11px] font-medium text-brand-foreground uppercase">
               {workspace.slice(0, 1)}
             </span>
             <span className="max-w-32 truncate">{workspace}</span>

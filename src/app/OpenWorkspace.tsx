@@ -14,7 +14,7 @@ export function OpenWorkspace() {
       <div className="flex w-full max-w-xs flex-col gap-8">
         <div className="flex flex-col items-center gap-4 text-center">
           {/* A banknote with a windowed thread, as the app's mark */}
-          <span className="relative h-14 w-24 rounded-md bg-foreground shadow-sm">
+          <span className="relative h-14 w-24 rounded-md bg-brand shadow-sm">
             <span className="absolute inset-y-0 left-[66%] w-1.5 bg-[repeating-linear-gradient(180deg,var(--background)_0_7px,transparent_7px_11px)]" />
           </span>
           <h1 className="font-heading text-xl font-semibold">Banknote Playground</h1>
