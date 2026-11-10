@@ -4,7 +4,21 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ColorField } from '../src/components/controls'
-import { hexToHsv, hsvFor, hsvToHex, pickedHex } from '../src/lib/color'
+import {
+  colorChannels,
+  hexToHsv,
+  hexToRgb,
+  hslToHsv,
+  hsvFor,
+  hsvToHex,
+  hsvToHsl,
+  pickedHex,
+  rgbToHex,
+  setColorMode,
+  typedHex,
+  useColorMode,
+  withColorChannel,
+} from '../src/lib/color'
 
 interface Pick {
   resolve: (sRGBHex: string) => void
@@ -51,6 +65,8 @@ async function openPicker(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
+  // Every picker opens in Hex until another mode is picked
+  setColorMode('hex')
   // jsdom has no pointer capture
   for (const name of ['setPointerCapture', 'releasePointerCapture', 'hasPointerCapture']) {
     Object.defineProperty(HTMLElement.prototype, name, { configurable: true, value: vi.fn() })
@@ -94,6 +110,55 @@ describe('colours as the picker shows them', () => {
     expect(hsvFor('#000000', dragged)).toEqual({ h: 210.4, s: 0.503, v: 0 })
     expect(hsvFor('#ff0000', dragged)).toEqual({ h: 0, s: 1, v: 1 })
     expect(hsvFor('not a colour', dragged)).toBe(dragged)
+  })
+
+  it('reads a hex as red, green and blue, and back, each a whole number from 0 to 255', () => {
+    expect(hexToRgb('#336699')).toEqual([51, 102, 153])
+    expect(hexToRgb('#FFFFFF')).toEqual([255, 255, 255])
+    expect(hexToRgb('#fff')).toBeUndefined()
+    expect(rgbToHex([51, 102, 153])).toBe('#336699')
+    expect(rgbToHex([255, 102.4, -3])).toBe('#ff6600')
+    expect(rgbToHex([300, 0, 0])).toBe('#ff0000')
+  })
+
+  it('reads HSB as HSL and back, the hue the same', () => {
+    expect(hsvToHsl({ h: 30, s: 1, v: 1 })).toEqual({ h: 30, s: 1, l: 0.5 })
+    expect(hsvToHsl({ h: 210, s: 0, v: 1 })).toEqual({ h: 210, s: 0, l: 1 })
+    expect(hsvToHsl({ h: 210, s: 0.5, v: 0 })).toEqual({ h: 210, s: 0, l: 0 })
+    expect(hsvToHex(hslToHsv({ h: 210, s: 0.5, l: 0.4 }))).toBe('#336699')
+    expect(hsvToHex(hslToHsv({ h: 30, s: 1, l: 0.5 }))).toBe('#ff8000')
+    for (const hex of ['#336699', '#c8a24a', '#808080', '#000000', '#ffffff', '#ff0000', '#0a141e']) {
+      expect(hsvToHex(hslToHsv(hsvToHsl(hexToHsv(hex)!)))).toBe(hex)
+    }
+  })
+
+  it('reads a typed hex with its # or without, three digits only once allowed', () => {
+    expect(typedHex('FF8000')).toBe('#ff8000')
+    expect(typedHex('#ff8000')).toBe('#ff8000')
+    expect(typedHex(' 1e90ff ')).toBe('#1e90ff')
+    expect(typedHex('F80')).toBeUndefined()
+    expect(typedHex('F80', true)).toBe('#ff8800')
+    expect(typedHex('#f80', true)).toBe('#ff8800')
+    expect(typedHex('FF80', true)).toBeUndefined()
+    expect(typedHex('GG0000')).toBeUndefined()
+    expect(typedHex('')).toBeUndefined()
+  })
+
+  it('gives each mode’s three numbers, and the colour with one of them typed', () => {
+    const blue = hexToHsv('#336699')!
+    expect(colorChannels('rgb', blue)).toEqual([51, 102, 153])
+    const [h, s, b] = colorChannels('hsb', blue)
+    expect([h, Math.round(s), Math.round(b)]).toEqual([210, 67, 60])
+    const hsl = colorChannels('hsl', blue)
+    expect(hsl.map((n) => Math.round(n))).toEqual([210, 50, 40])
+    expect(hsvToHex(withColorChannel('rgb', blue, 0, 255))).toBe('#ff6699')
+    expect(hsvToHex(withColorChannel('hsb', blue, 1, 100))).toBe(hsvToHex({ h: 210, s: 1, v: 0.6 }))
+    expect(hsvToHex(withColorChannel('hsb', blue, 0, 30))).toBe(hsvToHex({ h: 30, s: blue.s, v: 0.6 }))
+    const lighter = hexToRgb(hsvToHex(withColorChannel('hsl', blue, 2, 50)))!
+    ;[64, 128, 191].forEach((c, i) => expect(Math.abs(lighter[i] - c)).toBeLessThanOrEqual(1))
+    // A grey typed in RGB keeps the hue it was shown with
+    expect(withColorChannel('rgb', { h: 210, s: 0, v: 0.5 }, 0, 200).h).toBeCloseTo(0)
+    expect(withColorChannel('rgb', { h: 210, s: 0.5, v: 0.5 }, 1, 64)).toEqual(hsvFor('#404080', { h: 210, s: 0.5, v: 0.5 }))
   })
 
   it('reads the colour the eyedropper picked', () => {
@@ -260,5 +325,118 @@ describe('the colour picker', () => {
     fireEvent.change(hexField(), { target: { value: '#ff8000' } })
     expect(hue().getAttribute('aria-valuenow')).toBe('30')
     expect(square().getAttribute('aria-valuetext')).toBe('Saturation 100%, brightness 100%')
+  })
+})
+
+describe('typing the colour in the picker', () => {
+  const typed = () => within(picker()).getByRole<HTMLInputElement>('textbox', { name: 'Hex' })
+  const channel = (title: string) => within(picker()).getByTitle(title).querySelector('input')!
+  async function pickMode(user: ReturnType<typeof userEvent.setup>, name: string) {
+    await user.click(within(picker()).getByRole('combobox', { name: 'Colour mode' }))
+    await user.click(await screen.findByRole('option', { name, exact: true }))
+  }
+
+  // Keller, 9 November: "make sure that I'll be able to input hex, input any other like color modes like RGB or HSB"
+  it('opens in Hex, its hex typed with its # or without, and three digits read as shorthand once left', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await openPicker(user)
+    expect(within(picker()).getByRole('combobox', { name: 'Colour mode' }).textContent).toContain('Hex')
+    expect(typed().value).toBe('#336699')
+    fireEvent.change(typed(), { target: { value: 'ff8000' } })
+    expect(hexField().value).toBe('#ff8000')
+    expect(hue().getAttribute('aria-valuenow')).toBe('30')
+    fireEvent.change(typed(), { target: { value: '0F8' } })
+    expect(hexField().value).toBe('#ff8000')
+    fireEvent.blur(typed())
+    expect(hexField().value).toBe('#00ff88')
+    expect(typed().value).toBe('#00ff88')
+    // Not a colour: left, it shows the colour again
+    fireEvent.change(typed(), { target: { value: 'nope' } })
+    fireEvent.blur(typed())
+    expect(typed().value).toBe('#00ff88')
+  })
+
+  it('types the colour as RGB, HSB or HSL, three numbers each, and keeps the mode picked for every picker', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await openPicker(user)
+    await pickMode(user, 'RGB')
+    expect(picker()).toBeTruthy()
+    expect(within(picker()).queryByRole('textbox', { name: 'Hex' })).toBeNull()
+    expect([channel('Red').value, channel('Green').value, channel('Blue').value]).toEqual(['51', '102', '153'])
+    fireEvent.change(channel('Red'), { target: { value: '255' } })
+    expect(hexField().value).toBe('#ff6699')
+
+    await pickMode(user, 'HSB')
+    expect([channel('Hue (°)').value, channel('Saturation (%)').value, channel('Brightness (%)').value]).toEqual(['340', '60', '100'])
+    fireEvent.change(channel('Brightness (%)'), { target: { value: '50' } })
+    expect(hexField().value).toBe(hsvToHex({ h: 340, s: 0.6, v: 0.5 }))
+    expect(channel('Hue (°)').value).toBe('340')
+
+    // HSL reads the colour where HSB left it, not as its hex rounds it (its hue would read 341)
+    await pickMode(user, 'HSL')
+    const [h, s, l] = colorChannels('hsl', { h: 340, s: 0.6, v: 0.5 }).map((n) => String(Math.round(n)))
+    expect(h).toBe('340')
+    expect([channel('Hue (°)').value, channel('Saturation (%)').value, channel('Lightness (%)').value]).toEqual([h, s, l])
+    fireEvent.change(channel('Lightness (%)'), { target: { value: '100' } })
+    expect(hexField().value).toBe('#ffffff')
+    // White has no hue of its own: the strip keeps it
+    expect(hue().getAttribute('aria-valuenow')).toBe('340')
+
+    // Closed and opened again, it is still in HSL, remembered in this browser
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await openPicker(user)
+    expect(within(picker()).getByRole('combobox', { name: 'Colour mode' }).textContent).toContain('HSL')
+    expect(useColorMode.getState().mode).toBe('hsl')
+    expect(localStorage.getItem('of-playground.colour-mode')).toBe('hsl')
+  })
+
+  it('scrubs a number by dragging its label', async () => {
+    setColorMode('rgb')
+    const user = userEvent.setup()
+    render(<Harness />)
+    await openPicker(user)
+    const label = within(picker()).getByTitle('Green').querySelector('span')!
+    fireEvent.pointerDown(label, { pointerId: 1, button: 0, buttons: 1, clientX: 100 })
+    fireEvent.pointerMove(label, { pointerId: 1, button: -1, buttons: 1, clientX: 120 })
+    fireEvent.pointerUp(label, { pointerId: 1, button: 0, buttons: 0, clientX: 120 })
+    expect(channel('Green').value).toBe('112')
+    expect(hexField().value).toBe('#337099')
+  })
+
+  it('leaves I to the typed fields, and starts the eyedropper again once a mode is picked', async () => {
+    const opened = stubEyeDropper()
+    const user = userEvent.setup()
+    render(<Harness />)
+    await openPicker(user)
+    fireEvent.keyDown(typed(), { key: 'i' })
+    expect(opened).toHaveLength(0)
+    await pickMode(user, 'HSB')
+    fireEvent.keyDown(channel('Hue (°)'), { key: 'i' })
+    expect(opened).toHaveLength(0)
+    // The mode menu's own button has the keyboard now
+    await user.keyboard('i')
+    expect(opened).toHaveLength(1)
+  })
+
+  it('takes the hex beside the swatch with its # or without, and three digits once it is left', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(hexField())
+    fireEvent.change(hexField(), { target: { value: 'C8A24A' } })
+    fireEvent.blur(hexField())
+    expect(hexField().value).toBe('#c8a24a')
+    fireEvent.change(hexField(), { target: { value: '#F80' } })
+    fireEvent.blur(hexField())
+    expect(hexField().value).toBe('#ff8800')
+    fireEvent.change(hexField(), { target: { value: 'F8' } })
+    fireEvent.blur(hexField())
+    expect(hexField().value).toBe('#ff8800')
+    // Enter takes it too
+    fireEvent.change(hexField(), { target: { value: '123' } })
+    fireEvent.keyDown(hexField(), { key: 'Enter' })
+    expect(hexField().value).toBe('#112233')
   })
 })
