@@ -1,13 +1,40 @@
 import { Pipette } from 'lucide-react'
 import { useEffect, useRef, useState, type PointerEvent, type SyntheticEvent } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { type Hsv, hexToHsv, hsvFor, hsvToHex, pickedHex } from '../lib/color'
+import {
+  COLOR_MODES,
+  type ColorMode,
+  type Hsv,
+  colorChannels,
+  hexToHsv,
+  hsvFor,
+  hsvToHex,
+  pickedHex,
+  setColorMode,
+  typedHex,
+  useColorMode,
+  withColorChannel,
+} from '../lib/color'
+import { ScrubField } from './controls'
 
-/** Keys typed into these are text, never the eyedropper's I, as with the editor's other single-key shortcuts */
-const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
+/**
+ * Keys typed into these are text, never the eyedropper's I, nor are keys in the mode menu's open list; the mode menu's
+ * own button doesn't count, so I starts it straight after a mode is picked
+ */
+const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="spinbutton"], [role="listbox"]'
+
+/** Each colour mode's three numbers, as small ScrubFields: their labels, what those stand for, and how far they go */
+const CHANNELS: Record<Exclude<ColorMode, 'hex'>, { label: string; title: string; max: number }[]> = {
+  rgb: [{ label: 'R', title: 'Red', max: 255 }, { label: 'G', title: 'Green', max: 255 }, { label: 'B', title: 'Blue', max: 255 }],
+  hsb: [{ label: 'H', title: 'Hue (°)', max: 360 }, { label: 'S', title: 'Saturation (%)', max: 100 }, { label: 'B', title: 'Brightness (%)', max: 100 }],
+  hsl: [{ label: 'H', title: 'Hue (°)', max: 360 }, { label: 'S', title: 'Saturation (%)', max: 100 }, { label: 'L', title: 'Lightness (%)', max: 100 }],
+}
+const whole = (value: number) => String(Math.round(value))
 
 /** Every hue, red round to red, along the hue strip */
 const HUES = 'linear-gradient(to right, #f00, #ff0 16.667%, #0f0 33.333%, #0ff 50%, #00f 66.667%, #f0f 83.333%, #f00)'
@@ -45,7 +72,7 @@ export function ColorPicker({ value, onChange, className }: {
         className={cn('size-5 cursor-pointer rounded-[max(0px,calc(var(--radius)-6px))] ring-1 ring-foreground/10 outline-none focus-visible:ring-2 focus-visible:ring-ring', className)}
         style={{ backgroundColor: value }}
       />
-      <PopoverContent side="bottom" align="start" sideOffset={8} className="w-56">
+      <PopoverContent side="bottom" align="start" sideOffset={8} className="w-60">
         <Picker value={value} onChange={onChange} open={open} />
       </PopoverContent>
     </Popover>
@@ -193,7 +220,62 @@ function Picker({ value, onChange, open }: { value: string; onChange: (value: st
           <span className={cn(THUMB, 'top-1/2')} style={{ left: `${(hsv.h / 360) * 100}%`, backgroundColor: `hsl(${hsv.h}, 100%, 50%)` }} />
         </div>
       </div>
+      <TypedColor hsv={hsv} set={set} />
     </>
+  )
+}
+
+/**
+ * The colour typed, as Figma's picker has it (Keller, 9 November: "input hex, input any other like color modes like RGB
+ * or HSB"): the mode menu, then the hex or the mode's three numbers, each a ScrubField. The mode is the last one picked
+ * in this browser (`useColorMode`), whichever picker it was picked in.
+ */
+function TypedColor({ hsv, set }: { hsv: Hsv; set: (next: Hsv) => void }) {
+  const mode = useColorMode((s) => s.mode)
+  return (
+    <div className="flex items-center gap-1">
+      <Select value={mode} items={COLOR_MODES} onValueChange={(next) => { if (next) setColorMode(next as ColorMode) }}>
+        <SelectTrigger size="sm" aria-label="Colour mode" className="w-[4.25rem] shrink-0 gap-1 px-2 text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent alignItemWithTrigger={false} className="min-w-24">
+          {COLOR_MODES.map((m) => <SelectItem key={m.value} value={m.value} className="text-xs">{m.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {mode === 'hex'
+        ? <HexField hex={hsvToHex(hsv)} onChange={(hex) => set(hsvFor(hex, hsv))} />
+        : CHANNELS[mode].map((channel, i) => (
+          <ScrubField key={`${mode}-${channel.label}`} size="sm" className="min-w-0 flex-1" label={channel.label} title={channel.title}
+            value={colorChannels(mode, hsv)[i]} min={0} max={channel.max} format={whole}
+            onChange={(value) => set(withColorChannel(mode, hsv, i, value))} />
+        ))}
+    </div>
+  )
+}
+
+/** The colour's hex, typed with its # or without; three digits are Figma's shorthand, read once the field is left */
+function HexField({ hex, onChange }: { hex: string; onChange: (hex: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <Input
+      aria-label="Hex"
+      autoComplete="off"
+      spellCheck={false}
+      // As a small ScrubField's box, which the other modes show here
+      className="h-7 min-w-0 flex-1 rounded-md border-transparent bg-muted/67 px-1.5 text-xs uppercase tabular-nums hover:border-border focus-visible:border-ring focus-visible:ring-0 md:text-xs"
+      value={draft ?? hex}
+      onChange={(event) => {
+        setDraft(event.target.value)
+        const typed = typedHex(event.target.value)
+        if (typed && typed !== hex) onChange(typed)
+      }}
+      onBlur={() => {
+        const typed = draft === null ? undefined : typedHex(draft, true)
+        if (typed && typed !== hex) onChange(typed)
+        setDraft(null)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur()
+      }}
+    />
   )
 }
 

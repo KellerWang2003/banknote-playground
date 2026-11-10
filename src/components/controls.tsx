@@ -19,6 +19,7 @@ import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { typedHex } from '../lib/color'
 import { LENGTH_UNITS, formatLength, lengthField, setLengthUnit, useLengthUnit, type LengthUnit } from '../lib/units'
 import { ColorPicker } from './ColorPicker'
 
@@ -607,9 +608,19 @@ export function ColorField({ value, onChange }: { value: string; onChange: (valu
         value={draft ?? value}
         onChange={(e) => {
           setDraft(e.target.value)
-          if (/^#[0-9a-f]{6}$/i.test(e.target.value)) onChange(e.target.value)
+          // With its # or without, as Figma takes it
+          const typed = typedHex(e.target.value)
+          if (typed && typed !== value.toLowerCase()) onChange(typed)
         }}
-        onBlur={() => setDraft(null)}
+        onBlur={() => {
+          // Three digits are Figma's shorthand (F80 is FF8800), read once the field is left
+          const typed = draft === null ? undefined : typedHex(draft, true)
+          if (typed && typed !== value.toLowerCase()) onChange(typed)
+          setDraft(null)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
       />
     </div>
   )
