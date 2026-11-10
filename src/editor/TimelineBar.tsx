@@ -262,7 +262,7 @@ function FrameTrack({ note, noteRef, sectionId }: { note: Note; noteRef: NoteRef
   return (
     <>
       <div className="w-px shrink-0 bg-border" />
-      <div ref={scroller} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg bg-muted/40">
+      <div ref={scroller} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg bg-muted/67">
         <div
           ref={track}
           className="relative h-full touch-none overflow-hidden select-none"
@@ -430,7 +430,7 @@ function FrameTrack({ note, noteRef, sectionId }: { note: Note; noteRef: NoteRef
                   type="button"
                   aria-label="Add frame"
                   disabled={frames.length >= MAX_FRAMES && !frames.every((f) => f.kind !== 'image')}
-                  className="absolute bottom-1 flex items-center justify-center rounded-sm border border-dashed border-foreground/25 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  className="absolute bottom-1 flex items-center justify-center rounded-sm border border-dashed border-foreground/25 text-muted-foreground transition-colors hover:bg-muted/67 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                   style={{ top: framesTop, left: x(totalLength) + ADD_GAP, width: ADD_PX }}
                 />
               }

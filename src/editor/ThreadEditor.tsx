@@ -351,7 +351,7 @@ function SectionList({ note, selectedId, onSelect, onAdd, onDuplicate, onRemove,
               ) : (
                 <>
                   <Button variant="ghost" aria-pressed={on} title={`${Math.round(Math.abs(angle))}° ridges`}
-                    className={cn('h-8 w-full justify-start gap-2 px-1.5 font-normal group-hover:pr-14', on ? 'bg-muted hover:bg-muted' : 'hover:bg-muted/50')}
+                    className={cn('h-8 w-full justify-start gap-2 px-1.5 font-normal group-hover:pr-14', on ? 'bg-muted/67 hover:bg-muted/67' : 'hover:bg-muted/50')}
                     onClick={() => onSelect(section.id)} onDoubleClick={() => setRenaming(section.id)}>
                     <RidgeIcon angle={angle} />
                     <span className="min-w-0 flex-1 truncate text-left">{section.name}</span>

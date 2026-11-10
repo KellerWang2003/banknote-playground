@@ -181,7 +181,7 @@ export function ProjectPanel({
                 key={note.id}
                 className={cn(
                   'rounded-lg',
-                  picked && 'bg-muted',
+                  picked && 'bg-muted/67',
                   // Lifted while dragged, solid so the rows it passes don't show through it; the others glide out of its way
                   dragging && (dragged ? cn('z-10 shadow-md', picked ? 'bg-muted' : 'bg-background') : 'transition-transform'),
                 )}
@@ -388,7 +388,7 @@ function LayerRow({ icon, name, kind, selected, onBlock = false, onSelect, onRen
         className={cn(
           'flex w-full items-center gap-1.5 rounded-lg py-1 pr-1.5 pl-2 text-left transition-colors',
           onRemove && 'group-hover/layer:pr-8',
-          selected ? 'bg-muted' : onBlock ? 'hover:bg-foreground/5' : 'hover:bg-muted/50',
+          selected ? 'bg-muted/67' : onBlock ? 'hover:bg-foreground/5' : 'hover:bg-muted/50',
         )}
       >
         <span className={cn('flex h-5 shrink-0 items-center [&_svg]:size-3.5', selected ? 'text-foreground' : 'text-muted-foreground')}>

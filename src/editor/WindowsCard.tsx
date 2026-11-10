@@ -57,7 +57,7 @@ export function WindowsCard({ note, noteRef, onWindowSelect, tip = false, onTipD
   }, [tip, onTipDone])
 
   return (
-    <div className="relative flex flex-col gap-2 rounded-lg bg-muted/50 p-2">
+    <div className="relative flex flex-col gap-2 rounded-lg bg-muted/67 p-2">
       <div className="flex h-6 items-center gap-1">
         <span className="flex-1 pl-0.5 text-xs">Windows</span>
         {windows.enabled && <IconButton label="Add window" size="icon-xs" disabled={!canAdd} onClick={addWindow}><Plus /></IconButton>}

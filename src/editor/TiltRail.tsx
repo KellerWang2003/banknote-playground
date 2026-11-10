@@ -23,7 +23,7 @@ export const TILT_PANEL_PX = PAD_PX + 2 * 6 + 2
 const POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
 /** The lamp and Realistic, on the card's top row */
-const ROW_TOGGLE = 'size-6 min-w-6 rounded-[min(var(--radius-md),10px)] bg-background/95 p-0 aria-pressed:bg-primary aria-pressed:text-primary-foreground'
+const ROW_TOGGLE = 'size-6 min-w-6 rounded-[min(var(--radius-md),10px)] bg-background/67 p-0 aria-pressed:bg-primary aria-pressed:text-primary-foreground'
 
 type Axis = 'x' | 'y'
 
@@ -153,7 +153,7 @@ function BackToFlat() {
     || Math.round(s.source === 'hold' ? s.targetX : s.angleX) !== 0 || Math.round(s.source === 'hold' ? s.target : s.angle) !== 0)
   if (!offFlat) return null
   return (
-    <IconButton label="Back to flat" variant="outline" size="icon-xs" className="bg-background/95" onClick={() => setTilt({ source: 'hold', target: 0, targetX: 0 })}>
+    <IconButton label="Back to flat" variant="outline" size="icon-xs" className="bg-background/67" onClick={() => setTilt({ source: 'hold', target: 0, targetX: 0 })}>
       <RotateCcw />
     </IconButton>
   )
@@ -274,7 +274,7 @@ function Pad({ limit, playback, recording, onRecorded }: {
       title={recording ? 'Drag to record a move; Escape cancels' : undefined}
       tabIndex={0}
       className={cn(
-        'relative touch-none overflow-hidden rounded-md bg-muted outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        'relative touch-none overflow-hidden rounded-md bg-muted/67 outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50',
         dragging ? 'cursor-grabbing' : 'cursor-crosshair',
         recording && 'ring-2 ring-destructive/70',
       )}

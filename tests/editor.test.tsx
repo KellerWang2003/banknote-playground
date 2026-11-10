@@ -310,7 +310,7 @@ describe('username workspace editor', () => {
     // A layer's row picks it on the canvas too: the panel has no tabs of its own to turn to it (Keller, 9 November)
     expect(screen.queryAllByRole('tab')).toHaveLength(0)
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
-    expect(screen.getByRole('button', { name: 'Security thread', exact: true }).classList.contains('bg-muted')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Security thread', exact: true }).classList.contains('bg-muted/67')).toBe(true)
     expect(body(0).querySelector('[data-outline="selected"]')).not.toBeNull()
     await user.click(screen.getByRole('button', { name: 'Watermark', exact: true }))
     expect(screen.getByRole('group', { name: 'Place watermark' })).toBeDefined()
@@ -1446,7 +1446,7 @@ describe('username workspace editor', () => {
     await user.click(screen.getByRole('menuitem', { name: /^Magnetic ink/ }))
     expect(ink()).toBeDefined()
     expect(picked()).toBe('Magnetic ink')
-    expect(screen.getByRole('button', { name: 'Magnetic ink', exact: true }).classList.contains('bg-muted')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Magnetic ink', exact: true }).classList.contains('bg-muted/67')).toBe(true)
     expect(placing()).not.toBeNull()
     expect(screen.getByRole('group', { name: 'Tilt' })).toBeDefined()
 

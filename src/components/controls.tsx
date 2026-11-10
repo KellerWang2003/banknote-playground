@@ -179,7 +179,7 @@ export function ScrubField({
     <div
       title={title}
       className={cn(
-        'flex min-w-0 items-center rounded-md border border-transparent bg-muted/90 focus-within:border-ring hover:border-border',
+        'flex min-w-0 items-center rounded-md border border-transparent bg-muted/67 focus-within:border-ring hover:border-border',
         error && 'border-destructive focus-within:border-destructive hover:border-destructive',
         sm ? 'h-7' : 'h-8',
         className,
@@ -380,7 +380,7 @@ export function Drawer({ title, action, open, onOpenChange, children }: {
  * A part's tab, as Figma's Design and Prototype: the open one a filled pill in dark semibold text, the others plain grey
  * text that darkens under the pointer
  */
-const PART_TAB = "h-7 flex-none rounded-md px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-muted data-active:font-semibold data-active:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-none [&_svg:not([class*='size-'])]:size-3.5"
+const PART_TAB = "h-7 flex-none rounded-md px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-active:bg-muted/67 data-active:font-semibold data-active:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-none [&_svg:not([class*='size-'])]:size-3.5"
 
 /** One of a side panel's part tabs, in a `TabStrip`; its icon goes before its name */
 export function PartTab({ className, ...props }: ComponentProps<typeof TabsTrigger>) {
@@ -475,7 +475,7 @@ export function NumberField({
       <Input
         {...input}
         aria-describedby={error ? errorId : undefined}
-        className={cn('h-8 bg-background/90 text-right tabular-nums [&::-webkit-inner-spin-button]:appearance-none', unit && (typeof unit === 'string' ? 'pr-7' : 'pr-8'))}
+        className={cn('h-8 bg-background/67 text-right tabular-nums [&::-webkit-inner-spin-button]:appearance-none', unit && (typeof unit === 'string' ? 'pr-7' : 'pr-8'))}
       />
       {typeof unit === 'string' ? (
         <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground">
@@ -554,7 +554,7 @@ export function Segmented<T extends string>({
       size="sm"
       // Pills of their own with a 2 px gap, not buttons joined into one bar
       spacing={0.5}
-      className="w-full rounded-md bg-muted/90 p-0.5"
+      className="w-full rounded-md bg-muted/67 p-0.5"
       value={[value]}
       onValueChange={(next) => {
         const picked = next.at(0)
@@ -603,7 +603,7 @@ export function ColorField({ value, onChange }: { value: string; onChange: (valu
     <div className="relative min-w-0">
       <ColorPicker value={value} onChange={onChange} className="absolute top-1/2 left-1.5 -translate-y-1/2" />
       <Input
-        className="h-8 bg-background/90 pl-8 uppercase tabular-nums"
+        className="h-8 bg-background/67 pl-8 uppercase tabular-nums"
         value={draft ?? value}
         onChange={(e) => {
           setDraft(e.target.value)

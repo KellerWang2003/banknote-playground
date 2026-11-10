@@ -30,7 +30,7 @@ export function UploadDesignButton({ noteRef, side }: { noteRef: NoteRef; side: 
         variant="outline"
         size="icon"
         data-upload-design={side}
-        className="pointer-events-auto size-10 rounded-full bg-background/90 shadow-sm"
+        className="pointer-events-auto size-10 rounded-full bg-background/95 shadow-sm"
         // Its own press: the canvas would take it for a tilt
         onPointerDown={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
