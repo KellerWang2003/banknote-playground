@@ -87,7 +87,10 @@ describe('the + under the selected banknote', () => {
     const two = bare('Two', 200)
     const { rerender } = renderCanvas({ notes: [one, two] })
     expect(document.querySelectorAll('[data-add-feature]')).toHaveLength(1)
-    expect(plus()!.getAttribute('aria-label')).toBe('Add security feature')
+    // The + with its words (Keller: "the plus should be also be an icon and the text"), which name it, so no tooltip
+    expect(plus()!.textContent).toBe('Add security feature')
+    expect(plus()!.querySelector('svg')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Add security feature' })).toBe(plus())
     // It hangs from the banknote's own box, as the banknote's name does, in the middle of its bottom edge
     const box = (note: Note) => document.querySelector(`[data-note-body="${note.id}"]`)!.parentElement!.parentElement!
     const overBox = anchor().parentElement!

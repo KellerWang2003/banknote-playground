@@ -23,8 +23,9 @@ export function AddFeatureMenu({ note, onAdd, align = 'start', row, onCanvas }: 
   /** As a row, "+ Add security feature", under the selected banknote's features; on its grey, its hover darkens it */
   row?: { onBlock: boolean }
   /**
-   * As the round + under the selected banknote on the canvas (Keller, 10 November), built as the + that uploads a design
-   * there is, its menu opening under it
+   * As a pill under the selected banknote on the canvas, the + and "Add security feature" (Keller, 10 November: "the
+   * plus should be also be an icon and the text"), in the look of the + that uploads a design there, its menu opening
+   * under it. Its words say what it does, so it has no tooltip
    */
   onCanvas?: boolean
 }) {
@@ -33,29 +34,21 @@ export function AddFeatureMenu({ note, onAdd, align = 'start', row, onCanvas }: 
   return (
     <DropdownMenu>
       {onCanvas ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Add security feature"
-                    data-add-feature=""
-                    className="size-10 rounded-full bg-background/95 shadow-sm"
-                    // Its own press: the canvas would take it for a tilt, or a click clearing the selection
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onDoubleClick={(e) => e.stopPropagation()}
-                  />
-                }
-              />
-            }
-          >
-            <Plus className="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>Add security feature</TooltipContent>
-        </Tooltip>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              data-add-feature=""
+              className="rounded-full bg-background/95 pr-3.5 pl-3 shadow-sm"
+              // Its own press: the canvas would take it for a tilt, or a click clearing the selection
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+            />
+          }
+        >
+          <Plus />
+          Add security feature
+        </DropdownMenuTrigger>
       ) : row ? (
         <DropdownMenuTrigger
           render={
