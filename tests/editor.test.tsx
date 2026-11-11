@@ -98,6 +98,7 @@ describe('username workspace editor', () => {
     await user.click(await screen.findByRole('button', { name: 'New project', exact: true }))
     await user.type(await screen.findByPlaceholderText('Untitled project'), 'UI test project')
     await user.click(screen.getByRole('button', { name: 'Create', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Add banknote', exact: true }))
     await user.type(await screen.findByPlaceholderText('Banknote 1'), 'UI test banknote')
     await user.click(screen.getByRole('button', { name: 'Add', exact: true }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -113,6 +114,46 @@ describe('username workspace editor', () => {
     expect(screen.getAllByText('1 banknote')).toHaveLength(2)
   })
 
+  it('opens a new project on a blank canvas, asking nothing, with a tip by Add banknote until it has a banknote', async () => {
+    // Measured, so the canvas lays out its view and its corner bar
+    vi.stubGlobal('ResizeObserver', class {
+      callback: ResizeObserverCallback
+      constructor(callback: ResizeObserverCallback) { this.callback = callback }
+      observe() { this.callback([{ contentRect: { width: 1280, height: 720 } } as ResizeObserverEntry], this as unknown as ResizeObserver) }
+      unobserve() {} disconnect() {}
+    })
+    const user = userEvent.setup()
+    localStorage.setItem('of-thread-workspace', 'blank-canvas-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'New project', exact: true }))
+    await user.type(await screen.findByPlaceholderText('Untitled project'), 'Blank project')
+    await user.click(screen.getByRole('button', { name: 'Create', exact: true }))
+    // Keller, 10 November: New banknote no longer opens by itself, nor is there a button in the middle asking for one:
+    // the canvas itself, at 100% with nothing to export, and the tip beside the Banknotes list's +
+    expect(await screen.findByText('Start by adding a banknote here')).toBeDefined()
+    await waitFor(() => expect(document.querySelector('[data-zoom-readout]')?.textContent).toBe('100%'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add a banknote' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Export', exact: true })).toBeNull()
+
+    // The + opens New banknote, the tip going meanwhile, and for good once the banknote is added
+    await user.click(screen.getByRole('button', { name: 'Add banknote', exact: true }))
+    await screen.findByRole('dialog')
+    expect(screen.queryByText('Start by adding a banknote here')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.querySelector('[data-note-body]')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Export', exact: true })).toBeDefined()
+    expect(screen.queryByText('Start by adding a banknote here')).toBeNull()
+
+    // With its last banknote deleted the project is blank again, with the tip, and still nothing opens by itself
+    await user.click(screen.getByRole('button', { name: 'Delete', exact: true }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete', exact: true }))
+    expect(await screen.findByText('Start by adding a banknote here')).toBeDefined()
+    expect(document.querySelector('[data-note-body]')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('starts a banknote with no security feature, adds and removes its thread from the Add menu, the first with a tip by Windows', async () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'windows-tip-ui-test')
@@ -120,6 +161,7 @@ describe('username workspace editor', () => {
     await user.click(await screen.findByRole('button', { name: 'New project', exact: true }))
     await user.type(await screen.findByPlaceholderText('Untitled project'), 'Tip project')
     await user.click(screen.getByRole('button', { name: 'Create', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Add banknote', exact: true }))
     await screen.findByPlaceholderText('Banknote 1')
     // New banknote asks only for a name and size (Keller, 4 November)
     expect(screen.queryByText('Colour', { exact: true })).toBeNull()

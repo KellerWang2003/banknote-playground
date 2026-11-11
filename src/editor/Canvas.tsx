@@ -73,6 +73,14 @@ type Gesture =
 function fitView(notes: Note[], size: { width: number; height: number }, quarter: Quarter = 0): View {
   // A widened right panel takes more room
   const FIT_INSETS = { ...FIT, right: Math.max(FIT.right, usePanelWidth.getState().width + 36) }
+  // A blank canvas has nothing to fit: 100%, with the origin, where the first banknote goes, in the middle of the room
+  if (!notes.length) {
+    return {
+      zoom: 1,
+      x: FIT_INSETS.left + (size.width - FIT_INSETS.left - FIT_INSETS.right) / 2,
+      y: FIT_INSETS.top + (size.height - FIT_INSETS.top - FIT_INSETS.bottom) / 2,
+    }
+  }
   // The banknotes as they show, rotated onto their sides or not
   const boxes = notes.map((n) => noteBox(n, quarter))
   const minX = Math.min(...boxes.map((b) => b.x))
@@ -182,8 +190,8 @@ export function Canvas({
   const offsets = usePatternOffsets((s) => s.offsets)
   const unit = useLengthUnit((s) => s.unit)
 
-  // Until the first pan or zoom, the view simply fits every note
-  const current = view ?? (size && notes.length ? fitView(notes, size, quarter) : undefined)
+  // Until the first pan or zoom, the view simply fits every note (a blank canvas sits at 100%)
+  const current = view ?? (size ? fitView(notes, size, quarter) : undefined)
   const scale = current ? current.zoom * PX_PER_MM : 0
 
   /**

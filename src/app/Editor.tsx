@@ -2,7 +2,6 @@ import { undoProject, redoProject, updateNote } from '../lib/store'
 import { beginHistoryGroup, endHistoryGroup, breakHistoryGroup } from '../lib/history'
 import { pressLight, releaseLight, rotateNotes, setTilt, springToFlat, togglePlayback, turnOver, useTilt } from '../tilt/tilt'
 import { playbackLens, playbackTilt } from '../lib/pattern'
-import { Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Project } from '../lib/types'
@@ -88,15 +87,9 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   const [openedEmpty] = useState(() => project.notes.length === 0)
   const [exporting, setExporting] = useState(false)
   const [focus, setFocus] = useState<{ noteId: string; token: number }>()
+  // A new project has no banknotes yet: it opens on the blank canvas, asking nothing, with a tip by the Banknotes list's
+  // + saying to start there (Keller, 10 November; New banknote used to open by itself), until the first one is added
   const isEmpty = project.notes.length === 0
-
-  // A new project has no notes yet, so it opens straight into adding the first one. Opening after mount
-  // rather than on the first render keeps the dialog from dismissing itself during mount.
-  useEffect(() => {
-    if (isEmpty) setAdding(true)
-    // Only on opening the project, not every time the last note is deleted
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id])
 
   // The demo opens playing its playlist, so its banknotes move before anyone knows to tilt them. Leaving it stops
   // playback and goes back to flat, so the next project opens still
@@ -330,22 +323,15 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       onFocusCapture={() => breakHistoryGroup(project.id)}
       onBlurCapture={() => breakHistoryGroup(project.id)}
     >
-      {isEmpty ? (
-        <div className="flex flex-1 items-center justify-center">
-          <Button onClick={() => setAdding(true)}>
-            <Plus />
-            Add a banknote
-          </Button>
-        </div>
-      ) : (
-        <Canvas projectId={project.id} notes={project.notes} selectedId={note?.id} layer={shownLayer} onSelect={selectNote} onSelectLayer={selectLayer} onExitWindows={exitWindows} focus={focus} editingWindows={editingWindows} selectedWindowId={selectedWindowId} onWindowSelect={setSelectedWindowId} onExport={threadNote ? undefined : () => setExporting(true)}
-          placing={placing} onExitPlacing={exitPlacing} onEditThread={threadNote ? undefined : editThread} inStudio={inStudio}
-          onEditWindow={(noteId, windowId) => {
-            selectLayer(noteId, 'thread')
-            setEditingNoteId(noteId)
-            setSelectedWindowId(windowId)
-          }} />
-      )}
+      {/* Empty, the canvas is blank, with nothing to export; it starts afresh with the first banknote, so that one is fitted
+          into view as a project's first banknote always was, however the blank canvas was panned or zoomed */}
+      <Canvas key={isEmpty ? 'blank' : 'notes'} projectId={project.id} notes={project.notes} selectedId={note?.id} layer={shownLayer} onSelect={selectNote} onSelectLayer={selectLayer} onExitWindows={exitWindows} focus={focus} editingWindows={editingWindows} selectedWindowId={selectedWindowId} onWindowSelect={setSelectedWindowId} onExport={threadNote || isEmpty ? undefined : () => setExporting(true)}
+        placing={placing} onExitPlacing={exitPlacing} onEditThread={threadNote ? undefined : editThread} inStudio={inStudio}
+        onEditWindow={(noteId, windowId) => {
+          selectLayer(noteId, 'thread')
+          setEditingNoteId(noteId)
+          setSelectedWindowId(windowId)
+        }} />
 
       {threadNote ? (
         // The canvas stays underneath: it runs playback
@@ -356,7 +342,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
           {/* Front | Back and Rotate left and right, where they can't be missed (Keller); F, Shift+R and R do the same */}
           {!isEmpty && <SideSwitch />}
           <ProjectPanel isDemo={isDemo} project={project} selectedId={note?.id} layer={shownLayer} onSelect={selectFromList} onAdd={() => setAdding(true)} aboveTilt={tiltPad}
-            onAddLayer={addFrom} onRemoveLayer={dropLayer} />
+            addTip={isEmpty && !adding} onAddLayer={addFrom} onRemoveLayer={dropLayer} />
           {!isEmpty && (
             // The timeline is the thread's: its frames show only while the thread itself is picked (Keller, 9 November, as a
             // banknote now holds so many security features); otherwise the bar stays as it is with nothing selected

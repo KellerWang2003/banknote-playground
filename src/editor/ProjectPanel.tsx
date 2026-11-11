@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { IconButton, Panel } from '../components/controls'
 import { CloudStatus } from '../components/CloudStatus'
@@ -87,6 +88,7 @@ export function ProjectPanel({
   layer,
   onSelect,
   onAdd,
+  addTip = false,
   onAddLayer,
   onRemoveLayer,
   aboveTilt = false,
@@ -99,6 +101,8 @@ export function ProjectPanel({
   /** A banknote row picks the banknote itself (no layer, or 'note'), a layer row that layer */
   onSelect: (noteId: string, layer?: Layer) => void
   onAdd: () => void
+  /** A tip beside Add banknote saying to start there, while the project has no banknote (Keller, 10 November) */
+  addTip?: boolean
   onAddLayer: (noteId: string, layer: Feature) => void
   onRemoveLayer: (noteId: string, layer: Feature) => void
   /** The tilt pad sits under the panel, bottom left, so the list stops short of it */
@@ -161,9 +165,20 @@ export function ProjectPanel({
             Banknotes · {project.notes.length}
             <ChevronDown className={cn('size-3.5 transition-transform', !open && '-rotate-90')} />
           </CollapsibleTrigger>
-          <IconButton label="Add banknote" size="icon-xs" onClick={onAdd}>
-            <Plus />
-          </IconButton>
+          <div className="relative flex">
+            <IconButton label="Add banknote" size="icon-xs" onClick={onAdd}>
+              <Plus />
+            </IconButton>
+            {/* Anchored to a box over the + rather than the + itself, which keeps its own tooltip and its click, as the
+                windows tip is */}
+            {addTip && (
+              <Tooltip open>
+                <TooltipTrigger render={<span aria-hidden className="pointer-events-none absolute inset-0" />} />
+                {/* Past the panel's edge, so it sits over the canvas with its arrow at the + */}
+                <TooltipContent side="right" sideOffset={16}>Start by adding a banknote here</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </div>
         <CollapsibleContent className="min-h-0 overflow-y-auto">
           <ul ref={list} className="flex flex-col gap-0.5 px-1.5 pb-1.5">
