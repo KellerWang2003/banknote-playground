@@ -17,6 +17,7 @@ import { bandLook, embossOutset, fromShape, needsShape, paintArcEnCiel, useBandS
 import { arcLight } from '../lib/arcEnCiel'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
+import { LIGHT_PX, grainStyle, lightBox, lightMove, paintPaperLight, usePaperGrain } from '../lib/paper'
 import { type PlacedBox, boxTurn } from '../lib/placed'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { type Layer, extraIdOf, extraView, extrasOf, partLayer } from '../lib/extras'
@@ -403,6 +404,18 @@ export function NoteView({
     const look = canvas && arcEnCiel && bandLook(arcEnCiel, arcShape, tilt, arcLit ? arcLight(arcEnCiel, view, quarter) : undefined)
     if (canvas && look && arcMask?.canvas) paintArcEnCiel(canvas, arcMask.canvas, look)
   }
+  // Realistic's paper (paper.ts): its grain, painted once, and the lamp's glare off it, one small canvas moved to where the
+  // paper mirrors the lamp as the note turns on screen (turning over included) and stretched as seen aslant. The banknote's
+  // own, not again for each further feature drawn alone over it
+  const paperShown = realistic && !only
+  const grain = usePaperGrain(paperShown)
+  const paperLight = useRef<HTMLCanvasElement>(null)
+  const movePaperLight = (view: Tilt2, quarter: Quarter) => {
+    if (paperLight.current) Object.assign(paperLight.current.style, lightMove(note, scale, view, quarter))
+  }
+  useLayoutEffect(() => {
+    if (paperShown && paperLight.current) paintPaperLight(paperLight.current)
+  }, [paperShown])
   const revealOf = (state: LiveState) => reveal ?? watermarkReveal(state.light, { x: state.angleX, y: state.angle })
 
   // Live: write the continuous parts straight onto the elements, after every render and on every tilt change
@@ -431,6 +444,7 @@ export function NoteView({
       const view = { x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }
       const quarter = quarterOf(state.quarterTurns ?? 0)
       if (inkLit) paintInk(view, quarter)
+      movePaperLight(view, quarter)
       // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen; Realistic, its ridges
       // turn from the lamp as the ink does
       paintArc({ x: angleX, y: angle }, view, quarter)
@@ -441,6 +455,7 @@ export function NoteView({
   useLayoutEffect(() => {
     if (live) return
     if (inkLit) paintInk({ x: angleX, y: angle }, 0)
+    movePaperLight({ x: angleX, y: angle }, 0)
     paintArc({ x: angleX, y: angle }, { x: angleX, y: angle }, 0)
   })
   useLayoutEffect(() => {
@@ -529,6 +544,15 @@ export function NoteView({
       {face && <img src={face} alt="" draggable={false} className="absolute inset-0 size-full object-cover" />}
       {/* The design still on its way: the paper shimmers where it will show, under everything drawn over it */}
       {design && face === undefined && <Loading />}
+
+      {/* Realistic's paper (paper.ts), over the design and under every feature, which has its own light: its light cotton
+          grain, fixed to it, and the lamp's glare where the paper mirrors the lamp. Flat on a phone it shows too, following
+          the phone's tilt as the features do */}
+      {grain && <div aria-hidden="true" data-paper-grain="" className="pointer-events-none absolute inset-0" style={grainStyle(grain, scale)} />}
+      {paperShown && (
+        <canvas ref={paperLight} aria-hidden="true" data-paper-light="" width={LIGHT_PX} height={LIGHT_PX} className="pointer-events-none absolute"
+          style={{ ...lightBox(note, scale), willChange: live ? 'transform, opacity' : undefined }} />
+      )}
 
       {watermarkBox && watermark?.imageId && (
         // Light through thinner paper (relief.ts, through its levels), colour-dodged over the design: it only ever

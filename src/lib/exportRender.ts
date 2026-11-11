@@ -14,6 +14,7 @@ import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
 import { type PlacedBox, type Size, rotationOf } from './placed'
 import { inkLight } from './realisticInk'
+import { drawPaper } from './paper'
 import { copyStarts, imageBox } from './artwork'
 import { extraView, extrasOf } from './extras'
 import { type Feature, hasThread } from './layers'
@@ -273,6 +274,9 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     const w = face.naturalWidth * k, h = face.naturalHeight * k
     ctx.drawImage(face, (width - w) / 2, (height - h) / 2, w, h)
   }
+  // Realistic's paper, as NoteView: its grain and the lamp's glare off it, over the design and under every feature, the
+  // glare turning over with the banknote only as it shows turning, in perspective, as realistic ink's lamp does
+  if (options.realistic) drawPaper(ctx, note, scale, withTurn(tilt, options.perspective ? options.turn ?? 0 : 0), options.quarter)
   // Every one of a kind: the first, on the banknote itself, then each further one as its view with its assets
   const each = (feature: Feature) => [
     { note, assets },
