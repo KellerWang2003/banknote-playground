@@ -825,17 +825,21 @@ export function Canvas({
       {current && size && !covered && (
         // The corner bar, built like Thread Studio's top bar: fixed top right, as wide as the properties panel that
         // opens under it, with the zoom controls, then ▶ Demo and Export, in the same place whatever is selected.
-        // Its own pointer events, or the canvas captures the pointer and the buttons never get a click
+        // Export, filled, sits 12 px in from the right edge, as far as − shows in from the left inside its ghost button
+        // (Keller, 11 November: at 6 px the right end looked squeezed). Its own pointer events, or the canvas captures
+        // the pointer and the buttons never get a click
         <div data-corner-bar="" className="absolute top-3 right-3 w-(--panel-w)" onPointerDown={(e) => e.stopPropagation()}>
-          <Panel className="flex h-11 items-center gap-0.5 pr-1.5 pl-1.5">
+          <Panel className="flex h-11 items-center gap-0.5 pr-3 pl-1.5">
             <IconButton className="rounded-lg" label="Zoom out" onClick={() => zoomAround(1 / 1.25, size.width / 2, size.height / 2)}>
               <Minus />
             </IconButton>
-            {/* 100% is about true size, at the screen's 96 px an inch (Keller wanted the readout back on 4 November) */}
+            {/* 100% is about true size, at the screen's 96 px an inch (Keller wanted the readout back on 4 November). 44 px
+                holds 800%, the most it reads, and leaves − and + about as far from it as + is from fit: at 56 px it took
+                the room the bar's right end lacked (Keller, 11 November) */}
             <Button
               variant="ghost"
               size="sm"
-              className="w-14 rounded-lg tabular-nums"
+              className="w-11 rounded-lg px-1 tabular-nums"
               title="Zoom to 100% (about true size)"
               onClick={() => zoomAround(1 / (viewRef.current?.zoom ?? 1), size.width / 2, size.height / 2)}
             >
