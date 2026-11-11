@@ -134,7 +134,7 @@ describe('the unit menu', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'units-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
     const field = (label: string) => screen.getByText(label, { exact: true }).parentElement!.querySelector('input')!
@@ -215,7 +215,7 @@ describe('the unit menu', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'units-watermark-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const demo = useProjects.getState().demoPreview!
     act(() => updateNote(demo.id, demo.notes[0].id, (n) => ({ ...n, watermark: newWatermark(n) })))
@@ -232,7 +232,7 @@ describe('the unit menu', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'units-dialog-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     act(() => setLengthUnit('cm'))
     await user.click(screen.getByRole('button', { name: 'Add banknote', exact: true }))
@@ -322,7 +322,7 @@ describe('a banknote’s size', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'size-limit-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Add banknote', exact: true }))
     const dialog = await screen.findByRole('dialog')
     const width = within(dialog).getByText('Width', { exact: true }).parentElement!.querySelector('input')!

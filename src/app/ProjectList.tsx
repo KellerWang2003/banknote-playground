@@ -38,8 +38,16 @@ import { NoteSkeleton, NoteView } from '../components/NoteView'
 import { createProject } from '../lib/notes'
 import { updateProject, useProjects } from '../lib/store'
 import type { Note, Project } from '../lib/types'
+import { isPhone } from '../lib/demoLink'
 
-const open = (id: string) => (location.hash = `#/p/${id}`)
+/**
+ * A project opens in the editor, or on a phone (a small touch screen) in Demo, as the editor isn't made for one (Keller,
+ * 10 November); an iPad still opens the editor
+ */
+const open = (id: string) => {
+  const { workspace } = useWorkspace.getState()
+  location.hash = isPhone() && workspace ? `#/play/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}` : `#/p/${id}`
+}
 
 const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4'
 
@@ -116,7 +124,7 @@ export function ProjectList() {
                   }}
                 >
                   <Bird />
-                  Demo
+                  Sample project
                 </Button>
                 <Button onClick={() => setCreating(true)}>
                   <Plus />

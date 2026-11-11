@@ -224,7 +224,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'window-editor-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const sections = () => useProjects.getState().demoPreview!.notes[0].thread.windows.sections
@@ -302,7 +302,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'selection-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const demo = useProjects.getState().demoPreview!
     act(() => addNote(demo.id, createNote({ name: 'Other', x: 200, y: 0, widthMm: 100, heightMm: 50, color: '#654321' })))
@@ -364,7 +364,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'rename-feature-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
     const rename = async (row: string, field: string, typed: string) => {
@@ -403,7 +403,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'timeline-thread-only-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     const demo = useProjects.getState().demoPreview!
     act(() => updateNote(demo.id, demo.notes[0].id, (n) => ({ ...n, watermark: { ...newWatermark(n), imageId: 'fixture-watermark' } })))
     const clips = () => document.querySelectorAll('[data-frame-clip]').length
@@ -442,7 +442,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'timeline-fill-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
     const clip = (id: string) => document.querySelector<HTMLElement>(`[data-frame-clip="${id}"]`)!
@@ -522,7 +522,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'timeline-per-note-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const demo = useProjects.getState().demoPreview!
@@ -550,7 +550,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'thread-size-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
 
@@ -580,7 +580,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'panel-lens-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const note = () => useProjects.getState().demoPreview!.notes[0]
@@ -666,7 +666,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'hover-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const demo = useProjects.getState().demoPreview!
     act(() => addNote(demo.id, createNote({ name: 'Other', x: 200, y: 0, widthMm: 100, heightMm: 50, color: '#654321' })))
@@ -724,7 +724,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'pan-zoom-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     // The banknote's place on the canvas, round what turns with it once rotated
     const note = () => document.querySelector('[data-note-body]')!.parentElement!.parentElement as HTMLElement
     const layer = () => note().parentElement as HTMLElement
@@ -765,7 +765,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'per-note-lens-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Duplicate', exact: true }))
     // The copy is selected, its layers open under it
@@ -784,7 +784,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'playback-settings-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Duplicate', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Playback settings', exact: true }))
@@ -816,7 +816,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'flip-move-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Playback settings', exact: true }))
     const dialog = await screen.findByRole('dialog', { name: 'Playback settings' })
@@ -834,7 +834,7 @@ describe('username workspace editor', () => {
     setTiltPadOpen(false)
     localStorage.setItem('of-thread-workspace', 'record-move-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     expect(screen.queryByRole('group', { name: 'Tilt pad' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Playback settings', exact: true }))
@@ -859,7 +859,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'reveal-lane-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     const demo = useProjects.getState().demoPreview!
@@ -891,7 +891,7 @@ describe('username workspace editor', () => {
     render(<TooltipProvider><App /></TooltipProvider>)
     await screen.findByRole('button', { name: 'New project', exact: true })
     expect(screen.queryByText('Demo fixture')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Demo', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Sample project', exact: true }))
     await screen.findByRole('button', { name: 'Exit demo' })
     const name = screen.getByRole('textbox', { name: 'Project name' })
     await user.clear(name)
@@ -901,7 +901,7 @@ describe('username workspace editor', () => {
     await screen.findByRole('button', { name: 'New project', exact: true })
     expect(screen.queryByText('Unsaved demo edit')).toBeNull()
     expect(screen.queryByRole('list')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Demo', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Sample project', exact: true }))
     await screen.findByRole('button', { name: 'Exit demo' })
     expect((screen.getByRole('textbox', { name: 'Project name' }) as HTMLInputElement).value).toBe('Demo fixture')
     expect(screen.queryByRole('button', { name: 'Sign out', exact: true })).toBeNull()
@@ -923,7 +923,7 @@ describe('username workspace editor', () => {
     localStorage.setItem('of-thread-workspace', 'demo-play-test')
     render(<TooltipProvider><App /></TooltipProvider>)
     await screen.findByRole('button', { name: 'New project', exact: true })
-    await user.click(screen.getByRole('button', { name: 'Demo', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Sample project', exact: true }))
     await screen.findByRole('button', { name: 'Exit demo' })
     expect(useTilt.getState().source).toBe('wobble')
     expect(screen.getByRole('button', { name: 'Pause', exact: true })).toBeDefined()
@@ -937,7 +937,7 @@ describe('username workspace editor', () => {
     localStorage.setItem('of-thread-workspace', 'keyboard-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
     await screen.findByRole('button', { name: 'New project', exact: true })
-    await user.click(screen.getByRole('button', { name: 'Demo', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Sample project', exact: true }))
     await screen.findByRole('button', { name: 'Exit demo' })
     // Held down, Space is the hand that pans: playback waits for it to come up
     fireEvent.keyDown(window, { code: 'Space', key: ' ' })
@@ -972,7 +972,7 @@ describe('username workspace editor', () => {
     localStorage.setItem('of-thread-workspace', 'undo-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
     await screen.findByRole('button', { name: 'New project', exact: true })
-    await user.click(screen.getByRole('button', { name: 'Demo', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Sample project', exact: true }))
     await screen.findByRole('button', { name: 'Exit demo' })
     expect((screen.getByRole('button', { name: 'Undo', exact: true }) as HTMLButtonElement).disabled).toBe(true)
     const name = screen.getByRole('textbox', { name: 'Project name' }) as HTMLInputElement
@@ -1002,7 +1002,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'tilt-spring-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const body = () => document.querySelector('[data-note-body]')!
     const target = () => ({ y: useTilt.getState().target, x: useTilt.getState().targetX })
@@ -1066,7 +1066,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'canvas-navigation-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const body = () => document.querySelector('[data-note-body]')!
     // The banknote's place on the canvas, round what turns with it once rotated
@@ -1143,7 +1143,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'watermark-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const placing = () => screen.queryByRole('group', { name: 'Place watermark' })
     const watermark = () => useProjects.getState().demoPreview!.notes[0].watermark
@@ -1264,7 +1264,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'back-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const demo = useProjects.getState().demoPreview!
     const note = () => useProjects.getState().demoPreview!.notes[0]
@@ -1350,7 +1350,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'rotate-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const demo = useProjects.getState().demoPreview!
     const note = () => useProjects.getState().demoPreview!.notes[0]
@@ -1434,7 +1434,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'watermark-remove-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     await user.click(addFeature())
     await user.click(await screen.findByRole('menuitem', { name: /^Watermark/ }))
@@ -1475,7 +1475,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'magnetic-ink-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const placing = () => screen.queryByRole('group', { name: 'Place magnetic ink' })
     const ink = () => useProjects.getState().demoPreview!.notes[0].magneticInk
@@ -1571,7 +1571,7 @@ describe('username workspace editor', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'magnetic-ink-remove-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const notes = () => useProjects.getState().demoPreview!.notes
     await user.click(addFeature())

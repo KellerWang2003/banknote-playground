@@ -70,13 +70,16 @@ export function EditorSkeleton({ isDemo = false }: { isDemo?: boolean }) {
         </ul>
       </Panel>
 
-      {/* Top right: the corner bar, zoom on its left, Export on its right */}
+      {/* Top right: the corner bar, zoom on its left, ▶ Demo and Export on its right */}
       <Panel className="absolute top-3 right-3 flex h-11 w-(--panel-w) items-center gap-3 px-3">
         <Skeleton className="size-4 rounded" />
         <Skeleton className="h-3.5 w-9 rounded-sm" />
         <Skeleton className="size-4 rounded" />
         <Skeleton className="size-4 rounded" />
-        <Skeleton className="ml-auto -mr-1.5 h-7 w-[78px] rounded-lg" />
+        <div className="ml-auto -mr-1.5 flex items-center gap-1">
+          <Skeleton className="size-7 rounded-lg" />
+          <Skeleton className="h-7 w-[78px] rounded-lg" />
+        </div>
       </Panel>
 
       {/* Bottom left: the tilt card, its pad as it was left, over the playback bar */}

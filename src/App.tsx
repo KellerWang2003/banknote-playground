@@ -10,6 +10,8 @@ import { openWorkspace, closeWorkspace, useWorkspace, watchWorkspace, retrySync,
 import { readWorkspaceName, WORKSPACE_EVENT } from './cloud/identity'
 import { useNotice, runAction } from './cloud/notices'
 import { ConflictDialog } from './components/CloudStatus'
+import { DemoPage } from './app/DemoPage'
+import { readDemoLink } from './lib/demoLink'
 
 function useHash() {
   const [hash, setHash] = useState(location.hash)
@@ -50,6 +52,7 @@ function Workspace({ name }: { name: string }) {
 }
 
 function App() {
+  const hash = useHash()
   const [name, setName] = useState(readWorkspaceName)
   const notice = useNotice((s) => s.message)
   useEffect(() => {
@@ -60,8 +63,11 @@ function App() {
   useEffect(() => { useNotice.setState({ message: '' }) }, [name])
 
   if (!cloudConfigured) return <div className="flex h-full items-center justify-center text-sm" role="alert">Cloud connection is not configured.</div>
+  // A Demo link (a phone, from Demo's QR code) opens its banknote ahead of the username screen, reading the workspace it
+  // names without opening it
+  const play = readDemoLink(hash)
   return <>
-    {name ? <Workspace key={name} name={name} /> : <OpenWorkspace />}
+    {play ? <DemoPage key={`${play.workspace}/${play.projectId}`} {...play} /> : name ? <Workspace key={name} name={name} /> : <OpenWorkspace />}
     {notice && <div role="alert" className="fixed top-3 left-1/2 z-[100] flex max-w-lg -translate-x-1/2 items-center gap-3 rounded-lg border bg-background p-3 text-sm shadow-menu">
       <span>{notice}</span>
       <Button variant="ghost" size="sm" onClick={() => useNotice.setState({ message: '' })}>Dismiss</Button>

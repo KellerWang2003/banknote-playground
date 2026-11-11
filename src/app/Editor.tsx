@@ -19,6 +19,9 @@ import { addFeature, layerOf, removeFeature, removeLayer, type Layer } from '../
 import { useFeatureClipboard } from '../editor/featureClipboard'
 import { pressSpace, releaseSpace, useSpaceHand } from '../editor/spaceHand'
 import { hasThread, isPlaced, onFront, type Feature, type PlacedLayer } from '../lib/layers'
+import { useWorkspace } from '../cloud/workspace'
+import { DemoView } from './DemoView'
+import { demoLink } from '../lib/demoLink'
 
 /** Keys typed into these, or pressed while a dialog or menu is open, are not shortcuts */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
@@ -26,7 +29,7 @@ const POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="list
 
 /**
  * A full-screen canvas with floating panels: project and banknotes top left, the frame timeline along
- * the bottom, and the selected banknote's selected layer on the right. The thread editor opens over it all.
+ * the bottom, and the selected banknote's selected layer on the right. The thread editor and Demo open over it all.
  */
 export function Editor({ project, isDemo = false }: { project: Project; isDemo?: boolean }) {
   // Banknotes whose images came before frames kept their proportions are brought up to date once
@@ -79,6 +82,20 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     setThreadNoteId(noteId)
   }
   const closeThread = () => setThreadNoteId(undefined)
+  // Demo, over the editor as Thread Studio is (Keller, 10 November): the banknote it shows, picked in the editor or the
+  // first, from ▶ Demo in the corner bar, which is also the click full screen needs. Esc leaves full screen, then Demo
+  const [demoNoteId, setDemoNoteId] = useState<string>()
+  const demo = demoNoteId !== undefined
+  const workspace = useWorkspace((s) => s.workspace)
+  const openDemo = () => {
+    setDemoNoteId(note?.id ?? project.notes[0]?.id)
+    // The whole page, so what opens over Demo (its picker's list, tooltips) shows too
+    document.documentElement.requestFullscreen?.().catch(() => {})
+  }
+  const closeDemo = () => {
+    setDemoNoteId(undefined)
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
+  }
   const [adding, setAdding] = useState(false)
   // A new project's first thread opens on its tab, with a tip by Windows saying they can be added there, since threads
   // start without them (Keller); it goes at the next click or key. Banknotes come without a thread (Keller, 4
@@ -326,6 +343,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       {/* Empty, the canvas is blank, with nothing to export; it starts afresh with the first banknote, so that one is fitted
           into view as a project's first banknote always was, however the blank canvas was panned or zoomed */}
       <Canvas key={isEmpty ? 'blank' : 'notes'} projectId={project.id} notes={project.notes} selectedId={note?.id} layer={shownLayer} onSelect={selectNote} onSelectLayer={selectLayer} onExitWindows={exitWindows} focus={focus} editingWindows={editingWindows} selectedWindowId={selectedWindowId} onWindowSelect={setSelectedWindowId} onExport={threadNote || isEmpty ? undefined : () => setExporting(true)}
+        onDemo={threadNote || demo || isEmpty ? undefined : openDemo} covered={demo}
         placing={placing} onExitPlacing={exitPlacing} onEditThread={threadNote ? undefined : editThread} inStudio={inStudio}
         onAddFeature={threadNote ? undefined : addFrom}
         onEditWindow={(noteId, windowId) => {
@@ -334,7 +352,12 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
           setSelectedWindowId(windowId)
         }} />
 
-      {threadNote ? (
+      {demo ? (
+        // The canvas stays underneath, not drawn: it runs the tilt loop. The sample project isn't in the cloud, so a phone
+        // couldn't open it
+        <DemoView project={project} noteId={demoNoteId} onPick={setDemoNoteId} onClose={closeDemo}
+          phoneLink={!isDemo && workspace ? demoLink(workspace, project.id, demoNoteId) : undefined} />
+      ) : threadNote ? (
         // The canvas stays underneath: it runs playback
         <ThreadEditor key={threadNote.id} project={project} note={threadNote} onClose={closeThread} />
       ) : (

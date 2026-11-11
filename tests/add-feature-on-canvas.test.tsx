@@ -192,7 +192,7 @@ describe('adding a security feature from the canvas', () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'canvas-plus-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
-    await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const picked = () => screen.queryByRole('heading', { level: 2 })?.textContent
     const note = () => useProjects.getState().demoPreview!.notes[0]

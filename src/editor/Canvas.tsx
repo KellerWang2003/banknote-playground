@@ -1,5 +1,5 @@
 import { runAction } from '../cloud/notices'
-import { Maximize, Minus, Plus, Share } from 'lucide-react'
+import { Maximize, Minus, Play, Plus, Share } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -38,8 +38,8 @@ const PX_PER_MM = 96 / 25.4
 /** Far enough out to fit a few banknotes of the largest size (2 m) side by side */
 const MIN_ZOOM = 0.02
 const MAX_ZOOM = 8
-/** Room kept clear of the floating panels when fitting notes into view: the Banknotes panel is 224 px wide */
-const FIT = { left: 260, right: 284, top: 48, bottom: 128 }
+/** Room kept clear of the floating panels when fitting notes into view: the Banknotes panel is 224 px wide, the right one 280 */
+const FIT = { left: 260, right: 316, top: 48, bottom: 128 }
 /** How close, in screen px, a moving banknote's edge or centre must come to another's to snap to it */
 const SNAP_PX = 6
 /** How long a pan or zoom pauses before banknotes are redrawn at the new view */
@@ -133,6 +133,8 @@ export function Canvas({
   placing,
   onExitPlacing,
   onExport,
+  onDemo,
+  covered = false,
   onEditWindow,
   onEditThread,
   onAddFeature,
@@ -158,6 +160,13 @@ export function Canvas({
   onExitPlacing?: () => void
   /** Export, at the end of the corner bar after the zoom controls; left out while the thread editor is open */
   onExport?: () => void
+  /** ▶ Demo, left of Export (Keller, 10 November: a "play button" secondary button); left out while the thread editor is open */
+  onDemo?: () => void
+  /**
+   * Demo is open over the canvas: its banknotes and corner bar aren't drawn, so nothing is drawn twice, while it stays,
+   * as it runs the tilt loop
+   */
+  covered?: boolean
   /** A click on a thread window opens it for editing */
   onEditWindow?: (noteId: string, windowId: string) => void
   /** A double-click on a thread, or the Edit thread button under the picked one, opens the thread editor; left out while it is open */
@@ -647,7 +656,7 @@ export function Canvas({
     >
       {/* Everything drawn in canvas space, so a live pan or zoom can move it as one layer */}
       <div ref={content} className={cn('absolute top-0 left-0 origin-top-left', grab === 'grabbing' ? '**:cursor-grabbing!' : grab === 'grab' && '**:cursor-grab!')}>
-      {current &&
+      {current && !covered &&
         notes.map((note) => {
           const isSelected = note.id === selectedId
           const editingThis = isSelected && editingWindows
@@ -767,7 +776,7 @@ export function Canvas({
           list's Add menu. Drawn after every banknote, so none covers it, over the canvas and never in the banknote, so it is
           never exported: upright under the middle of the box the banknote shows, gliding there as it turns, as its name does
           (in shares of the banknote, so a zoom doesn't set it gliding), and as big at any zoom */}
-      {current && selected && onAddFeature && addUnder !== undefined && (
+      {current && !covered && selected && onAddFeature && addUnder !== undefined && (
         <div className="pointer-events-none absolute"
           style={{ left: current.x + selected.x * scale, top: current.y + selected.y * scale, width: selected.widthMm * scale, height: selected.heightMm * scale }}>
           <div data-keep-size="" className="absolute left-1/2 origin-top-left transition-[top] ease-in-out motion-reduce:transition-none"
@@ -780,9 +789,9 @@ export function Canvas({
       )}
       </div>
 
-      {current && size && (
+      {current && size && !covered && (
         // The corner bar, built like Thread Studio's top bar: fixed top right, as wide as the properties panel that
-        // opens under it, with the zoom controls, then Export, in the same place whatever is selected.
+        // opens under it, with the zoom controls, then ▶ Demo and Export, in the same place whatever is selected.
         // Its own pointer events, or the canvas captures the pointer and the buttons never get a click
         <div data-corner-bar="" className="absolute top-3 right-3 w-(--panel-w)" onPointerDown={(e) => e.stopPropagation()}>
           <Panel className="flex h-11 items-center gap-0.5 pr-1.5 pl-1.5">
@@ -805,11 +814,21 @@ export function Canvas({
             <IconButton className="rounded-lg" label="Fit all notes" onClick={() => jumpTo(fitView(notes, size, quarter))}>
               <Maximize />
             </IconButton>
-            {onExport && (
-              <Button size="sm" className="ml-auto" onClick={onExport}>
-                <Share />
-                Export
-              </Button>
+            {(onDemo || onExport) && (
+              <div className="ml-auto flex items-center gap-1">
+                {/* Its icon alone, Demo in its tooltip, as Figma's ▶ (there is just room for it at the bar's narrowest) */}
+                {onDemo && (
+                  <IconButton variant="outline" className="rounded-lg" label="Demo" onClick={onDemo}>
+                    <Play />
+                  </IconButton>
+                )}
+                {onExport && (
+                  <Button size="sm" onClick={onExport}>
+                    <Share />
+                    Export
+                  </Button>
+                )}
+              </div>
             )}
           </Panel>
         </div>

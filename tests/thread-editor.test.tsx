@@ -77,7 +77,7 @@ async function openDemo(workspace: string) {
   const user = userEvent.setup()
   localStorage.setItem('of-thread-workspace', workspace)
   render(<TooltipProvider><App /></TooltipProvider>)
-  await user.click(await screen.findByRole('button', { name: 'Demo', exact: true }))
+  await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
   await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
   // The banknote's row shows the banknote itself; the way into Thread Studio shows once its Security thread is picked
   await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))

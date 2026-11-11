@@ -32,6 +32,11 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
+  // Demo on a phone while developing: the phone needs https for its motion, so the dev server is opened through a
+  // Cloudflare quick tunnel (`cloudflared tunnel --url http://localhost:5174`), whose address Vite would otherwise refuse
+  server: {
+    allowedHosts: ['.trycloudflare.com'],
+  },
   build: {
     rolldownOptions: {
       input: {

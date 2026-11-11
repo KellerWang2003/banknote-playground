@@ -5,8 +5,11 @@ import { TILT_LIMIT, clamp } from '../lib/frames'
 import { LIGHT_RAMP_SECONDS } from '../lib/light'
 import { flipsBetween, lightAt, tiltAt, type PlaybackPlan } from '../lib/moves'
 
-/** drag springs back on release, slider scrubs within one cycle, hold stays at a set angle */
-export type TiltSource = 'drag' | 'wobble' | 'slider' | 'hold'
+/**
+ * drag springs back on release, slider scrubs within one cycle, hold stays at a set angle, device is a phone's own tilt in
+ * Demo (`useDeviceTilt`), followed as it comes
+ */
+export type TiltSource = 'drag' | 'wobble' | 'slider' | 'hold' | 'device'
 
 interface TiltState {
   source: TiltSource
@@ -156,8 +159,9 @@ export function togglePlayback() {
 const approach = (value: number, target: number, step: number) => (value < target ? Math.min(target, value + step) : Math.max(target, value - step))
 
 /**
- * Manual tilt uses a critically damped spring. Playback follows the project's moves exactly (no spring), from
- * the start each time it begins; a change to the plan while playing keeps the same share of the way through.
+ * Manual tilt uses a critically damped spring; a phone's own tilt in Demo is followed exactly. Playback follows the
+ * project's moves exactly (no spring), from the start each time it begins; a change to the plan while playing keeps the
+ * same share of the way through.
  * The light fades towards the switch at a steady rate; while playing it is also at least what the moves say, and
  * on pausing it fades from there back to the switch. The banknotes turn over towards the turn-over switch the same way,
  * and each Flip move playback comes to flips that switch, as F does, unless `turnsOver` is off (in Thread Studio, where
@@ -205,6 +209,16 @@ export function useTiltLoop(plan: PlaybackPlan, limit = TILT_LIMIT, turnsOver = 
         if (target !== s.angle || targetX !== s.angleX || target !== s.target || targetX !== s.targetX || light !== s.light) {
           useTilt.setState({ angle: target, target, angleX: targetX, targetX, light })
         }
+      } else if (s.source === 'device') {
+        // A phone's own tilt in Demo, steadied already (`useDeviceTilt`): followed exactly, as playback is, with no spring
+        // to lag behind the hand
+        const light = approach(s.light, lightTarget(s), fade)
+        ramp = light
+        velocity = 0
+        velocityX = 0
+        const angle = clamp(s.target, -limit, limit)
+        const angleX = clamp(s.targetX, -limit, limit)
+        if (angle !== s.angle || angleX !== s.angleX || light !== s.light) useTilt.setState({ angle, angleX, light })
       } else {
         const light = approach(s.light, lightTarget(s), fade)
         ramp = light

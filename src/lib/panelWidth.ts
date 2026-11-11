@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 
-/** The right-hand control panel's width in px: drag its left edge to change it, remembered per browser */
-export const PANEL_WIDTH = { min: 248, max: 640, initial: 248 }
+/**
+ * The right-hand control panel's width in px: drag its left edge to change it, remembered per browser. At least 280 (248
+ * until 10 November), so the corner bar over it has room for ▶ Demo beside Export
+ */
+export const PANEL_WIDTH = { min: 280, max: 640, initial: 280 }
 const KEY = 'of-playground.panel-width'
 
 function load() {

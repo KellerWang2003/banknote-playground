@@ -277,6 +277,7 @@ export function NoteView({
   angleX = 0,
   live = false,
   perspective = false,
+  flat = false,
   sheen = false,
   realistic = false,
   reveal,
@@ -294,6 +295,12 @@ export function NoteView({
   /** Follows the shared tilt (`useTilt`) itself, re-rendering only when the frame shown changes */
   live?: boolean
   perspective?: boolean
+  /**
+   * With `perspective`, keeps the banknote flat on the screen, without the light and shade of turning, while it still turns
+   * over in 3D and its security features change with the tilt: Demo on a phone, where the phone itself is what tilts
+   * (`DemoView`)
+   */
+  flat?: boolean
   sheen?: boolean
   /**
    * Realistic, the canvas's switch beside the lamp (`src/lib/realistic.ts`): magnetic ink lit as metal flakes and
@@ -384,8 +391,10 @@ export function NoteView({
       // The frames follow the timeline once it is scrubbed; the turn, shade and watermark follow the banknote's tilt
       const frameTilt = framesTiltOf(state, note.id)
       const blends = blendsAt(note, frameTilt.y, frameTilt.x)
-      const style = tiltStyle(angle, angleX, blends[0] ?? 0, depth, revealOf(state), inkBar, turnDeg(state.turn))
-      element.style.transform = perspective ? style.rotate : ''
+      const turn = turnDeg(state.turn)
+      const style = tiltStyle(angle, angleX, blends[0] ?? 0, depth, revealOf(state), inkBar, turn)
+      // Flat, only turning over turns it: the phone it shows on is what tilts
+      element.style.transform = !perspective ? '' : !flat ? style.rotate : turn ? `rotateY(${turn}deg)` : ''
       for (const part of element.querySelectorAll<HTMLElement>('[data-tilt]')) {
         const section = part.dataset.section
         Object.assign(part.style, section === undefined ? style.parts[part.dataset.tilt as TiltPart] : { opacity: blends[Number(section)] ?? 0 })
@@ -459,7 +468,7 @@ export function NoteView({
         width: mm(note.widthMm),
         height: mm(note.heightMm),
         backgroundColor: PAPER,
-        transform: perspective && still ? still.rotate : undefined,
+        transform: perspective && still && !flat ? still.rotate : undefined,
         willChange: live && perspective ? 'transform' : undefined,
       }}
     >
@@ -564,8 +573,9 @@ export function NoteView({
         </div>
       )}
 
-      {perspective && (
-        // Light and shade as the note turns: they fade in with opacity rather than redrawing a gradient each frame
+      {perspective && !flat && (
+        // Light and shade as the note turns: they fade in with opacity rather than redrawing a gradient each frame. Not
+        // while it lies flat on a phone, where the room's own light falls on the phone as it turns
         <>
           {/* Turning sideways, the edge turning away darkens a little and the near edge catches the light */}
           <div className="pointer-events-none absolute inset-0" {...part('shade-right', { background: `linear-gradient(90deg, ${SIDE_LIGHT}, ${SIDE_DARK})` })} />
