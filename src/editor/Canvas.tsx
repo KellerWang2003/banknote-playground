@@ -18,10 +18,11 @@ import { updateNote } from '../lib/store'
 import type { Note } from '../lib/types'
 import { lengthIn, useLengthUnit } from '../lib/units'
 import { mmSpot, withPoint } from '../lib/arcEnCiel'
-import { isPlaced, type PlacedLayer } from '../lib/layers'
+import { type Feature, isPlaced, type PlacedLayer } from '../lib/layers'
 import { type PlacedBox, moveBox } from '../lib/placed'
 import { type Quarter, ROTATE_SECONDS, noteBox, onItsSide, quarterOf, turnedCorner, unturn, unturnedPoint } from '../lib/rotate'
 import { setTilt, showsBack, springToFlat, useTilt, useTiltLoop } from '../tilt/tilt'
+import { AddFeatureMenu } from './AddFeatureMenu'
 import { EdgeMarks, NeighbourRing } from './ContinuousView'
 import { addImageFrames, type NoteRef } from './frameActions'
 import { ArcHandles, RidgeDial } from './ArcHandles'
@@ -104,6 +105,15 @@ function fitView(notes: Note[], size: { width: number; height: number }, quarter
 }
 
 /**
+ * Whether the continuous check shows round a banknote: around an uploaded design on the side showing (turned over, the
+ * back's), while the banknote itself is picked
+ */
+function checksContinuous(note: Note, back: boolean, picked: Layer | undefined) {
+  const face = designFace(note, back ? 'back' : 'front')
+  return picked === 'note' && face.background === 'image' && !!face.faceImageId && !!note.continuous
+}
+
+/**
  * Every note of the project on one zoomable canvas, handled as Figma's (Keller): scroll, middle or right drag, or drag
  * with Space held to pan, pinch or ⌘/Ctrl-scroll to zoom, drag a note's label to move it, its thread, watermark or
  * magnetic ink to move that across it, and the note itself or the empty canvas to tilt every note.
@@ -125,6 +135,7 @@ export function Canvas({
   onExport,
   onEditWindow,
   onEditThread,
+  onAddFeature,
   inStudio = false,
 }: {
   projectId: string
@@ -151,6 +162,8 @@ export function Canvas({
   onEditWindow?: (noteId: string, windowId: string) => void
   /** A double-click on a thread, or the Edit thread button under the picked one, opens the thread editor; left out while it is open */
   onEditThread?: (noteId: string) => void
+  /** Adds a security feature from the + under the selected banknote, as the Add menu in the Banknotes list does; left out while the thread editor is open */
+  onAddFeature?: (noteId: string, feature: Feature) => void
   /** The thread editor is open over the canvas: the thread is only on the front, so playback's Flip moves wait flat, as F does nothing there */
   inStudio?: boolean
 }) {
@@ -403,6 +416,13 @@ export function Canvas({
     return () => window.removeEventListener('blur', onBlur)
   }, [])
 
+  /**
+   * A press on the canvas itself. A menu or tooltip opened from it (the + under the selected banknote's) is drawn elsewhere
+   * on the page, in a portal, though React hands its presses up through the canvas: a pick in the menu, or the press that
+   * closes it, would otherwise tilt the banknotes, or clear the selection, and take the pointer from the menu
+   */
+  const ownPress = (e: React.PointerEvent<HTMLDivElement>) => e.currentTarget.contains(e.target as Node)
+
   const noteAt = (target: EventTarget, attribute: 'data-note-label' | 'data-note-body') =>
     (target as HTMLElement).closest(`[${attribute}]`)?.getAttribute(attribute) ?? undefined
 
@@ -435,6 +455,13 @@ export function Canvas({
   const quiet = source === 'wobble' || activeMode === 'tilt' || activeMode === 'move'
   // The hand shows over everything a press would pan from, the notes' own cursors included
   const grab = activeMode === 'pan' ? 'grabbing' : hand ? 'grab' : undefined
+  // The + under the selected banknote (Keller, 10 November) goes with its other marks of selection while banknotes play or
+  // are dragged, and makes way while windows are edited, a layer placed or the continuous check shows. Where it hangs: the
+  // bottom of the box the banknote shows, rotated or not, as a share of its height as it lies upright
+  const shown = selected && noteBox(selected, quarter)
+  const addUnder = selected && shown && onAddFeature && !quiet && !editingWindows && !placing && !checksContinuous(selected, back, layer)
+    ? (shown.y + shown.height - selected.y) / selected.heightMm
+    : undefined
 
   return (
     <div
@@ -458,7 +485,7 @@ export function Canvas({
       onPointerDownCapture={(e) => {
         const v = viewRef.current
         const pans = e.button === 1 || e.button === 2 || (e.button === 0 && useSpaceHand.getState().held)
-        if (!v || !pans || (e.target as HTMLElement).closest('[data-corner-bar]')) return
+        if (!v || !pans || (e.target as HTMLElement).closest('[data-corner-bar]') || !ownPress(e)) return
         e.stopPropagation()
         startGesture(e, v)
         gesture.current = { mode: 'pan', startX: e.clientX, startY: e.clientY, view: v }
@@ -470,7 +497,7 @@ export function Canvas({
       onPointerDown={(e) => {
         const v = viewRef.current
         // Only the left button gets here: the others pan (above)
-        if (!v || e.button !== 0) return
+        if (!v || e.button !== 0 || !ownPress(e)) return
         const labelId = noteAt(e.target, 'data-note-label')
         const bodyId = noteAt(e.target, 'data-note-body')
         const note = notes.find((n) => n.id === (labelId ?? bodyId))
@@ -635,7 +662,7 @@ export function Canvas({
           // banknote has no outline, label or shadow, so nothing comes between it and its neighbours (Keller). It checks
           // the side showing: turned over, the back's design
           const face = designFace(note, back ? 'back' : 'front')
-          const checking = picked === 'note' && face.background === 'image' && !!face.faceImageId && !!note.continuous
+          const checking = checksContinuous(note, back, picked)
           // Where the banknote's top-left corner shows once rotated, for its name
           const corner = turnedCorner(note.widthMm, note.heightMm, quarter)
           return (
@@ -735,6 +762,22 @@ export function Canvas({
             }
           />
         ))}
+
+      {/* A + under the selected banknote that adds a security feature from the canvas (Keller, 10 November), the Banknotes
+          list's Add menu. Drawn after every banknote, so none covers it, over the canvas and never in the banknote, so it is
+          never exported: upright under the middle of the box the banknote shows, gliding there as it turns, as its name does
+          (in shares of the banknote, so a zoom doesn't set it gliding), and as big at any zoom */}
+      {current && selected && onAddFeature && addUnder !== undefined && (
+        <div className="pointer-events-none absolute"
+          style={{ left: current.x + selected.x * scale, top: current.y + selected.y * scale, width: selected.widthMm * scale, height: selected.heightMm * scale }}>
+          <div data-keep-size="" className="absolute left-1/2 origin-top-left transition-[top] ease-in-out motion-reduce:transition-none"
+            style={{ top: `${addUnder * 100}%`, transitionDuration: `${ROTATE_SECONDS}s` }}>
+            <div className="pointer-events-auto absolute top-3 left-0 -translate-x-1/2">
+              <AddFeatureMenu note={selected} onCanvas onAdd={(feature) => onAddFeature(selected.id, feature)} />
+            </div>
+          </div>
+        </div>
+      )}
       </div>
 
       {current && size && (

@@ -327,6 +327,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
           into view as a project's first banknote always was, however the blank canvas was panned or zoomed */}
       <Canvas key={isEmpty ? 'blank' : 'notes'} projectId={project.id} notes={project.notes} selectedId={note?.id} layer={shownLayer} onSelect={selectNote} onSelectLayer={selectLayer} onExitWindows={exitWindows} focus={focus} editingWindows={editingWindows} selectedWindowId={selectedWindowId} onWindowSelect={setSelectedWindowId} onExport={threadNote || isEmpty ? undefined : () => setExporting(true)}
         placing={placing} onExitPlacing={exitPlacing} onEditThread={threadNote ? undefined : editThread} inStudio={inStudio}
+        onAddFeature={threadNote ? undefined : addFrom}
         onEditWindow={(noteId, windowId) => {
           selectLayer(noteId, 'thread')
           setEditingNoteId(noteId)

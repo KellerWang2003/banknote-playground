@@ -12,22 +12,51 @@ export const FEATURE_ICONS: Record<Feature, ReactNode> = { thread: <Columns2 />,
 
 /**
  * The one way to add a banknote's security features (Keller, 4 November): a + whose menu lists every feature the
- * banknote doesn't have yet, each with its icon and a line on what it is. The banknote's row in the Banknotes list and
- * the end of the right panel's tabs both have it, and so does the selected banknote under its features, as a row
- * (`row`, Keller: a clearer way to add them), and it goes once the banknote has them all.
+ * banknote doesn't have yet, each with its icon and a line on what it is. The banknote's row in the Banknotes list has
+ * it, and so does the selected banknote under its features, as a row (`row`, Keller: a clearer way to add them), and on
+ * the canvas, under the selected banknote (`onCanvas`), and it goes once the banknote has them all.
  */
-export function AddFeatureMenu({ note, onAdd, align = 'start', row }: {
+export function AddFeatureMenu({ note, onAdd, align = 'start', row, onCanvas }: {
   note: Note
   onAdd: (feature: Feature) => void
   align?: 'start' | 'end'
   /** As a row, "+ Add security feature", under the selected banknote's features; on its grey, its hover darkens it */
   row?: { onBlock: boolean }
+  /**
+   * As the round + under the selected banknote on the canvas (Keller, 10 November), built as the + that uploads a design
+   * there is, its menu opening under it
+   */
+  onCanvas?: boolean
 }) {
   const addable = FEATURES.filter((f) => !hasFeature(note, f))
   if (addable.length === 0) return null
   return (
     <DropdownMenu>
-      {row ? (
+      {onCanvas ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="Add security feature"
+                    data-add-feature=""
+                    className="size-10 rounded-full bg-background/95 shadow-sm"
+                    // Its own press: the canvas would take it for a tilt, or a click clearing the selection
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                  />
+                }
+              />
+            }
+          >
+            <Plus className="size-5" />
+          </TooltipTrigger>
+          <TooltipContent>Add security feature</TooltipContent>
+        </Tooltip>
+      ) : row ? (
         <DropdownMenuTrigger
           render={
             <button
@@ -50,7 +79,7 @@ export function AddFeatureMenu({ note, onAdd, align = 'start', row }: {
           <TooltipContent>Add security feature</TooltipContent>
         </Tooltip>
       )}
-      <DropdownMenuContent className="w-60" align={align}>
+      <DropdownMenuContent className="w-60" align={onCanvas ? 'center' : align}>
         {addable.map((f) => (
           <DropdownMenuItem key={f} className="items-start py-1.5" onClick={() => onAdd(f)}>
             <span className="mt-0.5 flex">{FEATURE_ICONS[f]}</span>
