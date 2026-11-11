@@ -21,7 +21,8 @@ import { runAction, reportError } from '../cloud/notices'
 import { NoteView } from '../components/NoteView'
 import { duplicateNote, moveNote, removeNote, updateNote, updateProject, undoProject, redoProject } from '../lib/store'
 import { useHistory } from '../lib/history'
-import { FEATURES, FEATURE_NAMES, PLACED_LAYERS, featureName, hasFeature, hasThread, type Feature } from '../lib/layers'
+import { featureParts } from '../lib/extras'
+import { FEATURE_NAMES, featureName, type Feature } from '../lib/layers'
 import { useTiltPad } from '../lib/tiltPad'
 import type { Note, Project } from '../lib/types'
 import { AddFeatureMenu, FEATURE_ICONS } from './AddFeatureMenu'
@@ -74,9 +75,9 @@ function shiftOf(drag: NoteDrag, i: number) {
 
 /**
  * Top-left: back to the projects, the project's name, and its banknotes as a collapsible list. Each banknote opens
- * to its security features (its thread, watermark and magnetic ink, as it has them: each added from the Add menu, on
- * the + on its row or, for the selected one, the "Add security feature" row under its features, and removed from the
- * bin on its own row); the selected one opens by itself. A grip at the left of a banknote's row, on hover, drags it up
+ * to its security features (its threads, watermarks, Arc-en-Ciels and magnetic inks, as many of each as it has, each on
+ * a row of its own: added from the Add menu, on the + on its row or, for the selected one, the "Add security feature" row
+ * under its features, and removed from the bin on its own row); the selected one opens by itself. A grip at the left of a banknote's row, on hover, drags it up
  * or down the list (Keller, 9 November: "should be able to re-arrange these"), its features with it, the others making
  * room, and it lands where it is let go, one undo step saved with the project; with the grip focused, the up and down
  * arrow keys move it too.
@@ -103,8 +104,9 @@ export function ProjectPanel({
   onAdd: () => void
   /** A tip beside Add banknote saying to start there, while the project has no banknote (Keller, 10 November) */
   addTip?: boolean
-  onAddLayer: (noteId: string, layer: Feature) => void
-  onRemoveLayer: (noteId: string, layer: Feature) => void
+  onAddLayer: (noteId: string, feature: Feature) => void
+  /** Removes one of the banknote's features, by its layer: the first of its kind or a further one */
+  onRemoveLayer: (noteId: string, layer: Layer) => void
   /** The tilt pad sits under the panel, bottom left, so the list stops short of it */
   aboveTilt?: boolean
 }) {
@@ -187,8 +189,8 @@ export function ProjectPanel({
               // The banknote itself picked: its grey runs on behind its features, as they are part of it (Keller)
               const picked = selected && layer === 'note'
               const expanded = isOpen(note.id)
-              // The + lists only the features the banknote doesn't have yet, and goes once it has them all
-              const canAdd = FEATURES.some((f) => !hasFeature(note, f))
+              // Every feature it has, as many of each kind as it has, each as its own code sees it (extras.ts)
+              const parts = featureParts(note)
               const dragged = dragging?.id === note.id
               const shift = dragging ? shiftOf(dragging, index) : 0
               return (
@@ -209,7 +211,7 @@ export function ProjectPanel({
                   onDoubleClick={() => setRenaming(note.id)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg py-1 pr-1.5 pl-6 text-left transition-colors group-has-[[data-popup-open]]:pr-20',
-                    canAdd ? 'group-hover:pr-20' : 'group-hover:pr-14',
+                    'group-hover:pr-20',
                     !picked && 'hover:bg-muted/50',
                   )}
                 >
@@ -289,7 +291,7 @@ export function ProjectPanel({
                 )}
                 {renaming !== note.id && (
                   <div className="absolute inset-y-0 right-1 hidden items-center group-hover:flex has-[[data-popup-open]]:flex">
-                    <AddFeatureMenu note={note} onAdd={(feature) => onAddLayer(note.id, feature)} />
+                    <AddFeatureMenu onAdd={(feature) => onAddLayer(note.id, feature)} />
                     <IconButton
                       label="Duplicate"
                       size="icon-xs"
@@ -308,39 +310,28 @@ export function ProjectPanel({
                   </div>
                 )}
                 </div>
-                {expanded && FEATURES.some((f) => hasFeature(note, f)) && (
+                {expanded && parts.length > 0 && (
                   <ul aria-label={`Layers of ${note.name}`} className="flex flex-col gap-0.5 pt-0.5">
-                    {hasThread(note) && (
+                    {/* A further one is renamed through its view, as its own code sees it (extras.ts) */}
+                    {parts.map((part) => (
                       <LayerRow
-                        icon={note.thread.direction === 'vertical' ? <Columns2 /> : <Rows2 />}
-                        name={featureName(note, 'thread')}
-                        kind={FEATURE_NAMES.thread}
-                        selected={selected && layer === 'thread'}
+                        key={part.layer}
+                        icon={part.feature === 'thread' ? (part.note.thread.direction === 'vertical' ? <Columns2 /> : <Rows2 />) : FEATURE_ICONS[part.feature]}
+                        name={featureName(part.note, part.feature)}
+                        kind={FEATURE_NAMES[part.feature]}
+                        selected={selected && layer === part.layer}
                         onBlock={picked}
-                        onSelect={() => onSelect(note.id, 'thread')}
-                        onRename={(name) => renameFeature({ projectId: project.id, noteId: note.id }, 'thread', name)}
-                        onRemove={() => onRemoveLayer(note.id, 'thread')}
-                      />
-                    )}
-                    {PLACED_LAYERS.filter((l) => note[l]).map((l) => (
-                      <LayerRow
-                        key={l}
-                        icon={FEATURE_ICONS[l]}
-                        name={featureName(note, l)}
-                        kind={FEATURE_NAMES[l]}
-                        selected={selected && layer === l}
-                        onBlock={picked}
-                        onSelect={() => onSelect(note.id, l)}
-                        onRename={(name) => renameFeature({ projectId: project.id, noteId: note.id }, l, name)}
-                        onRemove={() => onRemoveLayer(note.id, l)}
+                        onSelect={() => onSelect(note.id, part.layer)}
+                        onRename={(name) => renameFeature({ projectId: project.id, noteId: part.note.id }, part.feature, name)}
+                        onRemove={() => onRemoveLayer(note.id, part.layer)}
                       />
                     ))}
                   </ul>
                 )}
                 {/* Under the selected banknote's features, the way to add more (Keller) */}
-                {expanded && selected && canAdd && (
+                {expanded && selected && (
                   <div className="ml-[52px] pt-0.5">
-                    <AddFeatureMenu note={note} row={{ onBlock: picked }} onAdd={(feature) => onAddLayer(note.id, feature)} />
+                    <AddFeatureMenu row={{ onBlock: picked }} onAdd={(feature) => onAddLayer(note.id, feature)} />
                   </div>
                 )}
               </li>

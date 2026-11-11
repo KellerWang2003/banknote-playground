@@ -1,12 +1,15 @@
 import { PAPER, fitBack } from './back'
 import { fitContinuous } from './continuous'
+import { featureCopy, withLens } from './copyFeature'
+import { promoteExtra } from './extras'
 import { keptName } from './layerName'
+import { FEATURES, type Feature, fitPlaced, isPlaced } from './layers'
 import { defaultPattern, migratePattern } from './pattern'
 import { DEFAULT_PLAYBACK, playbackSettings } from './playback'
 import { migrateWindows, threadLength } from './thread'
 import { fitArcEnCiel } from './arcEnCiel'
 import { fitMagneticInk } from './magneticInk'
-import type { Frame, Note, Project, TiltSettings } from './types'
+import type { ExtraFeature, Frame, Note, Project, TiltSettings } from './types'
 import { fitWatermark } from './watermark'
 
 export const MIN_FRAMES = 2
@@ -137,54 +140,94 @@ export function migrateProject(raw: unknown): Project {
       : []
   // Notes saved before the canvas had no position: lay them out in a row
   const placed: Note[] = []
-  for (const { watermark, continuous, arcEnCiel, magneticInk, back: savedBack, noThread, ...raw } of notes) {
-    const check = fitContinuous(continuous)
-    const back = fitBack(savedBack)
-    // Older notes had no background mode; an uploaded face meant an image background
-    const n: Note = {
-      ...raw,
-      // Without a thread only when saved so; every banknote from before has its thread
-      ...(noThread === true ? { noThread } : {}),
-      // Only notes with a watermark, Arc-en-Ciel or magnetic ink have one; a damaged one is put back on its banknote
-      ...(watermark && typeof watermark === 'object' ? { watermark: fitWatermark(watermark, raw) } : {}),
-      ...(arcEnCiel && typeof arcEnCiel === 'object' ? { arcEnCiel: fitArcEnCiel(arcEnCiel, raw) } : {}),
-      ...(magneticInk && typeof magneticInk === 'object' ? { magneticInk: fitMagneticInk(magneticInk, raw) } : {}),
-      // The continuous check is on only while saved, its tolerance kept in range
-      ...(check ? { continuous: check } : {}),
-      // A back once it has been set; until then it shows the front's paper
-      ...(back ? { back } : {}),
-      background: raw.background ?? (raw.faceImageId ? 'image' : 'solid'),
-      // Older frames had degree spans, or split one shared range equally: keep their proportions and cycle
-      frames: raw.frames.map((f) => ({ ...f, length: f.length ?? oldLength(raw.frames, f) })),
-      tilt: {
-        ...playbackSettings(raw.tilt),
-        ...lensFields(raw.tilt),
-        ...presetCycle(raw.tilt),
-        transition: raw.tilt.transition,
-        cycleDeg:
-          presetCycle(raw.tilt).cycleDeg ??
-          raw.tilt.cycleDeg ??
-          (raw.frames.every((f) => (f as { spanDeg?: number }).spanDeg !== undefined)
-            ? raw.frames.reduce((total, f) => total + ((f as { spanDeg?: number }).spanDeg ?? 0), 0)
-            : 2 * ((raw.tilt as { rangeDeg?: number }).rangeDeg ?? 15)),
-      },
-      thread: {
-        // Its own name once it has one (layerName.ts)
-        ...keptName(raw.thread.name),
-        // Threads without an explicit background let the banknote show through.
-        backgroundColor: raw.thread.backgroundColor,
-        widthMm: raw.thread.widthMm,
-        direction: raw.thread.direction ?? 'vertical',
-        positionMm: raw.thread.positionMm ?? (raw.thread as { xMm?: number }).xMm ?? raw.widthMm / 2,
-        // Images now sit once per repeat: a thread from before keeps its old gap (none from before gaps, which retired
-        // the cropping length) until its images are read and the gap becomes part of its repeat (`settleArtwork`)
-        ...(raw.thread.imageGapMm !== undefined || raw.pattern === undefined ? { imageGapMm: Math.max(0, raw.thread.imageGapMm ?? 0) } : {}),
-        windows: migrateWindows(raw.thread.windows, threadLength({ ...raw, thread: { direction: raw.thread.direction ?? 'vertical' } })),
-      },
-      // Banknotes from before patterns are one section over the whole thread with their own lens, drawn as before
-      pattern: migratePattern(raw.pattern),
-    }
+  for (const saved of notes) {
+    const n = migrateNote(saved)
     placed.push(Number.isFinite(n.x) && Number.isFinite(n.y) ? n : { ...n, ...nextNotePosition(placed) })
   }
   return { ...rest, notes: placed }
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object'
+
+/**
+ * A banknote's further features as saved (extras.ts), each brought up to date and repaired as the first of its kind is:
+ * a placed layer kept on the banknote, a thread as a banknote's own thread is, under its own lens. One that can't be read
+ * is left out, and one whose id another already has takes a new one
+ */
+function migrateExtras(saved: unknown, note: Note): ExtraFeature[] {
+  if (!Array.isArray(saved)) return []
+  const ids = new Set<string>()
+  return saved.flatMap((x: unknown): ExtraFeature[] => {
+    if (!isObject(x) || !(FEATURES as readonly unknown[]).includes(x.feature)) return []
+    const feature = x.feature as Feature
+    const id = typeof x.id === 'string' && x.id && !x.id.includes('/') && !ids.has(x.id) ? x.id : crypto.randomUUID()
+    ids.add(id)
+    try {
+      if (isPlaced(feature)) return isObject(x.layer) ? [{ id, feature, layer: fitPlaced(feature, x.layer as never, note) } as ExtraFeature] : []
+      const copy = x.thread
+      if (!isObject(copy) || !isObject(copy.thread) || !Array.isArray(copy.frames)) return []
+      // As the banknote's own thread would be, from the banknote as saved, with this thread and its lens in place of its own
+      const { watermark: _w, arcEnCiel: _a, magneticInk: _m, extras: _x, noThread: _t, continuous: _c, back: _b, ...base } = note
+      const lens = isObject(copy.lens) ? copy.lens : {}
+      const thread = featureCopy(migrateNote({ ...base, thread: copy.thread as never, frames: copy.frames as Frame[], pattern: copy.pattern as never, tilt: withLens(note.tilt, lens) }), 'thread')
+      return thread ? [{ ...thread, id }] : []
+    } catch {
+      return []
+    }
+  })
+}
+
+/** One banknote as saved, brought up to date and repaired; where it sits on the canvas as saved */
+function migrateNote({ watermark, continuous, arcEnCiel, magneticInk, back: savedBack, noThread, extras: savedExtras, ...raw }: Note): Note {
+  const check = fitContinuous(continuous)
+  const back = fitBack(savedBack)
+  const extras = migrateExtras(savedExtras, { ...raw, ...(noThread === true ? { noThread } : {}) } as Note)
+  // Older notes had no background mode; an uploaded face meant an image background
+  const n: Note = {
+    ...raw,
+    // Without a thread only when saved so; every banknote from before has its thread
+    ...(noThread === true ? { noThread } : {}),
+    // Only notes with a watermark, Arc-en-Ciel or magnetic ink have one; a damaged one is put back on its banknote
+    ...(watermark && typeof watermark === 'object' ? { watermark: fitWatermark(watermark, raw) } : {}),
+    ...(arcEnCiel && typeof arcEnCiel === 'object' ? { arcEnCiel: fitArcEnCiel(arcEnCiel, raw) } : {}),
+    ...(magneticInk && typeof magneticInk === 'object' ? { magneticInk: fitMagneticInk(magneticInk, raw) } : {}),
+    // The continuous check is on only while saved, its tolerance kept in range
+    ...(check ? { continuous: check } : {}),
+    // A back once it has been set; until then it shows the front's paper
+    ...(back ? { back } : {}),
+    background: raw.background ?? (raw.faceImageId ? 'image' : 'solid'),
+    // Older frames had degree spans, or split one shared range equally: keep their proportions and cycle
+    frames: raw.frames.map((f) => ({ ...f, length: f.length ?? oldLength(raw.frames, f) })),
+    tilt: {
+      ...playbackSettings(raw.tilt),
+      ...lensFields(raw.tilt),
+      ...presetCycle(raw.tilt),
+      transition: raw.tilt.transition,
+      cycleDeg:
+        presetCycle(raw.tilt).cycleDeg ??
+        raw.tilt.cycleDeg ??
+        (raw.frames.every((f) => (f as { spanDeg?: number }).spanDeg !== undefined)
+          ? raw.frames.reduce((total, f) => total + ((f as { spanDeg?: number }).spanDeg ?? 0), 0)
+          : 2 * ((raw.tilt as { rangeDeg?: number }).rangeDeg ?? 15)),
+    },
+    thread: {
+      // Its own name once it has one (layerName.ts)
+      ...keptName(raw.thread.name),
+      // Threads without an explicit background let the banknote show through.
+      backgroundColor: raw.thread.backgroundColor,
+      widthMm: raw.thread.widthMm,
+      direction: raw.thread.direction ?? 'vertical',
+      positionMm: raw.thread.positionMm ?? (raw.thread as { xMm?: number }).xMm ?? raw.widthMm / 2,
+      // Images now sit once per repeat: a thread from before keeps its old gap (none from before gaps, which retired
+      // the cropping length) until its images are read and the gap becomes part of its repeat (`settleArtwork`)
+      ...(raw.thread.imageGapMm !== undefined || raw.pattern === undefined ? { imageGapMm: Math.max(0, raw.thread.imageGapMm ?? 0) } : {}),
+      windows: migrateWindows(raw.thread.windows, threadLength({ ...raw, thread: { direction: raw.thread.direction ?? 'vertical' } })),
+    },
+    // Banknotes from before patterns are one section over the whole thread with their own lens, drawn as before
+    pattern: migratePattern(raw.pattern),
+    // Its further features, only while it has them
+    ...(extras.length ? { extras } : {}),
+  }
+  // Never further features of a kind without the first: the next moves up into its place
+  return FEATURES.reduce(promoteExtra, n)
 }

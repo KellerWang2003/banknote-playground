@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { newArcEnCiel } from '../src/lib/arcEnCiel'
-import { featureCopy, featureImageIds, hasCopy, withFeatureCopy } from '../src/lib/copyFeature'
+import { featureCopy, featureImageIds, withFeatureCopy } from '../src/lib/copyFeature'
 import { newMagneticInk } from '../src/lib/magneticInk'
 import { colorFrame, createNote, withNewThread } from '../src/lib/notes'
 import { presetPattern } from '../src/lib/patternPresets'
@@ -141,13 +141,5 @@ describe('pasting a security feature', () => {
     expect(pasted.pattern!.sections.map((s) => s.name)).toEqual(['Lane ↔', 'Lane ↕'])
     const { pattern: _none, ...old } = from
     expect(withFeatureCopy(to, featureCopy(old, 'thread')!, old).pattern).toBeUndefined()
-  })
-
-  it('knows when the banknote has the very feature already, as on the one it was copied from, unchanged', () => {
-    const from = { ...banknote(), watermark: newWatermark(banknote()) }
-    const copy = featureCopy(from, 'watermark')!
-    expect(hasCopy(from, copy)).toBe(true)
-    expect(hasCopy({ ...from, watermark: { ...from.watermark, xMm: from.watermark.xMm + 1 } }, copy)).toBe(false)
-    expect(hasCopy(banknote(), copy)).toBe(false)
   })
 })

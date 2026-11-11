@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { reportError } from '../cloud/notices'
 import { useWorkspace } from '../cloud/workspace'
-import { type FeatureCopy, featureCopy, featureImageIds, hasCopy, withFeatureCopy } from '../lib/copyFeature'
-import { copyImage, removeImage } from '../lib/images'
-import { FEATURE_NAMES, type Feature } from '../lib/layers'
+import { type FeatureCopy, featureCopy, featureImageIds, withFeatureCopy } from '../lib/copyFeature'
+import { featurePart, nextName, partLayer, withExtra } from '../lib/extras'
+import { copyImage } from '../lib/images'
+import { FEATURE_NAMES, type Feature, hasFeature } from '../lib/layers'
 import { clipboardImages } from '../lib/pasteImages'
 import type { Size } from '../lib/placed'
 import { findNote, updateNote } from '../lib/store'
@@ -15,7 +16,8 @@ import { popupOpen } from '../lib/popups'
 /**
  * Copying security features from one banknote and pasting them onto another, as Figma copies layers (Keller, 9
  * November): ⌘/Ctrl+C with a security feature picked, on the canvas or in the Banknotes list, copies it as it is then;
- * ⌘/Ctrl+V pastes it onto the selected banknote, whichever of its parts is picked, and picks it there. The copy is kept
+ * ⌘/Ctrl+V pastes it onto the selected banknote, whichever of its parts is picked, as one more of its kind there, and
+ * picks it. The copy is kept
  * in the app, so it pastes into any banknote of any project in this tab, and the clipboard holds its id, so whatever is
  * copied after it (an image for an upload slot, text) is what ⌘V pastes.
  */
@@ -67,20 +69,32 @@ export function copyFeature(note: Note, feature: Feature): FeatureClip | undefin
 }
 
 /**
- * Pastes a copied security feature onto a banknote: added, or in place of the one of that kind it has, with copies of
- * its own of the images, as Duplicate gives a banknote's copy, in one undo step. Pasted back onto the banknote it came
- * from, unchanged since, it changes nothing. Resolves to whether the banknote changed
+ * Pastes a copied security feature onto a banknote, with copies of its own of the images, as Duplicate gives a banknote's
+ * copy, in one undo step: as the first of its kind if the banknote hasn't got one, or else after those it has, as many as
+ * wanted (Keller, 10 November: "no limit"; extras.ts), and named as the next of its kind (Watermark 2) unless it has a
+ * name of its own; back onto the banknote it came from too, as Figma pastes a copy over its original. Resolves to the
+ * pasted feature's layer, or undefined if the banknote went meanwhile
  */
-export async function pasteFeature({ projectId, noteId }: NoteRef, pasted: Pick<FeatureClip, 'copy' | 'from'>): Promise<boolean> {
-  const target = findNote(projectId, noteId)
-  if (!target || hasCopy(target, pasted.copy)) return false
+export async function pasteFeature({ projectId, noteId }: NoteRef, pasted: Pick<FeatureClip, 'copy' | 'from'>): Promise<Layer | undefined> {
+  if (!findNote(projectId, noteId)) return undefined
   const images = new Map(await Promise.all(featureImageIds(pasted.copy).map(async (id) => [id, await copyImage(id)] as const)))
   const note = findNote(projectId, noteId)
-  if (!note) return false
-  const replaced = featureCopy(note, pasted.copy.feature)
-  updateNote(projectId, noteId, (n) => withFeatureCopy(n, pasted.copy, pasted.from, images))
-  if (replaced) await Promise.all(featureImageIds(replaced).map((id) => removeImage(id)))
-  return true
+  if (!note) return undefined
+  const { feature } = pasted.copy
+  if (!hasFeature(note, feature)) {
+    updateNote(projectId, noteId, (n) => withFeatureCopy(n, pasted.copy, pasted.from, images))
+    return feature
+  }
+  // Fitted onto the banknote as the first of its kind would be, then kept after the others
+  const fitted = featureCopy(withFeatureCopy(note, pasted.copy, pasted.from, images), feature)
+  if (!fitted) return undefined
+  const name = (fitted.feature === 'thread' ? fitted.thread.thread.name : fitted.layer.name) ?? nextName(note, feature)
+  const copy = (fitted.feature === 'thread'
+    ? { ...fitted, thread: { ...fitted.thread, thread: { ...fitted.thread.thread, name } } }
+    : { ...fitted, layer: { ...fitted.layer, name } }) as FeatureCopy
+  const id = crypto.randomUUID()
+  updateNote(projectId, noteId, (n) => withExtra(n, copy, id))
+  return partLayer(feature, id)
 }
 
 /** Keys pressed and pastes made in these go to the text, as with the editor's other shortcuts */
@@ -111,7 +125,8 @@ export function useFeatureClipboard({ projectId, note, layer, enabled, onPasted 
   /** Its part that is picked: the banknote itself or one of its features */
   layer: Layer
   enabled: boolean
-  onPasted: (noteId: string, feature: Feature) => void
+  /** With the pasted feature's layer */
+  onPasted: (noteId: string, layer: Layer) => void
 }) {
   // The latest, for the listeners below
   const latest = useRef({ projectId, note, layer, onPasted })
@@ -122,8 +137,10 @@ export function useFeatureClipboard({ projectId, note, layer, enabled, onPasted 
   useEffect(() => {
     if (!enabled) return
     const copyPicked = () => {
-      const { note: picked, layer: part } = latest.current
-      return picked && part !== 'note' ? copyFeature(picked, part) : undefined
+      const { note: picked, layer } = latest.current
+      // The first of its kind or a further one, as its own code sees it (extras.ts)
+      const part = featurePart(picked, layer)
+      return part ? copyFeature(part.note, part.feature) : undefined
     }
     // Some browsers send no copy event with nothing selected on the page, so the keys copy too; where the copy event
     // follows, it copies again, now putting the copy's id on the clipboard
@@ -159,9 +176,9 @@ export function useFeatureClipboard({ projectId, note, layer, enabled, onPasted 
       const feature = current.copy.feature
       if (!target) return reportError(new Error(`Pick a banknote to paste the ${FEATURE_NAMES[feature].toLowerCase()} onto.`))
       pasteFeature({ projectId: project, noteId: target.id }, current)
-        .then(() => {
+        .then((pastedLayer) => {
           // Unless another banknote was picked meanwhile
-          if (latest.current.note?.id === target.id) latest.current.onPasted(target.id, feature)
+          if (pastedLayer && latest.current.note?.id === target.id) latest.current.onPasted(target.id, pastedLayer)
         })
         .catch(reportError)
     }

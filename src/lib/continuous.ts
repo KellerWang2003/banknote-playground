@@ -21,6 +21,13 @@ import { formatLength, lengthIn, type LengthUnit } from './units'
 
 /** The cut tolerance, mm (the crit said to allow 0.5 to 1 mm) */
 export const CUT_MM = { min: 0, max: 5, initial: 1, step: 0.1 }
+
+/** How far out from the banknote its neighbours show on the canvas, mm, and at most on screen, px, so they never cover it */
+const NEIGHBOURS_MM = 10
+const NEIGHBOURS_MAX_PX = 120
+
+/** How far the neighbours reach out from the banknote's edges on screen, px at `scale` px per mm (ContinuousView.tsx) */
+export const neighboursPx = (scale: number) => Math.min(NEIGHBOURS_MM * scale, NEIGHBOURS_MAX_PX)
 /** Pixels per mm the design is read at, and the most on its longest side */
 const READ_PX_PER_MM = 8
 const READ_MAX_PX = 1200

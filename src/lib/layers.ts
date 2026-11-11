@@ -5,10 +5,10 @@ import type { ArcEnCiel, MagneticInk, Note, Watermark } from './types'
 import { fitWatermark, newWatermark } from './watermark'
 
 /**
- * The banknote's layers placed on it as a box (placed.ts), siblings of its thread: at most one of each, added from the +
- * on the banknote's row, listed in this order under its thread, and placed the same way on the canvas. They draw in
- * this order too, over the design and under the thread: Arc-en-Ciel's offset print under magnetic ink's screen print,
- * as the press lays them down.
+ * The banknote's layers placed on it as a box (placed.ts), siblings of its thread: the first of each kind here, any more
+ * in extras.ts, added from the + on the banknote's row, listed in this order under its threads, and placed the same way on
+ * the canvas. They draw in this order too, over the design and under the threads: Arc-en-Ciel's offset print under
+ * magnetic ink's screen print, as the press lays them down.
  */
 export const PLACED_LAYERS = ['watermark', 'arcEnCiel', 'magneticInk'] as const
 export type PlacedLayer = (typeof PLACED_LAYERS)[number]
@@ -24,13 +24,20 @@ export const isPlaced = (layer: string | undefined): layer is PlacedLayer => (PL
 /** Each one's name in the UI */
 export const LAYER_NAMES: Record<PlacedLayer, string> = { watermark: 'Watermark', arcEnCiel: 'Arc-en-Ciel', magneticInk: 'Magnetic ink' }
 
-/** Printed on the front, so they don't show on the back: picking one turns the banknotes back round to their fronts */
-export const onFront = (layer: string): boolean => layer === 'thread' || layer === 'arcEnCiel' || layer === 'magneticInk'
+/**
+ * Printed on the front, so they don't show on the back: picking one turns the banknotes back round to their fronts. Each of
+ * a kind alike, the first or a further one (whose layer is its kind and its id, extras.ts)
+ */
+export function onFront(layer: string): boolean {
+  const kind = layer.split('/')[0]
+  return kind === 'thread' || kind === 'arcEnCiel' || kind === 'magneticInk'
+}
 
 /**
- * Every security feature a banknote can have, at most one of each, all added from one Add menu and removed the same
- * way (Keller, 4 November: a new banknote coming with a thread made no sense): its thread, then the placed layers, the
- * order the menu and the Banknotes list show them in
+ * Every kind of security feature a banknote can have, all added from one Add menu and removed the same way (Keller, 4
+ * November: a new banknote coming with a thread made no sense), as many of each as wanted (Keller, 10 November: "no
+ * limit"; the first of each kind in its own place on the banknote, the rest in extras.ts): its thread, then the placed
+ * layers, the order the menu and the Banknotes list show them in
  */
 export const FEATURES = ['thread', ...PLACED_LAYERS] as const
 export type Feature = (typeof FEATURES)[number]

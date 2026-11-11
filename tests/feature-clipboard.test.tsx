@@ -5,7 +5,6 @@ import { useNotice } from '../src/cloud/notices'
 import { colorFrame, createNote, withNewThread } from '../src/lib/notes'
 import type { Note } from '../src/lib/types'
 import { newWatermark } from '../src/lib/watermark'
-import type { Feature } from '../src/lib/layers'
 import type { Layer } from '../src/editor/layerActions'
 
 // Banknotes by id in place of the project store, artwork copied at once, and a workspace to copy in
@@ -31,7 +30,7 @@ function Editor({ note, layer, enabled = true, onPasted = () => {}, take = () =>
   note?: string
   layer: Layer
   enabled?: boolean
-  onPasted?: (noteId: string, feature: Feature) => void
+  onPasted?: (noteId: string, layer: Layer) => void
   take?: (file: File) => unknown
 }) {
   useFeatureClipboard({ projectId: 'p', note: note ? held.notes[note] : undefined, layer, enabled, onPasted })
@@ -174,15 +173,37 @@ describe('copying and pasting security features', () => {
     expect(held.edits).toBe(0)
   })
 
-  it('changes nothing pasted back onto the banknote it came from, unchanged, but picks it there', async () => {
+  it('pastes one more of its kind onto a banknote that has one, back onto its own banknote too, and picks the new one', async () => {
+    // Keller, 10 November: "you should be able to add multiple of the same security feature. so no limit". Back onto the
+    // banknote it came from it lands over the original, as Figma pastes a copy
     const onPasted = vi.fn()
     const { rerender } = render(<Editor note="a" layer="watermark" onPasted={onPasted} />)
     const board = clipboard()
     copyKeys(board)
     rerender(<Editor note="a" layer="note" onPasted={onPasted} />)
     send('paste', board)
-    await waitFor(() => expect(onPasted).toHaveBeenCalledWith('a', 'watermark'))
-    expect(held.edits).toBe(0)
+    await waitFor(() => expect(onPasted).toHaveBeenCalledTimes(1))
+    const [extra] = held.notes.a.extras!
+    expect(onPasted).toHaveBeenCalledWith('a', `watermark/${extra.id}`)
+    // With its own copy of the image and the name it had, the original as it was
+    expect(extra).toEqual({ id: extra.id, feature: 'watermark', layer: { ...held.notes.a.watermark, imageId: 'portrait copy' } })
+    expect(held.notes.a.watermark).toMatchObject({ name: 'Bird', imageId: 'portrait' })
+    expect(held.edits).toBe(1)
+
+    // Copied from a further one, it is that one
+    const c = banknote('c')
+    held.notes.c = { ...c, watermark: newWatermark(c), extras: [{ id: 'second', feature: 'watermark', layer: { ...newWatermark(c), xMm: 3, name: 'Watermark 2' } }] }
+    rerender(<Editor note="c" layer="watermark/second" onPasted={onPasted} />)
+    copyKeys(clipboard())
+    expect(copiedFeature()!.copy).toMatchObject({ feature: 'watermark', layer: { xMm: 3, name: 'Watermark 2' } })
+    // One without a name of its own goes by the next of its kind's
+    rerender(<Editor note="c" layer="watermark" onPasted={onPasted} />)
+    const again = clipboard()
+    copyKeys(again)
+    rerender(<Editor note="c" layer="note" onPasted={onPasted} />)
+    send('paste', again)
+    await waitFor(() => expect(held.notes.c.extras).toHaveLength(2))
+    expect(held.notes.c.extras![1]).toMatchObject({ feature: 'watermark', layer: { name: 'Watermark 3', xMm: held.notes.c.watermark!.xMm } })
   })
 
   it('says what is missing: a banknote to paste onto, or a copy made on this page', () => {

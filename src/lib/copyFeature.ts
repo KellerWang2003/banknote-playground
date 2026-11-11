@@ -3,41 +3,45 @@ import { type Feature, type PlacedLayer, fitPlaced, hasThread, withPlaced } from
 import { remapTracks } from './pattern'
 import { type Size, isWhollyOn, onto } from './placed'
 import { fitSections, threadLength } from './thread'
-import type { Frame, Note, SectionLens, ThreadPattern, ThreadSettings, TiltSettings } from './types'
+import type { FeatureCopy, Note, SectionLens, TiltSettings } from './types'
+
+export type { FeatureCopy, ThreadCopy } from './types'
 
 /**
  * Copying a security feature from one banknote and pasting it onto another (Keller, 9 November: "if i copy one from one
  * banknote, and paste it at another, it should work"). A copy holds everything the feature is, as it was when copied;
- * pasted, it is added to the banknote, or takes the place of the one it has (a banknote has at most one of each), with
- * its own images, as Duplicate gives a copied banknote its own.
+ * pasted, it is added to the banknote, past any it has of its kind (Keller, 10 November: "no limit"), with its own images,
+ * as Duplicate gives a copied banknote its own.
  */
 
 /**
  * The lens a thread takes with it, what tilting does to its frames, as the right panel shows it with the thread (a
  * section's own lens holds the same): playback (Fade, speed, curve, moves, recordings) is the project's and stays
  */
-const LENS_KEYS = ['effect', 'cycleDeg', 'cycleXDeg', 'yOn', 'runY', 'runX', 'revealAxis', 'revealWobble', 'revealLevel', 'flatAt'] as const satisfies readonly (keyof SectionLens)[]
-type ThreadLens = SectionLens
+export const LENS_KEYS = ['effect', 'cycleDeg', 'cycleXDeg', 'yOn', 'runY', 'runX', 'revealAxis', 'revealWobble', 'revealLevel', 'flatAt'] as const satisfies readonly (keyof SectionLens)[]
 
-/** A security thread is its settings (size, place, windows), its frames, its sections and its lens */
-export interface ThreadCopy {
-  thread: ThreadSettings
-  frames: Frame[]
-  pattern?: ThreadPattern
-  lens: ThreadLens
+/** The thread's lens out of the banknote's tilt settings, only what is set */
+export const lensOf = (tilt: TiltSettings): SectionLens =>
+  Object.fromEntries(LENS_KEYS.filter((key) => tilt[key] !== undefined).map((key) => [key, tilt[key]])) as SectionLens
+
+/** The tilt settings with this lens in place of theirs, playback as it was */
+export function withLens(tilt: TiltSettings, lens: SectionLens): TiltSettings {
+  const next: Record<string, unknown> = { ...tilt }
+  for (const key of LENS_KEYS) {
+    if (lens[key] === undefined) delete next[key]
+    else next[key] = lens[key]
+  }
+  return next as unknown as TiltSettings
 }
 
 /** A placed layer is all in its box's settings, whichever layer it is, so a new one copies with no more work */
-type PlacedCopy = { [K in PlacedLayer]: { feature: K; layer: NonNullable<Note[K]> } }[PlacedLayer]
-
-export type FeatureCopy = { feature: 'thread'; thread: ThreadCopy } | PlacedCopy
+type PlacedCopy = Exclude<FeatureCopy, { feature: 'thread' }>
 
 /** The banknote's feature as it is now, detached from it; undefined when the banknote hasn't got it */
 export function featureCopy(note: Note, feature: Feature): FeatureCopy | undefined {
   if (feature === 'thread') {
     if (!hasThread(note)) return undefined
-    const lens = Object.fromEntries(LENS_KEYS.filter((key) => note.tilt[key] !== undefined).map((key) => [key, note.tilt[key]])) as ThreadLens
-    return structuredClone({ feature, thread: { thread: note.thread, frames: note.frames, ...(note.pattern ? { pattern: note.pattern } : {}), lens } })
+    return structuredClone({ feature, thread: { thread: note.thread, frames: note.frames, ...(note.pattern ? { pattern: note.pattern } : {}), lens: lensOf(note.tilt) } })
   }
   const layer = note[feature]
   return layer ? (structuredClone({ feature, layer }) as FeatureCopy) : undefined
@@ -48,9 +52,6 @@ export function featureImageIds(copy: FeatureCopy): string[] {
   const ids = copy.feature === 'thread' ? copy.thread.frames.map((f) => f.imageId) : [copy.layer.imageId]
   return [...new Set(ids.filter((id): id is string => !!id))]
 }
-
-/** Whether the banknote has this very feature, unchanged: pasting it there again would change nothing */
-export const hasCopy = (note: Note, copy: FeatureCopy) => JSON.stringify(featureCopy(note, copy.feature)) === JSON.stringify(copy)
 
 /**
  * The banknote with the copy pasted onto it, in place of the feature of that kind it had, using `images` for the copy's
@@ -74,18 +75,13 @@ export function withFeatureCopy(note: Note, copy: FeatureCopy, from: Size, image
   const room = Math.min(half, across(note) / 2)
   const positionMm = whollyOn ? clamp(thread.positionMm, room, across(note) - room) : clamp(thread.positionMm, 0, across(note))
   const length = threadLength({ ...note, thread })
-  const tilt: Record<string, unknown> = { ...note.tilt }
-  for (const key of LENS_KEYS) {
-    if (lens[key] === undefined) delete tilt[key]
-    else tilt[key] = lens[key]
-  }
   const { noThread: _none, pattern: _old, ...rest } = note
   const sections = remapTracks(pattern, ids)
   return {
     ...rest,
     thread: { ...thread, positionMm, windows: { ...thread.windows, sections: fitSections(thread.windows.sections, length) } },
     frames,
-    tilt: tilt as unknown as TiltSettings,
+    tilt: withLens(note.tilt, lens),
     ...(sections ? { pattern: sections } : {}),
   }
 }

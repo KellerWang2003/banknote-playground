@@ -1,3 +1,4 @@
+import { extrasOf, throughExtra } from './extras'
 import { REPEAT_LIMITS, isFull, patternOf, setRepeat } from './pattern'
 import type { Handle } from './placed'
 import type { Frame, ImagePlace, Note, Project, ThreadPattern, ThreadSettings } from './types'
@@ -128,11 +129,14 @@ export function keepFitted(note: Note): Note {
   return Math.abs(repeat - pattern.repeatMm) < 1e-9 ? note : { ...note, pattern: setRepeat(pattern, repeat) }
 }
 
-/** Every banknote on Fit refitted after a change, so its tile follows its thread wherever that was edited (the same project when none moved) */
+/**
+ * Every banknote on Fit refitted after a change, so its tile follows its thread wherever that was edited, and so does each
+ * of its further threads' (the same project when none moved)
+ */
 export function fitTiles(project: Project): Project {
   let moved = false
   const notes = project.notes.map((n) => {
-    const fitted = keepFitted(n)
+    const fitted = extrasOf(n, 'thread').reduce((m, extra) => throughExtra(m, extra.id, keepFitted), keepFitted(n))
     moved ||= fitted !== n
     return fitted
   })

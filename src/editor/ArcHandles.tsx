@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { type ArcHandle, type MmPoint, canRemove, curvePoints, mmSpot, ridgeAngle, spotMm, withBend, withLineMoved, withSpot, withoutSpot } from '../lib/arcEnCiel'
+import type { Layer } from '../lib/extras'
 import { PLACE_STEP, boxTurn, intoBox, pointInBox } from '../lib/placed'
 import { type Quarter, unturn, unturnedPoint } from '../lib/rotate'
 import type { ArcEnCiel, BoxSpot } from '../lib/types'
@@ -51,8 +52,10 @@ function onBox(arc: ArcEnCiel, scale: number, clientX: number, clientY: number, 
  * keys still move them the way they point on screen; so they do with Arc-en-Ciel rotated on the banknote, whose box they
  * lie on (`Turned`).
  */
-export function ArcHandles({ arc, scale, quarter = 0, onChange }: {
+export function ArcHandles({ arc, part = 'arcEnCiel', scale, quarter = 0, onChange }: {
   arc: ArcEnCiel
+  /** Which Arc-en-Ciel it is, read off a press on its handles: the first, or a further one (extras.ts) */
+  part?: Layer
   scale: number
   quarter?: Quarter
   onChange: (arc: ArcEnCiel) => void
@@ -137,7 +140,7 @@ export function ArcHandles({ arc, scale, quarter = 0, onChange }: {
   const curve = kind === 'line' ? curvePoints(arc).points.map(([x, y]) => `${(arc.xMm + x) * scale},${(arc.yMm + y) * scale}`).join(' ') : ''
 
   return (
-    <div data-placed="arcEnCiel" data-arc-handles="" className="pointer-events-none absolute inset-0">
+    <div data-placed={part} data-arc-handles="" className="pointer-events-none absolute inset-0">
       <Turned arc={arc} scale={scale}>
         {kind === 'line' && (
           <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
@@ -232,8 +235,10 @@ type Turn = { from: number; offset: number }
  * past upright. On a rotated banknote it turns with it and still follows the pointer on screen. The angle is from the box's
  * own level, so with Arc-en-Ciel rotated on the banknote the dial turns with it, as its ridges do.
  */
-export function RidgeDial({ arc, scale, quarter = 0, onTurn }: {
+export function RidgeDial({ arc, part = 'arcEnCiel', scale, quarter = 0, onTurn }: {
   arc: ArcEnCiel
+  /** Which Arc-en-Ciel it is, as on its handles */
+  part?: Layer
   scale: number
   quarter?: Quarter
   onTurn: (angleDeg: number) => void
@@ -268,7 +273,7 @@ export function RidgeDial({ arc, scale, quarter = 0, onTurn }: {
   }
 
   return (
-    <div data-placed="arcEnCiel" data-ridge-dial="" className="pointer-events-none absolute inset-0">
+    <div data-placed={part} data-ridge-dial="" className="pointer-events-none absolute inset-0">
       <Turned arc={arc} scale={scale}>
         <svg aria-hidden="true" className="absolute top-0 left-0 overflow-visible" width={1} height={1}>
           {[{ stroke: 'white', strokeWidth: 3, opacity: 0.7 }, { className: 'stroke-fuchsia-500', strokeWidth: 1.25, strokeDasharray: '5 4' }].map((look, i) => (

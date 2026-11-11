@@ -221,7 +221,7 @@ export async function exportImages(projectName: string, options: ImageOptions, o
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('This browser cannot draw an image this big.')
       drawStill(ctx, note, assets, scale, options.tilt, {
-        sheen: options.sheen, realistic: options.realistic, frameNumbers: options.frameNumbers, back, quarter: options.quarter, offsetMm: options.offsets?.[note.id],
+        sheen: options.sheen, realistic: options.realistic, frameNumbers: options.frameNumbers, back, quarter: options.quarter, offsetMm: options.offsets?.[note.id], offsets: options.offsets,
       })
       const blob = await canvas.convertToBlob({ type: 'image/png' })
       // Nothing on the back moves with the angle, so only a front's name carries it

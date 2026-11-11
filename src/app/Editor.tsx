@@ -15,10 +15,11 @@ import { TimelineBar } from '../editor/TimelineBar'
 import { SideSwitch } from '../editor/SideSwitch'
 import { TiltRail } from '../editor/TiltRail'
 import { useSettleArtwork } from '../editor/useSettleArtwork'
-import { addFeature, layerOf, removeFeature, removeLayer, type Layer } from '../editor/layerActions'
+import { addFeature, layerOf, removeFeature, type Layer } from '../editor/layerActions'
 import { useFeatureClipboard } from '../editor/featureClipboard'
 import { pressSpace, releaseSpace, useSpaceHand } from '../editor/spaceHand'
-import { hasThread, isPlaced, onFront, type Feature, type PlacedLayer } from '../lib/layers'
+import { extraIdOf, extrasOf, featureOf, featurePart, hostNoteId, noteOrPart, partLayer } from '../lib/extras'
+import { hasThread, isPlaced, onFront, type Feature } from '../lib/layers'
 import { useWorkspace } from '../cloud/workspace'
 import { DemoView } from './DemoView'
 import { demoLink } from '../lib/demoLink'
@@ -43,13 +44,17 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   const [placingNoteId, setPlacingNoteId] = useState<string>()
   const note = project.notes.find((n) => n.id === selectedId)
   const shownLayer = layerOf(note, layer)
+  // The feature shown, as its own code sees it: the banknote itself for the first of a kind, a further one's view, under
+  // that view's own id (extras.ts), which the right panel, the timeline and Thread Studio work on as on the first
+  const part = featurePart(note, shownLayer)
+  const threadPart = part?.feature === 'thread' ? part : undefined
   // Window editing has no mode of its own: it starts when a window is picked (on the canvas or in the panel,
   // or by turning windows on) and ends on a click elsewhere on the banknote, on the canvas, or with Escape
-  const editingWindows = editingNoteId !== undefined && editingNoteId === selectedId && shownLayer === 'thread'
+  const editingWindows = editingNoteId !== undefined && editingNoteId === selectedId && threadPart !== undefined
   // Placing the watermark or magnetic ink works the same way: it starts when the layer is picked (its row, a press on
   // it on the canvas, adding it or uploading its image) and shows the banknote flat (the watermark clear) with the
   // layer's box until it ends
-  const placing: PlacedLayer | undefined = placingNoteId !== undefined && placingNoteId === selectedId && isPlaced(shownLayer) ? shownLayer : undefined
+  const placing: Layer | undefined = placingNoteId !== undefined && placingNoteId === selectedId && isPlaced(part?.feature) ? shownLayer : undefined
   const exitWindows = () => {
     setEditingNoteId(undefined)
     setSelectedWindowId(undefined)
@@ -60,10 +65,11 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
    * Arc-en-Ciel and magnetic ink are only on the front, so picking one turns the banknotes back round to it
    */
   const selectLayer = (noteId: string, next: Layer) => {
-    if (noteId !== selectedId || next !== 'thread') exitWindows()
+    // Window editing goes on only while the same thread stays picked
+    if (noteId !== selectedId || featureOf(next) !== 'thread' || next !== shownLayer) exitWindows()
     setSelectedId(noteId)
     setLayer(next)
-    setPlacingNoteId(isPlaced(next) ? noteId : undefined)
+    setPlacingNoteId(isPlaced(featureOf(next)) ? noteId : undefined)
     if (onFront(next)) turnOver(false)
   }
   /** Selects a banknote itself, or nothing */
@@ -73,13 +79,14 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     exitPlacing()
     setSelectedId(undefined)
   }
-  // The thread editor shows the selected banknote while open; selecting another (or none) leaves it.
+  // The thread editor shows one of the selected banknote's threads while open, by the id its code reads it by: the
+  // banknote's for its first thread, a further one's view's (extras.ts); selecting another banknote (or none) leaves it.
   // It belongs to the thread, so the right panel shows the thread when it closes
   const [threadNoteId, setThreadNoteId] = useState<string>()
-  const editThread = (noteId: string) => {
-    selectLayer(noteId, 'thread')
+  const editThread = (noteId: string, thread: Layer = 'thread') => {
+    selectLayer(noteId, thread)
     exitWindows()
-    setThreadNoteId(noteId)
+    setThreadNoteId(featurePart(project.notes.find((n) => n.id === noteId), thread)?.note.id ?? noteId)
   }
   const closeThread = () => setThreadNoteId(undefined)
   // Demo, over the editor as Thread Studio is (Keller, 10 November): the banknote it shows, picked in the editor or the
@@ -151,6 +158,8 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     return () => window.removeEventListener('keydown', onKey)
   }, [editingWindows, placing])
 
+  // The thread whose windows are edited, by the id its code reads it by (extras.ts)
+  const editedThreadId = editingWindows ? threadPart?.note.id : undefined
   useEffect(() => {
     if (!editingWindows) return
     const onDelete = (event: KeyboardEvent) => {
@@ -158,15 +167,15 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const element = event.target instanceof Element ? event.target : null
       if (element?.closest('input, textarea, select, [contenteditable], [role="dialog"], [role="menu"]')) return
-      if (!selectedWindowId || popupOpen('[role="dialog"], [role="menu"]')) return
+      if (!selectedWindowId || !editedThreadId || popupOpen('[role="dialog"], [role="menu"]')) return
       event.preventDefault()
-      updateNote(project.id, editingNoteId!, (n) => ({ ...n, thread: { ...n.thread,
+      updateNote(project.id, editedThreadId, (n) => ({ ...n, thread: { ...n.thread,
         windows: { ...n.thread.windows, sections: n.thread.windows.sections.filter((s) => s.id !== selectedWindowId) } } }))
       setSelectedWindowId(undefined)
     }
     window.addEventListener('keydown', onDelete)
     return () => window.removeEventListener('keydown', onDelete)
-  }, [editingWindows, editingNoteId, selectedWindowId, project.id])
+  }, [editingWindows, editedThreadId, selectedWindowId, project.id])
 
   // Delete while placing a layer removes it, as it removes a selected window
   useEffect(() => {
@@ -178,7 +187,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       if (element?.closest('input, textarea, select, [contenteditable], [role="dialog"], [role="menu"]')) return
       if (popupOpen('[role="dialog"], [role="menu"]')) return
       event.preventDefault()
-      void removeLayer({ projectId: project.id, noteId: placingNoteId }, placing)
+      void removeFeature({ projectId: project.id, noteId: placingNoteId }, placing)
       setLayer('note')
       exitPlacing()
     }
@@ -213,7 +222,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
 
   // F turns every banknote over to its back, or back to its front, and R rotates every banknote a quarter turn right
   // (Shift+R left), as the buttons beside Front | Back do; not in Thread Studio, as the thread is only on the front
-  const inStudio = threadNoteId !== undefined && note?.id === threadNoteId
+  const inStudio = threadNoteId !== undefined && note?.id === hostNoteId(threadNoteId)
   useEffect(() => {
     if (inStudio) return
     const onDown = (event: KeyboardEvent) => {
@@ -232,7 +241,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
 
   // ⌘C copies the picked security feature and ⌘V pastes it onto the selected banknote, picking it there (Keller, 9
   // November: "if i copy one from one banknote, and paste it at another, it should work"); not in Thread Studio
-  useFeatureClipboard({ projectId: project.id, note, layer: shownLayer, enabled: !inStudio, onPasted: (noteId, feature) => selectLayer(noteId, feature) })
+  useFeatureClipboard({ projectId: project.id, note, layer: shownLayer, enabled: !inStudio, onPasted: (noteId, pasted) => selectLayer(noteId, pasted) })
 
   // Space: a tap plays or pauses, and held down it is the hand, a press on the canvas panning (Figma's). So playback
   // toggles when Space comes up, and only if no pan started meanwhile; never while editing windows or placing a layer,
@@ -303,7 +312,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   // The tilt card stays whatever is picked, placing a layer or editing windows included (Keller, 9 November: "That
   // should be always there"); only an empty project, with nothing to tilt, goes without it
   const tiltPad = !isEmpty
-  const threadNote = note && note.id === threadNoteId ? note : undefined
+  const threadNote = inStudio && threadNoteId ? noteOrPart(note, threadNoteId) : undefined
 
   const selectAndFocus = (noteId: string) => {
     selectNote(noteId)
@@ -317,19 +326,26 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     selectLayer(noteId, next)
     if (elsewhere || next === 'note') setFocus({ noteId, token: Date.now() })
   }
-  /** Adds a security feature from the Add menu and shows it; the first thread in a project that opened empty comes with the windows tip */
+  /**
+   * Adds a security feature from the Add menu and shows it, the first of its kind or another (extras.ts); the first thread
+   * in a project that opened empty comes with the windows tip
+   */
   const addFrom = (noteId: string, added: Feature) => {
     const firstThread = added === 'thread' && openedEmpty && !project.notes.some(hasThread)
-    addFeature({ projectId: project.id, noteId }, added)
-    selectFromList(noteId, added)
+    selectFromList(noteId, addFeature({ projectId: project.id, noteId }, added))
     if (firstThread) setWindowsTip(noteId)
   }
-  // Removing the feature it shows leaves the banknote itself selected
-  const dropLayer = (noteId: string, removed: Feature) => {
+  // Removing the feature it shows leaves the banknote itself selected. Removing the first of a kind moves the next up into
+  // its place (extras.ts), which stays picked there if it was
+  const dropLayer = (noteId: string, removed: Layer) => {
+    const kind = featureOf(removed)
+    const host = project.notes.find((n) => n.id === noteId)
+    const next = host && kind && extraIdOf(removed) === undefined ? extrasOf(host, kind)[0] : undefined
     void removeFeature({ projectId: project.id, noteId }, removed)
     if (noteId === selectedId && shownLayer === removed) setLayer('note')
+    else if (noteId === selectedId && next && shownLayer === partLayer(next.feature, next.id)) setLayer(next.feature)
     if (noteId === placingNoteId && placing === removed) exitPlacing()
-    if (removed === 'thread' && noteId === editingNoteId) exitWindows()
+    if (kind === 'thread' && noteId === editingNoteId) exitWindows()
   }
 
   return (
@@ -346,8 +362,8 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
         onDemo={threadNote || demo || isEmpty ? undefined : openDemo} covered={demo}
         placing={placing} onExitPlacing={exitPlacing} onEditThread={threadNote ? undefined : editThread} inStudio={inStudio}
         onAddFeature={threadNote ? undefined : addFrom}
-        onEditWindow={(noteId, windowId) => {
-          selectLayer(noteId, 'thread')
+        onEditWindow={(noteId, windowId, thread) => {
+          selectLayer(noteId, thread)
           setEditingNoteId(noteId)
           setSelectedWindowId(windowId)
         }} />
@@ -370,23 +386,25 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
           {!isEmpty && (
             // The timeline is the thread's: its frames show only while the thread itself is picked (Keller, 9 November, as a
             // banknote now holds so many security features); otherwise the bar stays as it is with nothing selected
-            <TimelineBar projectId={project.id} notes={project.notes} note={note && hasThread(note) ? note : undefined}
-              noteRef={note && shownLayer === 'thread' ? noteRef : undefined} besidePanel={note !== undefined} />
+            <TimelineBar projectId={project.id} notes={project.notes} note={threadPart ? threadPart.note : note && hasThread(note) ? note : undefined}
+              noteRef={threadPart ? { projectId: project.id, noteId: threadPart.note.id } : undefined} besidePanel={note !== undefined} />
           )}
           {/* The way into Thread Studio while a thread is picked: above the timeline, in the middle of the workspace (Keller) */}
-          {note && shownLayer === 'thread' && (
+          {note && threadPart && (
             <div data-edit-thread="" className="pointer-events-none absolute right-[calc(var(--panel-w)+20px)] bottom-[112px] left-3 flex justify-center">
-              <Button size="sm" className="pointer-events-auto shadow-panel" onClick={() => editThread(note.id)}>Edit in Thread Studio</Button>
+              <Button size="sm" className="pointer-events-auto shadow-panel" onClick={() => editThread(note.id, threadPart.layer)}>Edit in Thread Studio</Button>
             </div>
           )}
-          {note && noteRef && <Inspector key={note.id} note={note} noteRef={noteRef} layer={shownLayer}
+          {/* A further feature comes as its view, under its own id, as the first of its kind comes as the banknote (extras.ts) */}
+          {note && noteRef && <Inspector key={part?.note.id ?? note.id} note={part?.note ?? note}
+            noteRef={part ? { projectId: project.id, noteId: part.note.id } : noteRef} layer={part?.feature ?? 'note'}
             onWindowSelect={(windowId) => {
               if (!windowId) return exitWindows()
               setEditingNoteId(note.id)
               setSelectedWindowId(windowId)
             }}
             onPlace={() => setPlacingNoteId(note.id)}
-            windowsTip={windowsTip === note.id} onWindowsTipDone={() => setWindowsTip(undefined)} />}
+            windowsTip={windowsTip === (part?.note.id ?? note.id)} onWindowsTipDone={() => setWindowsTip(undefined)} />}
         </>
       )}
 

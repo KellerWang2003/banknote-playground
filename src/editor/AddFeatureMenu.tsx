@@ -4,20 +4,19 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { FEATURES, FEATURE_LINES, FEATURE_NAMES, hasFeature, type Feature } from '../lib/layers'
-import type { Note } from '../lib/types'
+import { FEATURES, FEATURE_LINES, FEATURE_NAMES, type Feature } from '../lib/layers'
 
 /** Each feature's icon, in the Add menu and the Banknotes list, as on its tab in the right panel */
 export const FEATURE_ICONS: Record<Feature, ReactNode> = { thread: <Columns2 />, watermark: <Droplet />, arcEnCiel: <Rainbow />, magneticInk: <Magnet /> }
 
 /**
- * The one way to add a banknote's security features (Keller, 4 November): a + whose menu lists every feature the
- * banknote doesn't have yet, each with its icon and a line on what it is. The banknote's row in the Banknotes list has
- * it, and so does the selected banknote under its features, as a row (`row`, Keller: a clearer way to add them), and on
- * the canvas, under the selected banknote (`onCanvas`), and it goes once the banknote has them all.
+ * The one way to add a banknote's security features (Keller, 4 November): a + whose menu lists every kind of feature,
+ * each with its icon and a line on what it is, whatever the banknote has already, as it can have any number of each
+ * (Keller, 10 November: "you should be able to add multiple of the same security feature. so no limit"; extras.ts). The
+ * banknote's row in the Banknotes list has it, and so does the selected banknote under its features, as a row (`row`,
+ * Keller: a clearer way to add them), and on the canvas, under the selected banknote (`onCanvas`).
  */
-export function AddFeatureMenu({ note, onAdd, align = 'start', row, onCanvas }: {
-  note: Note
+export function AddFeatureMenu({ onAdd, align = 'start', row, onCanvas }: {
   onAdd: (feature: Feature) => void
   align?: 'start' | 'end'
   /** As a row, "+ Add security feature", under the selected banknote's features; on its grey, its hover darkens it */
@@ -29,8 +28,6 @@ export function AddFeatureMenu({ note, onAdd, align = 'start', row, onCanvas }: 
    */
   onCanvas?: boolean
 }) {
-  const addable = FEATURES.filter((f) => !hasFeature(note, f))
-  if (addable.length === 0) return null
   return (
     <DropdownMenu>
       {onCanvas ? (
@@ -73,7 +70,7 @@ export function AddFeatureMenu({ note, onAdd, align = 'start', row, onCanvas }: 
         </Tooltip>
       )}
       <DropdownMenuContent className="w-60" align={onCanvas ? 'center' : align}>
-        {addable.map((f) => (
+        {FEATURES.map((f) => (
           <DropdownMenuItem key={f} className="items-start py-1.5" onClick={() => onAdd(f)}>
             <span className="mt-0.5 flex">{FEATURE_ICONS[f]}</span>
             <span className="flex min-w-0 flex-col gap-0.5">

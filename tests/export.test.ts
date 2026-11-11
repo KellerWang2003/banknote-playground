@@ -531,3 +531,61 @@ describe('exporting each side', () => {
     }
   })
 })
+
+describe('further features in an export', () => {
+  // Keller, 10 November: "you should be able to add multiple of the same security feature. so no limit"
+  it('draws each one with the first of its kind, every watermark under every thread, each from its own assets', () => {
+    const calls: unknown[][] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string]
+        : key === 'createLinearGradient' ? () => ({ addColorStop() {} })
+          : (...args: unknown[]) => { calls.push([key, ...args]) }),
+      set: (target, key, value) => {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as CanvasRenderingContext2D
+    const plain = makeNote(150, 70)
+    const watermark = { xMm: 10, yMm: 10, widthMm: 20, heightMm: 20, depth: 1, imageId: 'a' }
+    const note: Note = {
+      ...plain, watermark,
+      extras: [
+        { id: 'w2', feature: 'watermark', layer: { ...watermark, xMm: 60, imageId: 'b' } },
+        { id: 't2', feature: 'thread', thread: { thread: { ...plain.thread, positionMm: 30 }, frames: plain.frames, lens: {} } },
+      ],
+    }
+    const relief = (canvas: string) => ({ canvas }) as unknown as Relief
+    const assets = { frames: new Map(), relief: relief('A'), extras: new Map([['w2', { frames: new Map(), relief: relief('B') }], ['t2', { frames: new Map() }]]) }
+    drawFace(ctx, note, assets, 2, { x: 0, y: 0 }, { sheen: false, perspective: false })
+    const drawn = calls.filter(([name]) => name === 'drawImage').map(([, image, x]) => [image, x])
+    expect(drawn).toEqual([['A', 20], ['B', 120]])
+    // Each thread's strip, the first one's then the further one's, after the watermarks
+    const strips = calls.flatMap((call, i) => (call[0] === 'translate' ? [[i, call[1]]] : []))
+    expect(strips.map(([, x]) => x)).toEqual([(75 - 2) * 2, (30 - 2) * 2])
+    expect(Math.min(...strips.map(([i]) => i as number))).toBeGreaterThan(calls.findLastIndex(([name]) => name === 'drawImage'))
+
+    // A further feature without assets loaded for it is left out, and on the back only the watermarks show
+    calls.length = 0
+    drawFace(ctx, note, { ...assets, extras: new Map([['w2', { frames: new Map(), relief: relief('B') }]]) }, 2, 0, { sheen: false, perspective: false, back: true })
+    expect(calls.filter(([name]) => name === 'drawImage').map(([, image]) => image)).toEqual(['A', 'B'])
+    // (each watermark mirrored by a translate to its far edge, no thread's strip at the top)
+    expect(calls.filter(([name]) => name === 'translate').map(([, x, y]) => [x, y])).toEqual([[280, 20], [180, 20]])
+  })
+
+  it('loads each further feature’s images with the banknote’s own, the design once', async () => {
+    const plain = makeNote(150, 75)
+    const frame = { ...plain.frames[0], kind: 'image' as const, imageId: 'second art', aspect: 2 }
+    const note: Note = {
+      ...plain, background: 'image', faceImageId: 'design',
+      extras: [{ id: 't2', feature: 'thread', thread: { thread: plain.thread, frames: [frame, plain.frames[1]], lens: {} } }],
+    }
+    loadImageUrl.mockClear()
+    const assets = await loadNoteAssets(note, 10)
+    expect(loadImageUrl.mock.calls.map(([id]) => id).sort()).toEqual(['design', 'second art'])
+    expect(assets.extras?.has('t2')).toBe(true)
+    // Its back shows no thread, so nothing of it is loaded
+    loadImageUrl.mockClear()
+    await loadNoteAssets(note, 10, true)
+    expect(loadImageUrl.mock.calls.map(([id]) => id)).toEqual([])
+  })
+})

@@ -326,6 +326,31 @@ export interface NoteBack {
   imageId?: string
 }
 
+/** A security thread on its own: its settings (size, place, windows), its frames, its sections and its lens */
+export interface ThreadCopy {
+  thread: ThreadSettings
+  frames: Frame[]
+  pattern?: ThreadPattern
+  lens: SectionLens
+}
+
+/**
+ * One of a banknote's security features detached from it: everything it is, as a copy holds it (copyFeature.ts) and as a
+ * banknote holds its further ones (`Note.extras`). A placed layer is all in its box's settings
+ */
+export type FeatureCopy =
+  | { feature: 'thread'; thread: ThreadCopy }
+  | { feature: 'watermark'; layer: Watermark }
+  | { feature: 'arcEnCiel'; layer: ArcEnCiel }
+  | { feature: 'magneticInk'; layer: MagneticInk }
+
+/**
+ * One of a banknote's security features past the first of its kind (Keller, 10 November: "you should be able to add
+ * multiple of the same security feature. so no limit"), held as a copy holds it, under an id of its own (extras.ts). The
+ * first of each kind keeps its own place on the banknote, so a save from before reads as it always did
+ */
+export type ExtraFeature = FeatureCopy & { id: string }
+
 /** One banknote in a project, with its own size, thread and frames */
 export interface Note {
   id: string
@@ -360,6 +385,11 @@ export interface Note {
   pattern?: ThreadPattern
   /** The back; absent until it is set, when it is plain paper of the front's colour (`backOf`) */
   back?: NoteBack
+  /**
+   * Its further security features, past the first of each kind, in the order they were added; absent while it has none.
+   * Only while it has the first of their kind (extras.ts)
+   */
+  extras?: ExtraFeature[]
 }
 
 export interface Project {

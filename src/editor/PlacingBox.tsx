@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { mirrored } from '../lib/back'
+import type { Layer } from '../lib/extras'
 import { LAYER_NAMES, type PlacedLayer } from '../lib/layers'
 import { type Corner, type Handle, PLACE_STEP, type PlacedBox, type Side, boxTurn, dragBoxHandle, intoBox, moveBox, normalRotation, rotationOf } from '../lib/placed'
 import { type Quarter, unturn } from '../lib/rotate'
@@ -69,9 +70,11 @@ function rotateCursor(deg: number) {
  * way they point on screen. A double-click in it, away from its corners and border, can place something there
  * (`onDoubleClick`: one more of Arc-en-Ciel's points).
  */
-export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 0, onChange, onDoubleClick }: {
+export function PlacingBox({ note, layer, part, box, scale, mirror = false, quarter = 0, onChange, onDoubleClick }: {
   note: Note
   layer: PlacedLayer
+  /** Which of its kind it places, read off a press on it: the first (its kind), or a further one (extras.ts) */
+  part?: Layer
   box: PlacedBox
   scale: number
   mirror?: boolean
@@ -113,7 +116,7 @@ export function PlacingBox({ note, layer, box, scale, mirror = false, quarter = 
       role="group"
       tabIndex={0}
       aria-label={`Place ${name}`}
-      data-placed={layer}
+      data-placed={part ?? layer}
       data-placing=""
       className="absolute touch-none cursor-move border border-fuchsia-500 ring-2 ring-fuchsia-500/40 outline-none focus-visible:ring-fuchsia-500/70"
       style={{ left: shown.xMm * scale, top: shown.yMm * scale, width, height, transform: boxTurn(shown) }}

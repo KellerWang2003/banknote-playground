@@ -1,38 +1,108 @@
+import { lensOf } from '../lib/copyFeature'
+import { type Layer, extrasOf, featurePart, nextName, partLayer, partNoteId, promoteExtra, withExtra } from '../lib/extras'
+import { clamp } from '../lib/frames'
 import { beginHistoryGroup, endHistoryGroup } from '../lib/history'
 import { imageAspect, removeImage, storeImage } from '../lib/images'
-import { FEATURE_NAMES, type Feature, type PlacedLayer, fitPlaced, hasThread, isPlaced, newPlaced, withPlaced } from '../lib/layers'
+import { FEATURE_NAMES, type Feature, type PlacedLayer, fitPlaced, hasFeature, hasThread, newPlaced, withPlaced } from '../lib/layers'
 import { withNewThread } from '../lib/notes'
 import { withArcImage } from '../lib/arcEnCiel'
 import { withInkImage } from '../lib/magneticInk'
-import type { PlacedBox } from '../lib/placed'
+import { type PlacedBox, PLACE_STEP } from '../lib/placed'
 import { findNote, updateNote } from '../lib/store'
 import { standIn } from '../lib/standIns'
-import type { ArcEnCiel, MagneticInk, Note, Watermark } from '../lib/types'
+import type { ArcEnCiel, FeatureCopy, MagneticInk, Note, Watermark } from '../lib/types'
 import { fitWatermark, withWatermarkImage } from '../lib/watermark'
 import type { NoteRef } from './frameActions'
 
-/** A banknote's parts, listed under it in the Banknotes list; the right panel shows one at a time */
-export type Layer = 'note' | 'thread' | PlacedLayer
+export type { Layer } from '../lib/extras'
 
 /** The layer a banknote can show: a feature it doesn't have (removed or undone, say) falls back to the banknote itself */
-export const layerOf = (note: Pick<Note, PlacedLayer | 'noThread'> | undefined, layer: Layer): Layer =>
-  (isPlaced(layer) && !note?.[layer]) || (layer === 'thread' && (!note || !hasThread(note))) ? 'note' : layer
+export const layerOf = (note: Note | undefined, layer: Layer): Layer => (layer !== 'note' && featurePart(note, layer) ? layer : 'note')
 
-/** Adds a security feature from the Add menu: the thread, as a new banknote's would be, or a placed layer */
-export function addFeature(ref: NoteRef, feature: Feature) {
-  if (feature !== 'thread') return addLayer(ref, feature)
+/**
+ * Adds a security feature from the Add menu, and returns its layer: the first of its kind as the banknote's thread (as a
+ * new banknote's would be) or a placed layer, and another of a kind it has already as a further one (extras.ts), as many
+ * as wanted (Keller, 10 November: "no limit")
+ */
+export function addFeature(ref: NoteRef, feature: Feature): Layer {
+  const note = findNote(ref.projectId, ref.noteId)
+  if (note && hasFeature(note, feature)) return addFurther(ref, note, feature)
+  if (feature !== 'thread') {
+    addLayer(ref, feature)
+    return feature
+  }
   updateNote(ref.projectId, ref.noteId, (n) => (hasThread(n) ? n : withNewThread(n)))
+  return 'thread'
 }
 
-/** Removes a security feature, the thread as the others: one undo step, nothing of it kept */
-export async function removeFeature(ref: NoteRef, feature: Feature) {
-  if (feature !== 'thread') return removeLayer(ref, feature)
-  updateNote(ref.projectId, ref.noteId, (n) => (hasThread(n) ? withNewThread(n, true) : n))
+/**
+ * Where another thread or placed layer of a kind starts, so it shows beside the ones there rather than hidden under them:
+ * a thread across from the middle, in steps either side, at the first place none of the banknote's threads that way covers;
+ * a placed layer a step down and right of its own place for each one of its kind before it, kept on the banknote
+ */
+function furtherCopy(note: Note, feature: Feature): FeatureCopy {
+  const name = nextName(note, feature)
+  if (feature === 'thread') {
+    const fresh = withNewThread(note)
+    const { direction, widthMm } = fresh.thread
+    const across = direction === 'vertical' ? note.widthMm : note.heightMm
+    const taken = [note, ...extrasOf(note, 'thread').map((x) => x.thread)].map((t) => t.thread).filter((t) => t.direction === direction)
+    const step = Math.max(widthMm * 2, Math.round(across * 0.3) / 2)
+    const spots = Array.from({ length: 9 }, (_, i) => fresh.thread.positionMm + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * step)
+      .filter((at) => at >= widthMm / 2 && at <= across - widthMm / 2)
+    const free = spots.find((at) => taken.every((t) => Math.abs(t.positionMm - at) >= (t.widthMm + widthMm) / 2))
+    const positionMm = clamp(free ?? fresh.thread.positionMm, 0, across)
+    return { feature, thread: { thread: { ...fresh.thread, name, positionMm }, frames: fresh.frames, ...(fresh.pattern ? { pattern: fresh.pattern } : {}), lens: lensOf(note.tilt) } }
+  }
+  const before = 1 + extrasOf(note, feature).length
+  const step = Math.max(PLACE_STEP, Math.round((Math.min(note.widthMm, note.heightMm) * 0.1) / PLACE_STEP) * PLACE_STEP)
+  const box = newPlaced(feature, note)
+  const layer = fitPlaced(feature, { ...box, xMm: box.xMm + before * step, yMm: box.yMm + before * step, name } as never, note)
+  return { feature, layer } as FeatureCopy
+}
+
+/**
+ * Adds another of a kind of feature the banknote has, after the others, named as the next of its kind (Watermark 2) so the
+ * two can be told apart; a placed layer gets a stand-in image, as the first one does (`addLayer`), in the same undo step
+ */
+function addFurther(ref: NoteRef, note: Note, feature: Feature): Layer {
+  const { projectId, noteId } = ref
+  const id = crypto.randomUUID()
+  const copy = furtherCopy(note, feature)
+  beginHistoryGroup(projectId)
+  updateNote(projectId, noteId, (n) => withExtra(n, copy, id))
+  const further = { projectId, noteId: partNoteId(noteId, id) }
+  if (copy.feature === 'thread') endHistoryGroup(projectId)
+  else {
+    const layer = copy.feature
+    void standIn(layer)
+      .then((file) => {
+        const added = findNote(further.projectId, further.noteId)?.[layer]
+        if (!added || added.imageId) return
+        return setLayerImage(further, layer, file)
+      })
+      .catch(() => {})
+      .finally(() => endHistoryGroup(projectId))
+  }
+  return partLayer(feature, id)
+}
+
+/**
+ * Removes a security feature, the thread as the others: one undo step, nothing of it kept. The first of a kind makes way
+ * for the next of its kind, which moves up into its place (`promoteExtra`)
+ */
+export async function removeFeature(ref: NoteRef, layer: Layer) {
+  const part = featurePart(findNote(ref.projectId, ref.noteId), layer)
+  if (!part) return
+  // The banknote for the first of a kind, the further one's view for the others
+  const own = { projectId: ref.projectId, noteId: part.note.id }
+  if (part.feature !== 'thread') return removeLayer(own, part.feature)
+  updateNote(own.projectId, own.noteId, (n) => (hasThread(n) ? promoteExtra(withNewThread(n, true), 'thread') : n))
 }
 
 /**
  * Gives a security feature a name of its own, typed on its row in the Banknotes list (layerName.ts). Left empty, or typed
- * as what it is anyway, it takes the name off, so it goes by what it is again
+ * as what it is anyway, it takes the name off, so it goes by what it is again. A further one is renamed through its view
  */
 export function renameFeature({ projectId, noteId }: NoteRef, feature: Feature, typed: string) {
   const given = typed.trim()
@@ -46,8 +116,8 @@ export function renameFeature({ projectId, noteId }: NoteRef, feature: Feature, 
 }
 
 /**
- * Adds a layer in its own place on the banknote (a banknote has at most one of each), with a stand-in image so it shows
- * what it does straight away (`standIn`): the box at once, the image a moment later, both one undo step
+ * Adds the first of a kind of placed layer in its own place on the banknote, with a stand-in image so it shows what it
+ * does straight away (`standIn`): the box at once, the image a moment later, both one undo step
  */
 export function addLayer(ref: NoteRef, layer: PlacedLayer) {
   const { projectId, noteId } = ref
@@ -66,10 +136,10 @@ export function addLayer(ref: NoteRef, layer: PlacedLayer) {
     .finally(() => endHistoryGroup(projectId))
 }
 
-/** Removes a layer, and its image with it */
+/** Removes a layer, and its image with it; the next of its kind moves up into its place (`promoteExtra`) */
 export async function removeLayer({ projectId, noteId }: NoteRef, layer: PlacedLayer) {
   const old = findNote(projectId, noteId)?.[layer]?.imageId
-  updateNote(projectId, noteId, (n) => (n[layer] ? withPlaced(n, layer, undefined) : n))
+  updateNote(projectId, noteId, (n) => (n[layer] ? promoteExtra(withPlaced(n, layer, undefined), layer) : n))
   if (old) await removeImage(old)
 }
 

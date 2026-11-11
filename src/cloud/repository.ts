@@ -1,11 +1,12 @@
 import { workspaceJson, uploadArtwork, fetchArtwork, WorkspaceApiError } from './client'
 import { readArtwork, writeArtwork } from './cache'
+import { extraImageIds } from '../lib/extras'
 import { migrateProject } from '../lib/notes'
 import { SaveConflict, type CachedProject, type CloudProject, type ProjectRepository } from './sync'
 import type { Project } from '../lib/types'
 
 export const projectImageIds = (project: Project) => [...new Set(project.notes.flatMap(
-  (note) => [note.faceImageId, note.back?.imageId, note.watermark?.imageId, note.arcEnCiel?.imageId, note.magneticInk?.imageId, ...note.frames.map((f) => f.imageId)],
+  (note) => [note.faceImageId, note.back?.imageId, note.watermark?.imageId, note.arcEnCiel?.imageId, note.magneticInk?.imageId, ...note.frames.map((f) => f.imageId), ...extraImageIds(note)],
 ).filter((id): id is string => !!id))]
 interface Row { data: Project; revision: string; deleted_at: string | null }
 const fromRow = (row: Row): CloudProject => ({ project: migrateProject(row.data), revision: row.revision, deleted: !!row.deleted_at })

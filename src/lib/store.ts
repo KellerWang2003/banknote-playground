@@ -1,13 +1,24 @@
 import { fitTiles } from './artwork'
 import { canStepNote, recordEdit, historyStep, reconcileHistory, resetHistory } from './history'
 import { useWorkspace, putProject, editorProject } from '../cloud/workspace'
+import { extraImageIds, hostNoteId, noteOrPart, splitNoteId, throughExtra } from './extras'
 import { copyImage, removeImage } from './images'
 import { nextNotePosition } from './notes'
 import { remapTracks } from './pattern'
-import type { Note, Project } from './types'
+import type { ExtraFeature, Note, Project } from './types'
 
 const noteImageIds = (note: Note) =>
-  [note.faceImageId, note.back?.imageId, note.watermark?.imageId, note.arcEnCiel?.imageId, note.magneticInk?.imageId, ...note.frames.map((f) => f.imageId)].filter((i) => i !== undefined)
+  [note.faceImageId, note.back?.imageId, note.watermark?.imageId, note.arcEnCiel?.imageId, note.magneticInk?.imageId, ...note.frames.map((f) => f.imageId), ...extraImageIds(note)].filter((i) => i !== undefined)
+
+/** A copy of one of a banknote's further features, with its own copies of its images and, for a thread, new frame ids */
+async function copyExtra(extra: ExtraFeature): Promise<ExtraFeature> {
+  const image = async <T extends { imageId?: string }>(item: T): Promise<T> => (item.imageId ? { ...item, imageId: await copyImage(item.imageId) } : item)
+  if (extra.feature !== 'thread') return { ...extra, layer: await image(extra.layer) } as ExtraFeature
+  const frames = await Promise.all(extra.thread.frames.map(async (f) => ({ ...(await image(f)), id: crypto.randomUUID() })))
+  const pattern = remapTracks(extra.thread.pattern, new Map(extra.thread.frames.map((f, i) => [f.id, frames[i].id])))
+  const { pattern: _old, ...thread } = extra.thread
+  return { ...extra, thread: { ...thread, frames, ...(pattern ? { pattern } : {}) } }
+}
 
 /** A copy of a note with fresh ids and its own copies of the images, so deleting one never breaks the other */
 async function copyNote(note: Note): Promise<Note> {
@@ -26,7 +37,9 @@ async function copyNote(note: Note): Promise<Note> {
   const magneticInk = note.magneticInk?.imageId ? { ...note.magneticInk, imageId: await copyImage(note.magneticInk.imageId) } : note.magneticInk
   // Section tracks name frames by id, so they follow the frames to their new ids
   const pattern = remapTracks(note.pattern, new Map(note.frames.map((f, i) => [f.id, frames[i].id])))
-  return { ...note, id: crypto.randomUUID(), faceImageId, frames, ...(back ? { back } : {}), ...(watermark ? { watermark } : {}), ...(arcEnCiel ? { arcEnCiel } : {}), ...(magneticInk ? { magneticInk } : {}), ...(pattern ? { pattern } : {}) }
+  // Its further features too, each with its own images
+  const extras = note.extras && (await Promise.all(note.extras.map(copyExtra)))
+  return { ...note, id: crypto.randomUUID(), faceImageId, frames, ...(back ? { back } : {}), ...(watermark ? { watermark } : {}), ...(arcEnCiel ? { arcEnCiel } : {}), ...(magneticInk ? { magneticInk } : {}), ...(pattern ? { pattern } : {}), ...(extras ? { extras } : {}) }
 }
 
 // Keep the editor's existing actions while the cloud workspace owns persistence.
@@ -83,7 +96,7 @@ export function redoProject(id: string) {
   if (restored) putProject(restored)
 }
 
-/** Undo or redo from one banknote's thread editor: only a step that is that banknote's (`canStepNote`) */
+/** Undo or redo from one banknote's thread editor: only a step that is that banknote's (`canStepNote`), whichever of its threads is open */
 export function stepNote(projectId: string, noteId: string, direction: 'undo' | 'redo') {
   const project = editorProject(projectId)
   const restored = project && canStepNote(project, noteId, direction) && historyStep(project, direction)
@@ -93,17 +106,27 @@ export function stepNote(projectId: string, noteId: string, direction: 'undo' | 
 export const updateProject = (id: string, change: (project: Project) => Project) =>
   useProjects.getState().update(id, change)
 
+/**
+ * A banknote by its id, or one of its further features as its view by the view's id (extras.ts), so the code of a feature
+ * reads a further one as it reads the first
+ */
 export const findNote = (projectId: string, noteId: string) =>
-  editorProject(projectId)?.notes.find((note) => note.id === noteId)
+  noteOrPart(editorProject(projectId)?.notes.find((note) => note.id === hostNoteId(noteId)), noteId)
+
+/** The project's notes with `change` made to one, or to one of its further features through its view (extras.ts) */
+function changeNote(notes: Note[], noteId: string, change: (note: Note) => Note) {
+  const { noteId: host, extraId } = splitNoteId(noteId)
+  return notes.map((n) => (n.id !== host ? n : extraId === undefined ? change(n) : throughExtra(n, extraId, change)))
+}
 
 export const updateNote = (projectId: string, noteId: string, change: (note: Note) => Note) =>
-  updateProject(projectId, (p) => ({ ...p, notes: p.notes.map((n) => (n.id === noteId ? change(n) : n)) }))
+  updateProject(projectId, (p) => ({ ...p, notes: changeNote(p.notes, noteId, change) }))
 
 /** Changes a note without an undo step: for bringing older data up to date, never for an edit */
 export function settleNote(projectId: string, noteId: string, change: (note: Note) => Note) {
   const project = editorProject(projectId)
-  if (!project?.notes.some((n) => n.id === noteId)) return
-  putProject(fitTiles({ ...project, notes: project.notes.map((n) => (n.id === noteId ? change(n) : n)) }))
+  if (!project?.notes.some((n) => n.id === hostNoteId(noteId))) return
+  putProject(fitTiles({ ...project, notes: changeNote(project.notes, noteId, change) }))
 }
 
 export const addNote = (projectId: string, note: Note) =>

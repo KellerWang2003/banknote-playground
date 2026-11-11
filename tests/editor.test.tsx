@@ -1514,11 +1514,11 @@ describe('username workspace editor', () => {
     const placing = () => screen.queryByRole('group', { name: 'Place magnetic ink' })
     const ink = () => useProjects.getState().demoPreview!.notes[0].magneticInk
 
-    // The + lists every layer the banknote doesn't have yet; adding the ink selects it and shows its box to place, the
-    // banknote laid flat and the tilt card staying, as for the watermark
+    // The + lists every kind of security feature, whatever the banknote has (Keller, 10 November: "no limit"); adding the
+    // ink selects it and shows its box to place, the banknote laid flat and the tilt card staying, as for the watermark
     await user.click(addFeature())
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent))
-      .toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
+      expect.stringMatching(/^Security thread/), expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
     await user.click(screen.getByRole('menuitem', { name: /^Magnetic ink/ }))
     expect(ink()).toBeDefined()
     expect(picked()).toBe('Magnetic ink')
@@ -1601,30 +1601,34 @@ describe('username workspace editor', () => {
     expect(saves).not.toHaveBeenCalled()
   })
 
-  it('takes the + away once a banknote has every layer, keeps magnetic ink on a copy, and Delete removes it while placing', async () => {
+  it('keeps the + however many layers a banknote has, adds another of a kind, keeps them on a copy, and Delete removes one while placing', async () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'magnetic-ink-remove-ui-test')
     render(<TooltipProvider><App /></TooltipProvider>)
     await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
     await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
     const notes = () => useProjects.getState().demoPreview!.notes
-    await user.click(addFeature())
-    await user.click(await screen.findByRole('menuitem', { name: /^Magnetic ink/ }))
-    await user.click(addFeature())
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/)])
-    await user.click(screen.getByRole('menuitem', { name: /^Watermark/ }))
-    await user.click(addFeature())
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Arc-en-Ciel/)])
-    await user.click(screen.getByRole('menuitem', { name: /^Arc-en-Ciel/ }))
-    expect(screen.queryAllByRole('button', { name: 'Add security feature' })).toHaveLength(0)
-    // Listed under the thread in the order they draw
+    const kinds = [/^Security thread/, /^Watermark/, /^Arc-en-Ciel/, /^Magnetic ink/].map((name) => expect.stringMatching(name))
+    // Every kind each time, whatever the banknote has already (Keller, 10 November: "no limit")
+    for (const kind of [/^Magnetic ink/, /^Watermark/, /^Arc-en-Ciel/, /^Watermark/]) {
+      await user.click(addFeature())
+      expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(kinds)
+      await user.click(screen.getByRole('menuitem', { name: kind }))
+    }
+    // The second watermark is picked, named so the two can be told apart, and the + stays
+    expect(picked()).toBe('Watermark 2')
+    expect(screen.queryAllByRole('button', { name: 'Add security feature' }).length).toBeGreaterThan(0)
+    // Listed under the thread in the order they draw, each kind's further ones after its first
     expect(within(screen.getByRole('list', { name: 'Layers of Demo banknote' })).getAllByRole('listitem').map((row) => row.textContent))
-      .toEqual(['Security thread', 'Watermark', 'Arc-en-Ciel', 'Magnetic ink'])
+      .toEqual(['Security thread', 'Watermark', 'Watermark 2', 'Arc-en-Ciel', 'Magnetic ink'])
     const original = notes()[0].magneticInk
+    const second = notes()[0].extras
+    expect(second).toEqual([expect.objectContaining({ feature: 'watermark', layer: expect.objectContaining({ name: 'Watermark 2' }) })])
 
     await user.click(screen.getByRole('button', { name: 'Duplicate', exact: true }))
     await waitFor(() => expect(notes()).toHaveLength(2))
     expect(notes()[1].magneticInk).toEqual(original)
+    expect(notes()[1].extras).toEqual(second)
 
     // On the copy: picking its ink places it, and Delete removes it, leaving the banknote itself selected and the original alone
     await user.click(screen.getByRole('button', { name: 'Magnetic ink', exact: true }))
@@ -1633,10 +1637,15 @@ describe('username workspace editor', () => {
     expect(notes()[1].magneticInk).toBeUndefined()
     expect(notes()[0].magneticInk).toEqual(original)
     expect(picked()).toBe('Demo banknote copy')
-    // The + is back, for the ink alone
-    await user.click(addFeature())
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([expect.stringMatching(/^Magnetic ink/)])
-    await user.keyboard('{Escape}')
+    // And its second watermark alone, its first kept
+    await user.click(screen.getByRole('button', { name: 'Watermark 2', exact: true }))
+    expect(picked()).toBe('Watermark 2')
+    fireEvent.keyDown(window, { key: 'Delete' })
+    expect(notes()[1].extras).toBeUndefined()
+    expect(notes()[1].watermark).toEqual(notes()[0].watermark)
+    expect(notes()[0].extras).toEqual(second)
+    expect(picked()).toBe('Demo banknote copy')
+    await user.click(screen.getByRole('button', { name: 'Undo', exact: true }))
 
     await user.click(screen.getByRole('button', { name: 'Undo', exact: true }))
     expect(notes()[1].magneticInk).toEqual(original)
@@ -1644,5 +1653,47 @@ describe('username workspace editor', () => {
     await user.click(screen.getByRole('button', { name: 'Magnetic ink', exact: true }))
     expect(screen.getAllByRole('button', { name: 'Remove magnetic ink' })).toHaveLength(1)
     expect(saves).not.toHaveBeenCalled()
+  })
+
+  it('removes one of a kind alone, the next moving up into the first one’s place, still picked, and copies a further one', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('of-thread-workspace', 'further-feature-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    const note = () => useProjects.getState().demoPreview!.notes[0]
+    const rows = () => within(screen.getByRole('list', { name: 'Layers of Demo banknote' })).getAllByRole('listitem').map((row) => row.textContent)
+    for (const kind of [/^Watermark/, /^Watermark/, /^Security thread/]) {
+      await user.click(addFeature())
+      await user.click(await screen.findByRole('menuitem', { name: kind }))
+    }
+    // A second thread too, with its own frames and lens, picked with the timeline showing its frames
+    expect(rows()).toEqual(['Security thread', 'Security thread 2', 'Watermark', 'Watermark 2'])
+    expect(picked()).toBe('Security thread 2')
+    const thread = note().extras!.find((x) => x.feature === 'thread')!
+    expect(thread.feature === 'thread' && thread.thread.thread.positionMm).not.toBe(note().thread.positionMm)
+    expect(screen.getByRole('button', { name: 'Edit in Thread Studio' })).toBeDefined()
+
+    // Its right panel edits it alone: its position typed there moves only it
+    const position = screen.getByTitle('Thread position from the left edge', { exact: true }).querySelector('input')!
+    fireEvent.change(position, { target: { value: '20' } })
+    fireEvent.blur(position)
+    await waitFor(() => expect(note().extras!.find((x) => x.feature === 'thread')).toMatchObject({ thread: { thread: { positionMm: 20 } } }))
+    expect(note().thread.positionMm).toBe(75)
+
+    // With the second watermark picked, the first goes from its row's bin: the second moves up into its place, still picked
+    await user.click(screen.getByRole('button', { name: 'Watermark 2', exact: true }))
+    const second = note().extras!.find((x) => x.feature === 'watermark')!
+    await user.click(screen.getAllByRole('button', { name: 'Remove watermark' })[0])
+    expect(note().watermark).toEqual(second.feature === 'watermark' && second.layer)
+    expect(note().extras!.map((x) => x.feature)).toEqual(['thread'])
+    expect(picked()).toBe('Watermark 2')
+    expect(rows()).toEqual(['Security thread', 'Security thread 2', 'Watermark 2'])
+
+    // The first thread removed too, the second takes its place, frames, lens and all
+    await user.click(screen.getAllByRole('button', { name: 'Remove security thread' })[0])
+    expect(note().thread.positionMm).toBe(20)
+    expect(note().extras).toBeUndefined()
+    expect(rows()).toEqual(['Security thread 2', 'Watermark 2'])
   })
 })

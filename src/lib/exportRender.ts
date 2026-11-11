@@ -15,6 +15,8 @@ import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
 import { type PlacedBox, type Size, rotationOf } from './placed'
 import { inkLight } from './realisticInk'
 import { copyStarts, imageBox } from './artwork'
+import { extraView, extrasOf } from './extras'
+import { type Feature, hasThread } from './layers'
 import { fitSections, threadLength } from './thread'
 import { onItsSide, type Quarter } from './rotate'
 import type { ArcEnCiel, Frame, MagneticInk, Note } from './types'
@@ -136,6 +138,8 @@ export interface NoteAssets {
   arc?: { mask: InkMask; shape?: BandShape }
   /** Magnetic ink's shape, the mask its colours and bar are drawn through (inkMask.ts) */
   ink?: InkMask
+  /** Each of the banknote's further features' own (extras.ts), by its id */
+  extras?: Map<string, NoteAssets>
 }
 /** A banknote's assets for each side an export shows: the one it shows, or both when playback turns it over */
 export type SideAssets = Partial<Record<Side, NoteAssets>>
@@ -165,27 +169,30 @@ export function framePx(note: Note, frame: Frame, scale: number) {
 /**
  * A banknote's images, ready to draw at the full resolution they were uploaded at (Keller): the originals, never display
  * copies, and the watermark, Arc-en-Ciel and magnetic ink read from the whole image, an SVG's at least as big as `scale`
- * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark.
+ * (px per mm) draws it. For its back (`back`), only what shows there: the back's design and the watermark. Its further
+ * features' too, each read from its view as the first of its kind is (extras.ts); for one of those, `only` its own kind.
  */
-export async function loadNoteAssets(note: Note, scale = 0, back = false): Promise<NoteAssets> {
+export async function loadNoteAssets(note: Note, scale = 0, back = false, only?: Feature): Promise<NoteAssets> {
   const frames = new Map<string, HTMLImageElement>()
   const drawnPx = (box: { widthMm: number; heightMm: number }) => Math.max(box.widthMm, box.heightMm) * scale
-  const { watermark } = note
-  const magneticInk = back ? undefined : note.magneticInk
-  const arcEnCiel = back ? undefined : note.arcEnCiel
-  const design = sideImageId(note, back ? 'back' : 'front')
-  const [face, relief, arc, ink] = await Promise.all([
+  const own = (feature: Feature) => !only || only === feature
+  const watermark = own('watermark') ? note.watermark : undefined
+  const magneticInk = back || !own('magneticInk') ? undefined : note.magneticInk
+  const arcEnCiel = back || !own('arcEnCiel') ? undefined : note.arcEnCiel
+  const design = only ? undefined : sideImageId(note, back ? 'back' : 'front')
+  const [face, relief, arc, ink, extras] = await Promise.all([
     design ? loadArtwork(design) : undefined,
     watermark?.imageId ? exportRelief({ imageId: watermark.imageId, invert: watermark.invert, levels: watermark.levels }, drawnPx(watermark)) : undefined,
     arcEnCiel?.imageId ? loadArc(arcEnCiel, arcEnCiel.imageId, drawnPx(arcEnCiel)) : undefined,
     magneticInk?.imageId ? exportInkMask(magneticInk.imageId, magneticInk.invert, drawnPx(magneticInk)) : undefined,
-    ...(back ? [] : note.frames).map(async (frame) => {
+    Promise.all(extrasOf(note).map(async (x) => [x.id, await loadNoteAssets(extraView(note, x), scale, back, x.feature)] as const)),
+    ...(back || !own('thread') ? [] : note.frames).map(async (frame) => {
       if (frame.kind !== 'image' || !frame.imageId) return
       const img = await loadArtwork(frame.imageId)
       if (img) frames.set(frame.id, img)
     }),
   ])
-  return { face, frames, relief, arc, ink }
+  return { face, frames, relief, arc, ink, ...(extras.length ? { extras: new Map(extras) } : {}) }
 }
 
 /**
@@ -229,6 +236,8 @@ export interface FaceOptions {
   reveal?: number
   /** Where along the thread the pattern's repeat starts, mm, as the canvas previews it */
   offsetMm?: number
+  /** The same for each further thread, by its view's id (extras.ts) */
+  offsets?: Record<string, number>
   /** The banknote's back, as the canvas shows it turned over: its own background and the watermark, mirrored (its assets loaded for it) */
   back?: boolean
   /** How far it has turned over, 0 (front) to 1 (back), which turns realistic magnetic ink from the lamp as it shows turning (with `perspective`) */
@@ -239,10 +248,13 @@ export interface FaceOptions {
   grain?: number
 }
 
-/** The flat note at `scale` px per mm, as NoteView draws it before it is turned in 3D */
+/**
+ * The flat note at `scale` px per mm, as NoteView draws it before it is turned in 3D: every one of a kind of feature
+ * together, the first and then its further ones (extras.ts), each from its view with its own assets, the watermarks
+ * under the Arc-en-Ciels, under the magnetic inks, under the threads
+ */
 export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number, tiltAt: Tilt2 | number, options: FaceOptions) {
-  const { thread, frames, watermark, arcEnCiel, magneticInk } = note
-  const { x: angleX, y: angle } = asTilt(tiltAt)
+  const tilt = asTilt(tiltAt)
   const mm = (value: number) => value * scale
   const width = mm(note.widthMm), height = mm(note.heightMm)
   ctx.save()
@@ -261,57 +273,83 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     const w = face.naturalWidth * k, h = face.naturalHeight * k
     ctx.drawImage(face, (width - w) / 2, (height - h) / 2, w, h)
   }
-  if (watermark && assets.relief) {
-    // As NoteView: light through thinner paper, colour-dodged over the design so it only brightens it and keeps the
-    // note's own colours, at how much of that light comes through, under the thread
-    ctx.globalCompositeOperation = 'color-dodge'
-    ctx.globalAlpha = watermarkOpacity(watermark.depth, options.reveal ?? watermarkReveal(0, { x: angleX, y: angle }))
-    // Scaled down as smoothly as the canvas draws it, so fine detail doesn't turn to grain
-    ctx.imageSmoothingQuality = 'high'
-    const light = assets.relief.canvas
-    if (options.back) {
-      // Seen from the back it lies the other way round, at the other side, turned the other way
-      const box = mirrored(watermark, note)
-      turnedAs(ctx, box, mm, () => {
-        ctx.save()
-        ctx.translate(mm(box.xMm + box.widthMm), mm(box.yMm))
-        ctx.scale(-1, 1)
-        ctx.drawImage(light, 0, 0, mm(box.widthMm), mm(box.heightMm))
-        ctx.restore()
-      })
-    } else {
-      turnedAs(ctx, watermark, mm, () => ctx.drawImage(light, mm(watermark.xMm), mm(watermark.yMm), mm(watermark.widthMm), mm(watermark.heightMm)))
-    }
-    ctx.imageSmoothingQuality = 'low'
-    ctx.globalAlpha = 1
-    ctx.globalCompositeOperation = 'source-over'
-  }
+  // Every one of a kind: the first, on the banknote itself, then each further one as its view with its assets
+  const each = (feature: Feature) => [
+    { note, assets },
+    ...extrasOf(note, feature).flatMap((x) => {
+      const own = assets.extras?.get(x.id)
+      return own ? [{ note: extraView(note, x), assets: own }] : []
+    }),
+  ]
+  for (const part of each('watermark')) drawWatermark(ctx, part.note, part.assets, mm, tilt, options)
   if (options.back) {
     // Nothing else shows on the back: no Arc-en-Ciel, no magnetic ink, no thread
-    drawShade(ctx, width, height, { x: angleX, y: angle }, options.perspective)
+    drawShade(ctx, width, height, tilt, options.perspective)
     ctx.restore()
     return
   }
   // Realistic, lit as the canvas lights them, turned over (only as it shows turning, in perspective) and rotated as the banknote shows
   const turn = options.perspective ? options.turn : 0
   // Each turned about its middle as far as it is rotated on the banknote, as NoteView turns its box
-  if (arcEnCiel && assets.arc) {
-    const arc = assets.arc
-    turnedAs(ctx, arcEnCiel, mm, () =>
-      drawArc(ctx, arcEnCiel, arc, mm, { x: angleX, y: angle }, options.realistic ? { turn, quarter: options.quarter } : undefined))
+  for (const { note: { arcEnCiel }, assets: { arc } } of each('arcEnCiel')) {
+    if (arcEnCiel && arc) turnedAs(ctx, arcEnCiel, mm, () => drawArc(ctx, arcEnCiel, arc, mm, tilt, options.realistic ? { turn, quarter: options.quarter } : undefined))
   }
-  if (magneticInk && assets.ink) {
-    const ink = assets.ink
-    turnedAs(ctx, magneticInk, mm, () =>
-      drawInk(ctx, magneticInk, ink, mm, { x: angleX, y: angle }, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain } : undefined))
+  for (const { note: { magneticInk }, assets: { ink } } of each('magneticInk')) {
+    if (magneticInk && ink) {
+      turnedAs(ctx, magneticInk, mm, () =>
+        drawInk(ctx, magneticInk, ink, mm, tilt, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain } : undefined))
+    }
   }
-  // A banknote without a thread ends there too (Keller, 4 November: the thread is added like any other feature)
-  if (note.noThread) {
-    drawShade(ctx, width, height, { x: angleX, y: angle }, options.perspective)
-    ctx.restore()
-    return
-  }
+  // A banknote without a thread has none of these (Keller, 4 November: the thread is added like any other feature)
+  const labels = each('thread').flatMap((part, i) => {
+    if (!hasThread(part.note)) return []
+    const offsetMm = (i === 0 ? options.offsetMm : options.offsets?.[part.note.id]) ?? 0
+    return [drawThread(ctx, part.note, part.assets, mm, tilt, offsetMm, options.sheen)]
+  })
 
+  drawShade(ctx, width, height, tilt, options.perspective)
+  if (options.frameNumbers) for (const { label, strip } of labels) if (label) drawFrameNumber(ctx, label, strip, mm)
+  ctx.restore()
+}
+
+/**
+ * A watermark, as NoteView draws it: light through thinner paper, colour-dodged over the design so it only brightens it
+ * and keeps the note's own colours, at how much of that light comes through, under the thread
+ */
+function drawWatermark(ctx: Ctx, note: Note, assets: NoteAssets, mm: (value: number) => number, tilt: Tilt2, options: FaceOptions) {
+  const { watermark } = note
+  if (!watermark || !assets.relief) return
+  ctx.globalCompositeOperation = 'color-dodge'
+  ctx.globalAlpha = watermarkOpacity(watermark.depth, options.reveal ?? watermarkReveal(0, tilt))
+  // Scaled down as smoothly as the canvas draws it, so fine detail doesn't turn to grain
+  ctx.imageSmoothingQuality = 'high'
+  const light = assets.relief.canvas
+  if (options.back) {
+    // Seen from the back it lies the other way round, at the other side, turned the other way
+    const box = mirrored(watermark, note)
+    turnedAs(ctx, box, mm, () => {
+      ctx.save()
+      ctx.translate(mm(box.xMm + box.widthMm), mm(box.yMm))
+      ctx.scale(-1, 1)
+      ctx.drawImage(light, 0, 0, mm(box.widthMm), mm(box.heightMm))
+      ctx.restore()
+    })
+  } else {
+    turnedAs(ctx, watermark, mm, () => ctx.drawImage(light, mm(watermark.xMm), mm(watermark.yMm), mm(watermark.widthMm), mm(watermark.heightMm)))
+  }
+  ctx.imageSmoothingQuality = 'low'
+  ctx.globalAlpha = 1
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+/**
+ * A thread, as NoteView draws it, through its windows: each section of its pattern showing its own frames through its
+ * areas, each frame's image once in every repeat from `offsetMm`, and the sheen. Returns where it runs and the frame it
+ * shows, for its number
+ */
+function drawThread(ctx: Ctx, note: Note, assets: NoteAssets, mm: (value: number) => number, tilt: Tilt2, offsetMm: number, sheen: boolean) {
+  const { thread, frames } = note
+  const { y: angle } = tilt
   const horizontal = thread.direction === 'horizontal'
   const lengthMm = threadLength(note)
   const strip = horizontal
@@ -340,7 +378,6 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   // sits once in every repeat from the same start
   const prepared = preparePattern(note)
   const { repeatMm } = prepared.pattern
-  const offsetMm = options.offsetMm ?? 0
   const thickness = horizontal ? strip.h : strip.w
   const drawFrame = (index: number, opacity: number) => {
     const frame = frames.at(index)
@@ -361,7 +398,7 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     }
     ctx.globalAlpha = 1
   }
-  const mixes = prepared.plain ? [lensMix(note, { x: angleX, y: angle })] : patternMix(note, { x: angleX, y: angle })
+  const mixes = prepared.plain ? [lensMix(note, tilt)] : patternMix(note, tilt)
   mixes.forEach((mix, i) => {
     const section = prepared.plain ? undefined : prepared.sections[i].section
     if (section) {
@@ -380,7 +417,7 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   })
 
   const t = angle / SHADE_DEG
-  if (options.sheen) {
+  if (sheen) {
     // A highlight that travels down the thread's box as the note tilts, soft-light blended
     const at = (50 + t * 120) / 100
     const gradient = ctx.createLinearGradient(0, 0, 0, strip.h)
@@ -400,10 +437,7 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.globalCompositeOperation = 'source-over'
   }
   ctx.restore()
-
-  drawShade(ctx, width, height, { x: angleX, y: angle }, options.perspective)
-  if (options.frameNumbers && frames.length > 0) drawFrameNumber(ctx, shownLabel(mixes.map((mix) => mix.current)), strip, mm)
-  ctx.restore()
+  return { strip, label: frames.length > 0 ? shownLabel(mixes.map((mix) => mix.current)) : undefined }
 }
 
 /** The light and shade a note catches as it turns, over all of it, as NoteView's shade parts (only in perspective) */
@@ -675,7 +709,7 @@ export function drawExportFrame(
     if (!face || !noteAssets) continue
     const faceCtx = face.getContext('2d')!
     faceCtx.clearRect(0, 0, face.width, face.height)
-    drawFace(faceCtx, cell.note, noteAssets, scale, angle, { ...options, back, reveal, offsetMm: options.offsets?.[cell.note.id], turn, grain })
+    drawFace(faceCtx, cell.note, noteAssets, scale, angle, { ...options, back, reveal, offsetMm: options.offsets?.[cell.note.id], offsets: options.offsets, turn, grain })
     const view = options.perspective ? withTurn(angle, turn) : 0
     const perspective = perspectiveFor(cell.note, scale)
     if (!options.quarter) {
@@ -728,7 +762,7 @@ export function artworkSize(id: string) {
 }
 
 /** What a still image follows from the canvas, as a video does: the sheen, Realistic, #, the side shown, the rotation, the pattern's offset */
-export type StillOptions = Pick<FaceOptions, 'sheen' | 'realistic' | 'frameNumbers' | 'back' | 'quarter' | 'offsetMm'>
+export type StillOptions = Pick<FaceOptions, 'sheen' | 'realistic' | 'frameNumbers' | 'back' | 'quarter' | 'offsetMm' | 'offsets'>
 
 /**
  * A still image of one banknote (Keller, 9 November): the banknote flat and face on, filling the image at `scale` px per mm

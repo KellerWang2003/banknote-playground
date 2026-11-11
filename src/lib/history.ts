@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { hostNoteId } from './extras'
 import type { Note, Project, TiltSettings } from './types'
 
 const LIMIT = 100
@@ -111,8 +112,10 @@ function ownPart(note: Note) {
  * thread editor steps through these alone, so it never changes a banknote out of sight. A playback change saved to
  * every banknote is shared even where the open one already had it, so it never strands the editor's undo.
  */
-export function canStepNote(project: Project, noteId: string, direction: 'undo' | 'redo', entry = useHistory.getState().entries[project.id]): boolean {
+export function canStepNote(project: Project, id: string, direction: 'undo' | 'redo', entry = useHistory.getState().entries[project.id]): boolean {
   if (!entry || entry.current !== fingerprint(project)) return false
+  // Thread Studio open on a further thread knows it by its view's id (extras.ts): its step is its banknote's
+  const noteId = hostNoteId(id)
   const next = (direction === 'undo' ? entry.past : entry.future).at(-1)
   const { notes } = project
   if (!next || next.notes.length !== notes.length || !notes.some((n) => n.id === noteId)) return false

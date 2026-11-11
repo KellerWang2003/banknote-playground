@@ -127,6 +127,15 @@ describe('undo in one banknote’s thread editor', () => {
     expect(canvas.notes[1].widthMm).toBe(150)
   })
 
+  it('steps through a further thread’s edits from Thread Studio open on it, by its view’s id, as its banknote’s', () => {
+    let project = twoNotes()
+    const [a, b] = project.notes.map((n) => n.id)
+    project = editNote(project, 0, (n) => ({ ...n, name: 'A2' }))
+    // Thread Studio knows a further thread by its banknote's id and its own (extras.ts)
+    expect(canStepNote(project, `${a}/second`, 'undo')).toBe(true)
+    expect(canStepNote(project, `${b}/second`, 'undo')).toBe(false)
+  })
+
   it('takes playback saved to every banknote as shared, even where the open one already had it', () => {
     let project = twoNotes()
     const [a] = project.notes.map((n) => n.id)

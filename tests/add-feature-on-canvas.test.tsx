@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ import App from '../src/App'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import { Canvas } from '../src/editor/Canvas'
 import { newArcEnCiel } from '../src/lib/arcEnCiel'
+import { neighboursPx } from '../src/lib/continuous'
 import { newMagneticInk } from '../src/lib/magneticInk'
 import { createNote } from '../src/lib/notes'
 import { useProjects } from '../src/lib/store'
@@ -16,7 +17,8 @@ import { newWatermark } from '../src/lib/watermark'
 import { setTilt, useTilt } from '../src/tilt/tilt'
 
 // Keller, 10 November: "a plus button at the bottom of the banknote so that i can add security features there. it would
-// only appear on the banknote that is selected"
+// only appear on the banknote that is selected"; then "the button should appear on all of the banknotes. not just new
+// ones. and also you should be able ot add multiple of the same security feature. so no limit"
 
 vi.mock('../src/cloud/client', () => ({ cloudConfigured: true }))
 vi.mock('../src/cloud/repository', async (importOriginal) => {
@@ -113,13 +115,13 @@ describe('the + under the selected banknote', () => {
     expect(plus()).toBeNull()
   })
 
-  it('opens the Add menu of the features the banknote lacks, adds the one picked, and is gone once it has them all', async () => {
+  it('opens the Add menu of every kind of feature, whatever the banknote has, and adds the one picked', async () => {
     const user = userEvent.setup()
     const one = bare('One')
     const { onAddFeature, onSelect, onSelectLayer, rerender } = renderCanvas({ notes: [one] })
+    const kinds = [/^Security thread/, /^Watermark/, /^Arc-en-Ciel/, /^Magnetic ink/].map((name) => expect.stringMatching(name))
     await user.click(plus()!)
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/^Security thread/), expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(kinds)
     await user.click(screen.getByRole('menuitem', { name: /^Watermark/ }))
     expect(onAddFeature).toHaveBeenCalledWith(one.id, 'watermark')
     // The menu is drawn outside the canvas, though React hands its presses up through it: neither the press that picks in
@@ -128,16 +130,16 @@ describe('the + under the selected banknote', () => {
     expect(onSelectLayer).not.toHaveBeenCalled()
     expect(useTilt.getState().source).toBe('drag')
 
-    // It lists only what is left, and goes once there is nothing
-    const withWatermark = { ...one, watermark: newWatermark(one) }
-    rerender({ notes: [withWatermark] })
-    await user.click(plus()!)
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/^Security thread/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
-    await user.keyboard('{Escape}')
+    // On a banknote that has one of each, and more, it is there all the same, offering every kind again
     const all = full('All')
-    rerender({ notes: [all], selectedId: all.id })
-    expect(plus()).toBeNull()
+    const more = { ...all, extras: [{ id: 'second', feature: 'watermark' as const, layer: newWatermark(all) }] }
+    for (const note of [all, more]) {
+      rerender({ notes: [note], selectedId: note.id })
+      await user.click(plus()!)
+      expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(kinds)
+      await user.click(screen.getByRole('menuitem', { name: /^Watermark/ }))
+      expect(onAddFeature).toHaveBeenLastCalledWith(note.id, 'watermark')
+    }
   })
 
   it('takes its own press, so a press on it neither picks nor tilts', () => {
@@ -151,7 +153,7 @@ describe('the + under the selected banknote', () => {
     expect(useTilt.getState()).toMatchObject({ source: 'drag', target: 0, targetX: 0 })
   })
 
-  it('makes way while banknotes play, windows are edited, a layer is placed or the continuous check shows', () => {
+  it('makes way while banknotes play, windows are edited or a layer is placed, and hangs past the continuous check', () => {
     const base = bare('One')
     const one = { ...base, watermark: newWatermark(base) }
     const { rerender } = renderCanvas({ notes: [one] })
@@ -161,9 +163,13 @@ describe('the + under the selected banknote', () => {
     expect(plus()).toBeNull()
     act(() => setTilt({ source: 'drag' }))
     expect(plus()).not.toBeNull()
-    // Placing its watermark, whose box may hang off the bottom edge
+    // Placing its watermark, whose box may hang off the bottom edge, or a further one
     rerender({ layer: 'watermark', placing: 'watermark' })
     expect(plus()).toBeNull()
+    const two = { ...one, extras: [{ id: 'second', feature: 'watermark' as const, layer: newWatermark(one) }] }
+    rerender({ notes: [two], layer: 'watermark/second', placing: 'watermark/second' })
+    expect(plus()).toBeNull()
+    rerender({ notes: [one] })
     // Picked but not being placed, it is back
     rerender({ layer: 'watermark', placing: undefined })
     expect(plus()).not.toBeNull()
@@ -174,12 +180,15 @@ describe('the + under the selected banknote', () => {
     expect(plus()).not.toBeNull()
 
     // The continuous check shows round an uploaded design while the banknote itself is picked, with nothing between it and
-    // its neighbours, its name and outline gone too
+    // its neighbours: it hangs 12 px past them, as it hangs 12 px under the banknote
     const checked: Note = { ...one, background: 'image', faceImageId: 'design', continuous: { cutMm: 1 } }
+    expect(plus()!.parentElement!.style.top).toBe('12px')
     rerender({ notes: [checked], layer: 'note' })
-    expect(plus()).toBeNull()
+    const scale = parseFloat(anchor().parentElement!.style.width) / 150
+    expect(parseFloat(plus()!.parentElement!.style.top)).toBeCloseTo(12 + neighboursPx(scale), 6)
+    expect(neighboursPx(scale)).toBeGreaterThan(0)
     rerender({ notes: [checked], layer: 'watermark' })
-    expect(plus()).not.toBeNull()
+    expect(plus()!.parentElement!.style.top).toBe('12px')
 
     // Not while Thread Studio is open over the canvas, which leaves the way to add out
     rerender({ notes: [one], layer: 'note', onAddFeature: undefined })
@@ -198,22 +207,31 @@ describe('adding a security feature from the canvas', () => {
     const note = () => useProjects.getState().demoPreview!.notes[0]
     expect(picked()).toBe('Demo banknote')
 
+    const kinds = [/^Security thread/, /^Watermark/, /^Arc-en-Ciel/, /^Magnetic ink/].map((name) => expect.stringMatching(name))
     await user.click(plus()!)
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/), expect.stringMatching(/^Magnetic ink/)])
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(kinds)
     await user.click(screen.getByRole('menuitem', { name: /^Magnetic ink/ }))
     // Added and picked, its box out to place it, which the + makes way for
     expect(note().magneticInk).toBeDefined()
     expect(picked()).toBe('Magnetic ink')
     expect(plus()).toBeNull()
 
-    // The banknote picked again, the + offers what is left
+    // The banknote picked again, the + offers every kind again: another magnetic ink comes after the first, named so the
+    // two can be told apart, and is picked
     await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
     expect(picked()).toBe('Demo banknote')
     await user.click(plus()!)
-    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/^Watermark/), expect.stringMatching(/^Arc-en-Ciel/)])
-    // Escape closes it, leaving the banknote picked
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(kinds)
+    await user.click(screen.getByRole('menuitem', { name: /^Magnetic ink/ }))
+    expect(note().extras).toEqual([expect.objectContaining({ feature: 'magneticInk', layer: expect.objectContaining({ name: 'Magnetic ink 2' }) })])
+    expect(picked()).toBe('Magnetic ink 2')
+    expect(within(screen.getByRole('list', { name: 'Layers of Demo banknote' })).getAllByRole('listitem').map((row) => row.textContent))
+      .toEqual(['Security thread', 'Magnetic ink', 'Magnetic ink 2'])
+
+    // Escape closes the menu, leaving the banknote picked
+    await user.click(screen.getByRole('button', { name: 'Demo banknote', exact: true }))
+    await user.click(plus()!)
+    await screen.findByRole('menu')
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).toBeNull()
     expect(picked()).toBe('Demo banknote')

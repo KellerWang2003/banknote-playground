@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { IconButton, Panel } from '../components/controls'
 import { NoteView } from '../components/NoteView'
 import { designFace } from '../lib/back'
+import { neighboursPx } from '../lib/continuous'
 import { clamp, perspectiveFor } from '../lib/frames'
 import { lensState } from '../lib/lens'
 import { playbackPlan } from '../lib/moves'
@@ -18,6 +19,7 @@ import { updateNote } from '../lib/store'
 import type { Note } from '../lib/types'
 import { lengthIn, useLengthUnit } from '../lib/units'
 import { mmSpot, withPoint } from '../lib/arcEnCiel'
+import { featureOf, featurePart, hostNoteId, noteOrPart } from '../lib/extras'
 import { type Feature, isPlaced, type PlacedLayer } from '../lib/layers'
 import { type PlacedBox, moveBox } from '../lib/placed'
 import { type Quarter, ROTATE_SECONDS, noteBox, onItsSide, quarterOf, turnedCorner, unturn, unturnedPoint } from '../lib/rotate'
@@ -64,10 +66,12 @@ type Gesture =
    * leaves the tilt where it is, and picks the banknote, or clears the selection
    */
   | { mode: 'tilt'; noteId?: string; startX: number; startY: number; start: number; startSide: number; moved: boolean }
-  | { mode: 'thread'; noteId: string; startX: number; startY: number; startPosition: number; alongMm: number }
+  /** A thread dragged across its banknote: `noteId` is the banknote's, or a further thread's view's (extras.ts), and `layer` which thread */
+  | { mode: 'thread'; noteId: string; layer: Layer; startX: number; startY: number; startPosition: number; alongMm: number }
   /**
    * A placed layer (the watermark, magnetic ink) moves only once the drag passes a few px, so a click just picks it;
-   * pressed on the banknote's back (`mirror`), a drag to the right moves it towards the front's left
+   * pressed on the banknote's back (`mirror`), a drag to the right moves it towards the front's left. `noteId` is the
+   * banknote's, or a further layer's view's (extras.ts), and `layer` its kind
    */
   | { mode: 'placed'; layer: PlacedLayer; noteId: string; startX: number; startY: number; original: PlacedBox; moved: boolean; mirror: boolean }
 
@@ -143,7 +147,10 @@ export function Canvas({
   projectId: string
   notes: Note[]
   selectedId: string | undefined
-  /** The selected banknote's part that is picked, outlined on the canvas: the banknote itself, its thread, watermark or magnetic ink */
+  /**
+   * The selected banknote's part that is picked, outlined on the canvas: the banknote itself, or one of its security
+   * features, the first of its kind or a further one (extras.ts)
+   */
   layer?: Layer
   /** Selects a banknote itself, or nothing */
   onSelect: (noteId: string | undefined) => void
@@ -155,8 +162,8 @@ export function Canvas({
   selectedWindowId?: string
   onWindowSelect: (id: string | undefined) => void
   onExitWindows?: () => void
-  /** The selected banknote's layer being placed: the banknote shows flat (its watermark clear) with the layer's box to drag */
-  placing?: PlacedLayer
+  /** The selected banknote's placed layer being placed: the banknote shows flat (its watermarks clear) with the layer's box to drag */
+  placing?: Layer
   onExitPlacing?: () => void
   /** Export, at the end of the corner bar after the zoom controls; left out while the thread editor is open */
   onExport?: () => void
@@ -167,10 +174,10 @@ export function Canvas({
    * as it runs the tilt loop
    */
   covered?: boolean
-  /** A click on a thread window opens it for editing */
-  onEditWindow?: (noteId: string, windowId: string) => void
-  /** A double-click on a thread, or the Edit thread button under the picked one, opens the thread editor; left out while it is open */
-  onEditThread?: (noteId: string) => void
+  /** A click on a thread window opens it for editing, on the thread whose layer it is */
+  onEditWindow?: (noteId: string, windowId: string, layer: Layer) => void
+  /** A double-click on a thread opens the thread editor on it; left out while it is open */
+  onEditThread?: (noteId: string, layer: Layer) => void
   /** Adds a security feature from the + under the selected banknote, as the Add menu in the Banknotes list does; left out while the thread editor is open */
   onAddFeature?: (noteId: string, feature: Feature) => void
   /** The thread editor is open over the canvas: the thread is only on the front, so playback's Flip moves wait flat, as F does nothing there */
@@ -435,17 +442,30 @@ export function Canvas({
   const noteAt = (target: EventTarget, attribute: 'data-note-label' | 'data-note-body') =>
     (target as HTMLElement).closest(`[${attribute}]`)?.getAttribute(attribute) ?? undefined
 
-  /** A placed layer the pointer is on, on the banknote or its placing box */
+  /** A placed layer the pointer is on, on the banknote or its placing box: the first of its kind or a further one */
   const placedAt = (target: EventTarget) => {
     const layer = (target as HTMLElement).closest('[data-placed]')?.getAttribute('data-placed') ?? undefined
-    return isPlaced(layer) ? layer : undefined
+    return isPlaced(featureOf(layer)) ? (layer as Layer) : undefined
   }
+
+  /**
+   * The thread the pointer is on, the first one or a further one; for hovering and double-clicks the window editor counts
+   * as the thread it edits (`editor`)
+   */
+  const threadAt = (target: EventTarget, editor = true): Layer | undefined => {
+    const element = target as HTMLElement
+    const thread = element.closest('[data-thread]')
+    if (thread) return (thread.getAttribute('data-thread') || 'thread') as Layer
+    return editor && element.closest('[data-window-editor]') && featureOf(layer) === 'thread' ? layer : undefined
+  }
+
+  /** A banknote, or a further feature's view, by its id (extras.ts) */
+  const partNote = (id: string) => noteOrPart(notes.find((n) => n.id === hostNoteId(id)), id)
 
   /** Follows the pointer between gestures; the window editor and placing box count as the part they edit */
   const hoverOver = (target: EventTarget) => {
-    const element = target as HTMLElement
     const noteId = noteAt(target, 'data-note-label') ?? noteAt(target, 'data-note-body')
-    const part: Layer = element.closest('[data-thread], [data-window-editor]') ? 'thread' : placedAt(target) ?? 'note'
+    const part: Layer = threadAt(target) ?? placedAt(target) ?? 'note'
     setHover((h) => (!noteId ? undefined : h?.noteId === noteId && h.part === part ? h : { noteId, part }))
   }
 
@@ -464,13 +484,15 @@ export function Canvas({
   const quiet = source === 'wobble' || activeMode === 'tilt' || activeMode === 'move'
   // The hand shows over everything a press would pan from, the notes' own cursors included
   const grab = activeMode === 'pan' ? 'grabbing' : hand ? 'grab' : undefined
-  // The + under the selected banknote (Keller, 10 November) goes with its other marks of selection while banknotes play or
-  // are dragged, and makes way while windows are edited, a layer placed or the continuous check shows. Where it hangs: the
-  // bottom of the box the banknote shows, rotated or not, as a share of its height as it lies upright
+  // The + under the selected banknote (Keller, 10 November), on every banknote, whatever it has already (Keller: "the button
+  // should appear on all of the banknotes"), goes with its other marks of selection while banknotes play or are dragged, and
+  // makes way while windows are edited or a layer placed. Where it hangs: the bottom of the box the banknote shows, rotated
+  // or not, as a share of its height as it lies upright, and past the neighbours while the continuous check shows them
   const shown = selected && noteBox(selected, quarter)
-  const addUnder = selected && shown && onAddFeature && !quiet && !editingWindows && !placing && !checksContinuous(selected, back, layer)
+  const addUnder = selected && shown && onAddFeature && !quiet && !editingWindows && !placing
     ? (shown.y + shown.height - selected.y) / selected.heightMm
     : undefined
+  const addBelow = selected && checksContinuous(selected, back, layer) ? neighboursPx(scale) : 0
 
   return (
     <div
@@ -515,14 +537,16 @@ export function Canvas({
         if (editingWindows && (!note || bodyId === selectedId)) onExitWindows?.()
         if (placing && (!note || bodyId === selectedId)) onExitPlacing?.()
         startGesture(e, v)
-        const onThread = !labelId && (e.target as HTMLElement).closest('[data-thread]') !== null
-        const onPlaced = labelId ? undefined : placedAt(e.target)
-        const placed = onPlaced && note?.[onPlaced]
+        // The thread or placed layer pressed, the first of its kind or a further one, as its own code sees it (extras.ts)
+        const onThread = labelId || !note ? undefined : featurePart(note, threadAt(e.target, false) ?? 'note')
+        const onPlaced = labelId || !note ? undefined : featurePart(note, placedAt(e.target) ?? 'note')
+        const placed = onPlaced && isPlaced(onPlaced.feature) ? onPlaced.note[onPlaced.feature] : undefined
         if (onThread && note) {
           // The thread moves across the banknote, along the axis its position is measured on
-          onSelectLayer(note.id, 'thread')
+          onSelectLayer(note.id, onThread.layer)
+          const { thread } = onThread.note
           const rect = (e.target as HTMLElement).closest('[data-note-body]')?.firstElementChild?.getBoundingClientRect()
-          const horizontal = note.thread.direction === 'horizontal'
+          const horizontal = thread.direction === 'horizontal'
           // Where the press is on the banknote as it lies, rotated or not
           const at = rect && unturnedPoint(e.clientX, e.clientY, rect, quarter)
           const alongMm = at
@@ -530,12 +554,12 @@ export function Canvas({
               ? (at.x / at.width) * note.widthMm
               : (at.y / at.height) * note.heightMm
             : -1
-          gesture.current = { mode: 'thread', noteId: note.id, startX: e.clientX, startY: e.clientY, startPosition: note.thread.positionMm, alongMm }
-        } else if (onPlaced && placed && note) {
+          gesture.current = { mode: 'thread', noteId: onThread.note.id, layer: onThread.layer, startX: e.clientX, startY: e.clientY, startPosition: thread.positionMm, alongMm }
+        } else if (onPlaced && placed && isPlaced(onPlaced.feature) && note) {
           // The watermark or magnetic ink moves around the banknote, as the thread moves across it. Picking it shows its
           // box, whose corners resize it.
-          onSelectLayer(note.id, onPlaced)
-          gesture.current = { mode: 'placed', layer: onPlaced, noteId: note.id, startX: e.clientX, startY: e.clientY, original: placed, moved: false, mirror: back }
+          onSelectLayer(note.id, onPlaced.layer)
+          gesture.current = { mode: 'placed', layer: onPlaced.feature, noteId: onPlaced.note.id, startX: e.clientX, startY: e.clientY, original: placed, moved: false, mirror: back }
         } else if (labelId && note) {
           onSelect(note.id)
           gesture.current = { mode: 'move', noteId: note.id, startX: e.clientX, startY: e.clientY, noteX: note.x, noteY: note.y }
@@ -578,7 +602,7 @@ export function Canvas({
           if (!g.moved && Math.hypot(dx, dy) < 3) return
           g.moved = true
           // From where the press found it, in 0.5 mm steps, kept on the banknote, the way the pointer goes on it rotated
-          const note = notes.find((n) => n.id === g.noteId)
+          const note = partNote(g.noteId)
           const box = note?.[g.layer]
           const along = unturn(dx, dy, quarter)
           const next = note && moveBox(g.original, (g.mirror ? -along.x : along.x) / scale, along.y / scale, note)
@@ -620,11 +644,11 @@ export function Canvas({
         const g = gesture.current
         // A click on a window, without dragging, opens it for resizing
         if (g?.mode === 'thread' && Math.hypot(e.clientX - g.startX, e.clientY - g.startY) < 3) {
-          const note = notes.find((n) => n.id === g.noteId)
+          const note = partNote(g.noteId)
           const section = note?.thread.windows.enabled
             ? note.thread.windows.sections.find((s) => g.alongMm >= s.startMm && g.alongMm <= s.endMm)
             : undefined
-          if (note && section) onEditWindow?.(note.id, section.id)
+          if (note && section) onEditWindow?.(hostNoteId(note.id), section.id, g.layer)
         }
         // A click without tilting picks the banknote itself, away from its thread and placed layers, or on the empty
         // canvas clears the selection
@@ -637,7 +661,8 @@ export function Canvas({
       onDoubleClick={(e) => {
         const target = e.target as HTMLElement
         const noteId = noteAt(target, 'data-note-body')
-        if (noteId && target.closest('[data-thread], [data-window-editor]')) onEditThread?.(noteId)
+        const thread = threadAt(target)
+        if (noteId && thread) onEditThread?.(noteId, thread)
       }}
       onDragOver={(e) => {
         e.preventDefault()
@@ -660,8 +685,12 @@ export function Canvas({
         notes.map((note) => {
           const isSelected = note.id === selectedId
           const editingThis = isSelected && editingWindows
-          const placingThis = isSelected && placing && note[placing] ? placing : undefined
-          const arc = note.arcEnCiel
+          // The thread whose windows are edited, or the placed layer being placed, as its own code sees it (extras.ts)
+          const edited = editingThis ? featurePart(note, layer) : undefined
+          const placingPart = isSelected && placing ? featurePart(note, placing) : undefined
+          const placingThis = placingPart && isPlaced(placingPart.feature) ? placingPart.feature : undefined
+          const placingRef: NoteRef = { projectId, noteId: placingPart?.note.id ?? note.id }
+          const arc = placingThis === 'arcEnCiel' ? placingPart?.note.arcEnCiel : undefined
           // Only what is picked is outlined, the banknote itself or one of its parts; what a click would pick is outlined
           // lightly, but not while Space is held, as a press then only pans
           const picked = isSelected ? layer : undefined
@@ -723,27 +752,28 @@ export function Canvas({
                 >
                   {/* Editing windows shows the banknote flat with its watermark faint; placing a layer, flat (the watermark clear) */}
                   <NoteView note={note} scale={scale} live perspective={perspective && !editingThis && !placingThis} sheen={sheen} realistic={realistic}
-                    reveal={editingThis ? 0 : placingThis === 'watermark' ? 1 : undefined} showWindowCuts={editingThis} showFrameNumber={frameNumbers} offsetMm={offsets[note.id]}
+                    reveal={editingThis ? 0 : placingThis === 'watermark' ? 1 : undefined} showWindowCuts={editingThis && edited?.layer} showFrameNumber={frameNumbers}
+                    offsetMm={offsets[note.id]} offsets={offsets}
                     selected={picked === 'note' || editingThis || placingThis || quiet ? undefined : picked} hovered={hovered === 'note' ? undefined : hovered} />
-                  {placingThis && (
-                    <PlacingBox note={note} layer={placingThis} box={note[placingThis]!} scale={scale} mirror={back} quarter={quarter}
-                      onChange={(next) => placeLayer(ref, placingThis, next)}
+                  {placingPart && placingThis && (
+                    <PlacingBox note={placingPart.note} layer={placingThis} part={placingPart.layer} box={placingPart.note[placingThis]!} scale={scale} mirror={back} quarter={quarter}
+                      onChange={(next) => placeLayer(placingRef, placingThis, next)}
                       // Arc-en-Ciel's rings start from points: a double-click in its box adds one there
                       onDoubleClick={placingThis === 'arcEnCiel' && arc?.flow === 'point'
-                        ? (at) => updateArcEnCiel(ref, (a) => withPoint(a, mmSpot([at.xMm - a.xMm, at.yMm - a.yMm], a)))
+                        ? (at) => updateArcEnCiel(placingRef, (a) => withPoint(a, mmSpot([at.xMm - a.xMm, at.yMm - a.yMm], a)))
                         : undefined} />
                   )}
                   {/* Arc-en-Ciel's ridges, turned with a dial over its box, and where its bands start from points or a line,
                       placed with handles over it */}
                   {placingThis === 'arcEnCiel' && arc && !back && (
-                    <RidgeDial arc={arc} scale={scale} quarter={quarter} onTurn={(angleDeg) => updateArcEnCiel(ref, (a) => ({ ...a, angleDeg }))} />
+                    <RidgeDial arc={arc} part={placingPart?.layer} scale={scale} quarter={quarter} onTurn={(angleDeg) => updateArcEnCiel(placingRef, (a) => ({ ...a, angleDeg }))} />
                   )}
                   {placingThis === 'arcEnCiel' && arc && !back && (arc.flow === 'point' || arc.flow === 'line') && (
-                    <ArcHandles arc={arc} scale={scale} quarter={quarter} onChange={(next) => updateArcEnCiel(ref, () => next)} />
+                    <ArcHandles arc={arc} part={placingPart?.layer} scale={scale} quarter={quarter} onChange={(next) => updateArcEnCiel(placingRef, () => next)} />
                   )}
-                  {isSelected && editingWindows && note.thread.windows.enabled && (
-                    <WindowEditor note={note} scale={scale} quarter={quarter} selectedId={selectedWindowId} onSelect={onWindowSelect}
-                      onChange={(sections) => updateNote(projectId, note.id, (n) => ({ ...n, thread: { ...n.thread, windows: { ...n.thread.windows, sections } } }))} />
+                  {edited?.feature === 'thread' && edited.note.thread.windows.enabled && (
+                    <WindowEditor note={edited.note} scale={scale} quarter={quarter} selectedId={selectedWindowId} onSelect={onWindowSelect}
+                      onChange={(sections) => updateNote(projectId, edited.note.id, (n) => ({ ...n, thread: { ...n.thread, windows: { ...n.thread.windows, sections } } }))} />
                   )}
                   {/* A side showing no design has a + in its middle to upload one (Keller), out of the way while it plays or is
                       dragged, edited or placed on, and on banknotes too small on screen to hold it */}
@@ -781,8 +811,8 @@ export function Canvas({
           style={{ left: current.x + selected.x * scale, top: current.y + selected.y * scale, width: selected.widthMm * scale, height: selected.heightMm * scale }}>
           <div data-keep-size="" className="absolute left-1/2 origin-top-left transition-[top] ease-in-out motion-reduce:transition-none"
             style={{ top: `${addUnder * 100}%`, transitionDuration: `${ROTATE_SECONDS}s` }}>
-            <div className="pointer-events-auto absolute top-3 left-0 -translate-x-1/2">
-              <AddFeatureMenu note={selected} onCanvas onAdd={(feature) => onAddFeature(selected.id, feature)} />
+            <div className="pointer-events-auto absolute left-0 -translate-x-1/2" style={{ top: 12 + addBelow }}>
+              <AddFeatureMenu onCanvas onAdd={(feature) => onAddFeature(selected.id, feature)} />
             </div>
           </div>
         </div>

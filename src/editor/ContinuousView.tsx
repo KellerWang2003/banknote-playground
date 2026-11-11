@@ -1,6 +1,6 @@
 import { DesignTiles } from '../components/DesignTiles'
 import { PAPER } from '../lib/back'
-import { edgeBreaks, useDesign } from '../lib/continuous'
+import { edgeBreaks, neighboursPx, useDesign } from '../lib/continuous'
 import { designPx, useImageUrl } from '../lib/images'
 import type { Note } from '../lib/types'
 import { useTilt } from '../tilt/tilt'
@@ -12,9 +12,6 @@ import { useTilt } from '../tilt/tilt'
  * landing off (Keller, 9 November: the dashed line round the banknote and the drift went).
  */
 
-/** How far out from the banknote its neighbours show, mm, and at most on screen, px, so they never cover the canvas */
-const NEIGHBOURS_MM = 10
-const NEIGHBOURS_MAX_PX = 120
 /**
  * How much of that, from the banknote out, they show at full strength before fading away: at the seam they are as
  * printed, so you see whether the colour carries across (Keller: faint copies only ever showed a step)
@@ -47,7 +44,7 @@ export function NeighbourRing({ note, scale, quiet }: { note: Note; scale: numbe
   if (!url) return null
   const width = note.widthMm * scale
   const height = note.heightMm * scale
-  const margin = Math.min(NEIGHBOURS_MM * scale, NEIGHBOURS_MAX_PX)
+  const margin = neighboursPx(scale)
   // Full strength by the banknote, fading out over the outer part of the margin
   const fading = margin * (1 - NEIGHBOURS_FULL)
   const fade = (to: string) => `linear-gradient(${to}, transparent, black ${fading}px, black calc(100% - ${fading}px), transparent)`

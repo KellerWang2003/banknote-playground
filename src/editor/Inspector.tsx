@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Drawer, Group, IconButton, Labeled, LengthField, Panel, Section, Segmented, SwitchField } from '../components/controls'
 import { sideImageId, type Side } from '../lib/back'
 import { clamp } from '../lib/frames'
-import { featureName, fitLayers, moveLayersTo } from '../lib/layers'
+import { withEveryPart } from '../lib/extras'
+import { type Feature, featureName, fitLayers, moveLayersTo } from '../lib/layers'
 import { NOTE_SIZE } from '../lib/notes'
 import { mod, patternOf } from '../lib/pattern'
 import { setPatternOffset, shufflePatternOffset, usePatternOffsets } from '../lib/patternOffset'
@@ -26,7 +27,6 @@ import { WatermarkPanel } from './WatermarkPanel'
 import { WindowsCard } from './WindowsCard'
 import type { NoteRef } from './frameActions'
 import { useTimelineFrame } from './useTimelineFrame'
-import type { Layer } from './layerActions'
 
 type Change = (note: Note) => Note
 
@@ -36,13 +36,16 @@ type Change = (note: Note) => Note
  * own name once it is renamed there): the banknote itself (size, its two sides), its security thread (where it sits and
  * its lens, with the lens's preview in a drawer at the foot; what is printed on it, its artwork and sections, is designed
  * in Thread Studio, which opens from the button above the timeline) and its watermark, Arc-en-Ciel and magnetic ink once
- * it has them. Every control has a small label over it (`Labeled`) unless a word in it or beside it already says what it
- * is.
+ * it has them. Another of a kind (extras.ts) comes as its view, the banknote with it in the first one's place, so the panel
+ * shows it as it shows the first. Every control has a small label over it (`Labeled`) unless a word in it or beside it
+ * already says what it is.
  */
 export function Inspector({ note, noteRef, layer, onWindowSelect, onPlace, windowsTip, onWindowsTipDone }: {
+  /** The banknote, or the view of the further feature shown (extras.ts) */
   note: Note
   noteRef: NoteRef
-  layer: Layer
+  /** Which part it shows: the banknote itself, or which kind of feature `note` shows in the first one's place */
+  layer: 'note' | Feature
   /** Selecting a window edits it on the canvas; undefined leaves window editing */
   onWindowSelect: (id: string | undefined) => void
   /** Shows the placed layer the panel shows on the canvas, flat, with its box to place it */
@@ -56,15 +59,16 @@ export function Inspector({ note, noteRef, layer, onWindowSelect, onPlace, windo
   const setThread = (patch: Partial<Note['thread']>) => update((n) => ({ ...n, thread: { ...n.thread, ...patch } }))
   const acrossOf = (n: Pick<Note, 'widthMm' | 'heightMm'>, direction: Note['thread']['direction']) =>
     direction === 'vertical' ? n.widthMm : n.heightMm
-  // The watermark, Arc-en-Ciel and magnetic ink stay where they were, as far as they fit (wholly on the banknote if they were)
+  // The watermark, Arc-en-Ciel and magnetic ink stay where they were, as far as they fit (wholly on the banknote if they were),
+  // and the threads across it, each of a kind as the first (`withEveryPart`)
   const setSize = (widthMm: number, heightMm: number) =>
-    update((n) => fitLayers({
+    update((note) => withEveryPart(note, (n) => fitLayers({
       ...n,
       widthMm,
       heightMm,
       thread: { ...n.thread, positionMm: clamp(n.thread.positionMm, 0, acrossOf({ widthMm, heightMm }, n.thread.direction)),
         windows: { ...n.thread.windows, sections: fitSections(n.thread.windows.sections, n.thread.direction === 'vertical' ? heightMm : widthMm) } },
-    }, n))
+    }, n)))
   // Turning the thread keeps it at the same relative position across the note
   const setDirection = (direction: Note['thread']['direction']) =>
     update((n) => ({
@@ -76,14 +80,14 @@ export function Inspector({ note, noteRef, layer, onWindowSelect, onPlace, windo
         positionMm: Math.round((n.thread.positionMm / acrossOf(n, n.thread.direction)) * acrossOf(n, direction) * 2) / 2,
       },
     }))
-  // Turning the note keeps the thread and the placed layers at the same relative position across it
+  // Turning the note keeps the threads and the placed layers at the same relative position across it, every one of each kind
   const flipOrientation = () =>
-    update((n) => {
+    update((note) => withEveryPart(note, (n) => {
       const flipped = { widthMm: n.heightMm, heightMm: n.widthMm }
       const across = acrossOf(n, n.thread.direction)
       const positionMm = Math.round((n.thread.positionMm / across) * acrossOf(flipped, n.thread.direction) * 2) / 2
       return moveLayersTo({ ...n, ...flipped, thread: { ...n.thread, positionMm, windows: { ...n.thread.windows, sections: fitSections(n.thread.windows.sections, n.thread.direction === 'vertical' ? flipped.heightMm : flipped.widthMm) } } }, n)
-    })
+    }))
   const portrait = note.heightMm >= note.widthMm
   // An uploaded design can be checked: whether it joins up at its edges, and is light where the brief asks. The checks
   // are for the side the canvas shows, the back's once the banknotes are turned over
