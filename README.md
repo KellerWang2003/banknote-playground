@@ -83,7 +83,7 @@ src/
                 the watermark (watermark.ts) and its relief (relief.ts), magnetic ink (magneticInk.ts), its
                 shape (inkMask.ts) and its Realistic look (realisticInk.ts, lit on the GPU by inkRenderer.ts), Arc-en-Ciel
                 (arcEnCiel.ts, with its Realistic light; its distance maps and white edge, bandMap.ts; drawn on the GPU by inkRenderer.ts too), uploaded images and their display copies (images.ts, made off the main
-                thread by imageWork.ts and imageWorker.ts), pasting images into upload slots (pasteImages.ts),
+                thread by imageWork.ts and imageWorker.ts), pasting images into upload slots (pasteImages.ts), whether a popup has the keyboard (popups.ts),
                 legacy IndexedDB import, editor actions, frame
                 maths, demo (the sample project), and Demo's phone tilt maths (deviceTilt.ts), real size
                 (realSize.ts) and links (demoLink.ts)

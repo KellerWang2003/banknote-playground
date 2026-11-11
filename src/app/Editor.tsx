@@ -22,10 +22,10 @@ import { hasThread, isPlaced, onFront, type Feature, type PlacedLayer } from '..
 import { useWorkspace } from '../cloud/workspace'
 import { DemoView } from './DemoView'
 import { demoLink } from '../lib/demoLink'
+import { popupOpen } from '../lib/popups'
 
-/** Keys typed into these, or pressed while a dialog or menu is open, are not shortcuts */
+/** Keys typed into these are not shortcuts, nor keys pressed while a popup shows (`popupOpen`) */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
-const POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
 /**
  * A full-screen canvas with floating panels: project and banknotes top left, the frame timeline along
@@ -140,7 +140,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
-      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !document.querySelector('[role=dialog]')) {
+      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !popupOpen('[role="dialog"]')) {
         // Clearing the selection always leaves window editing and placing; avoids reading a stale selectedId here
         exitWindows()
         exitPlacing()
@@ -158,7 +158,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const element = event.target instanceof Element ? event.target : null
       if (element?.closest('input, textarea, select, [contenteditable], [role="dialog"], [role="menu"]')) return
-      if (!selectedWindowId || document.querySelector('[role="dialog"], [role="menu"]')) return
+      if (!selectedWindowId || popupOpen('[role="dialog"], [role="menu"]')) return
       event.preventDefault()
       updateNote(project.id, editingNoteId!, (n) => ({ ...n, thread: { ...n.thread,
         windows: { ...n.thread.windows, sections: n.thread.windows.sections.filter((s) => s.id !== selectedWindowId) } } }))
@@ -176,7 +176,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const element = event.target instanceof Element ? event.target : null
       if (element?.closest('input, textarea, select, [contenteditable], [role="dialog"], [role="menu"]')) return
-      if (document.querySelector('[role="dialog"], [role="menu"]')) return
+      if (popupOpen('[role="dialog"], [role="menu"]')) return
       event.preventDefault()
       void removeLayer({ projectId: project.id, noteId: placingNoteId }, placing)
       setLayer('note')
@@ -191,7 +191,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
     const onDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== 'l' || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.defaultPrevented) return
       const element = event.target instanceof Element ? event.target : null
-      if (element?.closest(TYPING) || document.querySelector(POPUP)) return
+      if (element?.closest(TYPING) || popupOpen()) return
       event.preventDefault()
       if (!event.repeat) pressLight()
     }
@@ -220,7 +220,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       const key = event.key.toLowerCase()
       if ((key !== 'f' && key !== 'r') || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.defaultPrevented) return
       const element = event.target instanceof Element ? event.target : null
-      if (element?.closest(TYPING) || document.querySelector(POPUP)) return
+      if (element?.closest(TYPING) || popupOpen()) return
       event.preventDefault()
       if (event.repeat) return
       if (key === 'f') turnOver()
@@ -242,7 +242,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return
       const element = event.target instanceof Element ? event.target : null
       if (element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"], [role="switch"], [role="checkbox"], [role="radio"], [role="slider"]')) return
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return
+      if (popupOpen()) return
       event.preventDefault()
       if (!event.repeat) pressSpace()
     }
@@ -277,7 +277,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       const element = event.target instanceof Element ? event.target : null
       // Text fields keep native text undo while they are being edited.
       if (element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return
+      if (popupOpen()) return
       event.preventDefault()
       if (key === 'y' || event.shiftKey) redoProject(project.id)
       else undoProject(project.id)

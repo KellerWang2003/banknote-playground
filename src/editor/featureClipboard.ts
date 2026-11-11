@@ -10,6 +10,7 @@ import { findNote, updateNote } from '../lib/store'
 import type { Note } from '../lib/types'
 import type { NoteRef } from './frameActions'
 import type { Layer } from './layerActions'
+import { popupOpen } from '../lib/popups'
 
 /**
  * Copying security features from one banknote and pasting them onto another, as Figma copies layers (Keller, 9
@@ -84,10 +85,8 @@ export async function pasteFeature({ projectId, noteId }: NoteRef, pasted: Pick<
 
 /** Keys pressed and pastes made in these go to the text, as with the editor's other shortcuts */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
-const POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
 const typing = (event: Event) => event.target instanceof Element && !!event.target.closest(TYPING)
-const popupOpen = () => !!document.querySelector(POPUP)
 
 /** Whether a paste holds an image, which goes to an upload slot rather than being a copied feature */
 function holdsImage(data: DataTransfer | null) {

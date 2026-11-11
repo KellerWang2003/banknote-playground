@@ -46,6 +46,7 @@ import { FramePanel } from './FramePanel'
 import { TiltRail } from './TiltRail'
 import { TimelineBar } from './TimelineBar'
 import { useTimelineFrame } from './useTimelineFrame'
+import { popupOpen } from '../lib/popups'
 
 /**
  * One banknote's thread pattern, full screen. Top: back, the banknote, the ridges and undo. Left: Mixed angles, the
@@ -114,7 +115,7 @@ export function ThreadEditor({ project, note, onClose }: { project: Project; not
       if (e.key !== 'Escape' && e.key !== 'Delete' && e.key !== 'Backspace') return
       const element = e.target instanceof Element ? e.target : null
       if (element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return
+      if (popupOpen()) return
       e.preventDefault()
       if (e.key === 'Escape') {
         if (selectedSectionId || tab === 'frames') {
@@ -139,7 +140,7 @@ export function ThreadEditor({ project, note, onClose }: { project: Project; not
       const element = e.target instanceof Element ? e.target : null
       // Text fields keep native text undo while they are being edited
       if (element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return
+      if (popupOpen()) return
       e.preventDefault()
       stepNote(project.id, note.id, key === 'y' || e.shiftKey ? 'redo' : 'undo')
     }

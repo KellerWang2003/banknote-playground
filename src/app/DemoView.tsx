@@ -18,6 +18,7 @@ import { type Motion, useDeviceTilt, useWakeLock } from '../tilt/useDeviceTilt'
 import { useElementSize } from '../editor/useElementSize'
 import { PhoneLink } from './PhoneLink'
 import { useBlackPage } from './useBlackPage'
+import { POPUPS, popupOpen } from '../lib/popups'
 
 /** Fit leaves this much black round the banknote, px */
 const MARGIN = 16
@@ -151,13 +152,10 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // Keys: Esc leaves (full screen first, which the browser does itself), ← and → step through the banknotes, F turns them
   // over, L holds them to the light (a tap flips the lamp), H hides or brings back the UI, R and Shift+R rotate them
   useEffect(() => {
-    // The picker's list stays in the page, hidden, once the picker has had the keyboard (Base UI): only one showing counts
-    const popupOpen = () => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]')]
-      .some((element) => element !== root.current && !element.closest('[hidden]'))
     const onDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || checking) return
       const element = event.target instanceof Element ? event.target : null
-      if (element?.closest(TYPING) || popupOpen()) return
+      if (element?.closest(TYPING) || popupOpen(POPUPS, root.current)) return
       const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
       if (key === 'Escape') {
         if (document.fullscreenElement || performance.now() - leftFullScreen.current < 500 || !onClose) return

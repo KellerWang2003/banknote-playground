@@ -967,6 +967,40 @@ describe('username workspace editor', () => {
     expect(useTilt.getState().source).toBe('slider')
   })
 
+  it('keeps its keys once a dropdown in a panel has been used, though Base UI leaves the dropdown’s list in the page, hidden', async () => {
+    act(() => setTilt({ flipped: false, turn: 0, quarterTurns: 0 }))
+    const user = userEvent.setup()
+    localStorage.setItem('of-thread-workspace', 'dropdown-keys-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
+    await user.click(await screen.findByRole('button', { name: 'Demo banknote', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
+    const effect = () => useProjects.getState().demoPreview!.notes[0].tilt.effect
+    const before = effect()
+    // Another lens effect picked from the thread's dropdown: once it closes, its list is still in the page, hidden
+    await user.click(screen.getByRole('combobox', { name: 'Effect' }))
+    const options = await screen.findAllByRole('option')
+    await user.click(options.find((option) => option.getAttribute('aria-selected') !== 'true')!)
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+    expect(effect()).not.toBe(before)
+    const hiddenList = () => document.querySelector('[role="listbox"]')?.closest('[hidden]')
+    expect(hiddenList()).toBeTruthy()
+
+    // With the keyboard back on the page, the editor's keys work: R rotates, Space plays, ⌘Z undoes, F turns over
+    act(() => (document.activeElement as HTMLElement | null)?.blur())
+    fireEvent.keyDown(window, { key: 'r' })
+    expect(useTilt.getState().quarterTurns).toBe(1)
+    fireEvent.keyDown(window, { code: 'Space', key: ' ' })
+    fireEvent.keyUp(window, { code: 'Space', key: ' ' })
+    expect(screen.getByRole('button', { name: 'Pause', exact: true })).toBeDefined()
+    fireEvent.keyDown(window, { key: 'z', code: 'KeyZ', metaKey: true })
+    expect(effect()).toBe(before)
+    // The list was still there, hidden, for every one of them
+    expect(hiddenList()).toBeTruthy()
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(useTilt.getState().flipped).toBe(true)
+  })
+
   it('supports toolbar and keyboard undo/redo in the temporary editor', async () => {
     const user = userEvent.setup()
     localStorage.setItem('of-thread-workspace', 'undo-ui-test')

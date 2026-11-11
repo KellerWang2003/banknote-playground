@@ -13,14 +13,12 @@ import { setTiltPadOpen, useTiltPad } from '../lib/tiltPad'
 import type { RecordedPoint, TiltSettings } from '../lib/types'
 import { setRecording, setTilt, useTilt } from '../tilt/tilt'
 import { saveTilt } from './playbackActions'
+import { popupOpen } from '../lib/popups'
 
 /** Width and height of the pad, in px */
 const PAD_PX = 136
 /** Outer width of the pad's panel (the pad, its p-1.5 padding and border), which the playback bar's controls line up with */
 export const TILT_PANEL_PX = PAD_PX + 2 * 6 + 2
-
-/** Keys pressed while a dialog or menu is open are its own */
-const POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
 /** The lamp and Realistic, on the card's top row */
 const ROW_TOGGLE = 'size-6 min-w-6 rounded-[min(var(--radius-md),10px)] bg-background/67 p-0 aria-pressed:bg-primary aria-pressed:text-primary-foreground'
@@ -63,7 +61,7 @@ export function TiltRail({ limit = TILT_LIMIT, playback }: {
   // canvas). Added once, as the card mounts: its parents add theirs after it, so this one stays ahead of them
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || !useTilt.getState().recording || document.querySelector(POPUP)) return
+      if (e.key !== 'Escape' || e.defaultPrevented || !useTilt.getState().recording || popupOpen()) return
       e.preventDefault()
       setRecording(false)
     }
