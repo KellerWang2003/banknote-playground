@@ -37,6 +37,16 @@ vi.mock('../src/lib/inkRenderer', () => ({
   },
 }))
 
+// Realistic's lamp shading, which draws only on a page: a test notes where it was asked to shade, in the order drawn
+const paperShade = vi.hoisted(() => ({ calls: [] as unknown[][], order: undefined as unknown[][] | undefined }))
+vi.mock('../src/lib/paper', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/paper')>()),
+  drawPaperShade: (...args: unknown[]) => {
+    paperShade.calls.push(args)
+    paperShade.order?.push(['paperShade'])
+  },
+}))
+
 const makeNote = (widthMm = 68, heightMm = 120) => createNote({ name: 'Test', x: 0, y: 0, widthMm, heightMm, color: '#ffffff' })
 
 describe('playback angles', () => {
@@ -305,6 +315,46 @@ describe('Arc-en-Ciel in an export', () => {
     loadBandShape.mockClear()
     await loadNoteAssets({ ...note, arcEnCiel: { ...note.arcEnCiel, flow: 'edge' } }, 10)
     expect(loadBandShape).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Realistic’s lamp in an export', () => {
+  it('shades the banknote last, over everything, turned over and rotated as it shows, in place of the light and shade of turning', () => {
+    const calls: unknown[][] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get(target, key) {
+        if (key in target) return target[key as string]
+        if (key === 'createLinearGradient') return (...args: unknown[]) => (calls.push([key, ...args]), { addColorStop() {} })
+        return (...args: unknown[]) => calls.push([key, ...args])
+      },
+      set(target, key, value) {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as CanvasRenderingContext2D
+    const note = { ...makeNote(150, 70), noThread: true }
+    const assets = { frames: new Map() }
+    paperShade.calls = []
+    paperShade.order = calls
+    try {
+      drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, realistic: true, turn: 0.3, quarter: 3 })
+      // On the banknote's own canvas (a proxy, so compared by itself)
+      expect(paperShade.calls).toHaveLength(1)
+      expect(paperShade.calls[0][0]).toBe(ctx)
+      expect(paperShade.calls[0].slice(1)).toEqual([note, 2, { x: turnDeg(0.3), y: 10 }, 3])
+      expect(calls.slice(-2)).toEqual([['paperShade'], ['restore']])
+      expect(calls.some(([key]) => key === 'createLinearGradient')).toBe(false)
+      // The back too, and without perspective turning over leaves the lamp's light as it was, as it does the ink's
+      drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, back: true, turn: 0.3, quarter: 3 })
+      expect(paperShade.calls[1].slice(1)).toEqual([note, 2, { x: 0, y: 10 }, 3])
+      // With Realistic off, the light and shade of turning, as before
+      calls.length = 0
+      drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
+      expect(paperShade.calls).toHaveLength(2)
+      expect(calls.filter(([key]) => key === 'createLinearGradient')).toHaveLength(1)
+    } finally {
+      paperShade.order = undefined
+    }
   })
 })
 

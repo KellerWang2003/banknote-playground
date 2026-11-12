@@ -463,12 +463,12 @@ describe('Demo on a phone', () => {
       const refused = within(await openMenu()).getByRole('menuitem', { name: 'Motion not allowed' })
       expect(refused.getAttribute('aria-disabled')).toBe('true')
       await userEvent.setup().keyboard('{Escape}')
-      // Dragging stands in, the banknote turning in 3D, with the canvas's light and shade
+      // Dragging stands in, the banknote turning in 3D, shaded by Realistic's lamp (on as Demo starts) as the canvas is
       const view = demo()
       fireEvent.pointerDown(view, { clientX: 600, clientY: 400, pointerId: 1, pointerType: 'touch' })
       fireEvent.pointerMove(view, { clientX: 600, clientY: 320, pointerId: 1, pointerType: 'touch' })
       expect(useTilt.getState()).toMatchObject({ source: 'drag', target: 15 })
-      expect(document.querySelectorAll('[data-demo-note] [data-tilt^="shade"]')).toHaveLength(4)
+      expect(document.querySelectorAll('[data-demo-note] [data-paper-shade]')).toHaveLength(1)
     } finally {
       delete (DeviceOrientationEvent as unknown as { requestPermission?: unknown }).requestPermission
       delete (navigator as unknown as { maxTouchPoints?: unknown }).maxTouchPoints

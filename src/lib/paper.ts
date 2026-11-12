@@ -8,25 +8,36 @@ import { type Quarter, unturn } from './rotate'
 /**
  * Realistic's paper (Keller, 11 November: "a bit of lighting and treatment to the entire paper, whether it is just a faint
  * glare, or anything, just so that it would look real"; of the looks he was shown he kept "just the lamp glare", with its
- * light grain). The lamp that lights magnetic ink and Arc-en-Ciel (realisticInk.ts, hanging LAMP_HEIGHT_DEG over the
- * viewer's head) shines off the paper too: a soft glare where the paper mirrors it into the eye, sliding across the banknote
- * as it tilts, about the eye's distance in mm a radian (6 mm a degree on a 150 mm banknote). Flat, it sits above the
- * banknote's middle, just past a long banknote's top edge; with its top tipped back by half LAMP_HEIGHT_DEG it is in the
- * middle, where magnetic ink's bar rests too. And the paper has a light cotton grain, its fibres and a faint cloudiness,
- * fixed to it. Both lie over the design and under every security feature, which has its own light, on the canvas (NoteView:
- * the grain painted once, the glare one small canvas per banknote that only moves) and in exports (`drawPaper`) alike. The
- * numbers are those of the mockup Keller picked from (its look B), and are not settings.
+ * light grain; 12 November, of that glare: "isn't that apparent ... it's moving so fast ... I think it can be bigger ... a
+ * bigger thing that moves slowly", and of four looks rendered tilting in a hand he took the bigger glare with the lamp
+ * shading the paper, not easing after the tilt). The lamp that lights magnetic ink and Arc-en-Ciel (realisticInk.ts, hanging
+ * LAMP_HEIGHT_DEG over the viewer's head) lights the paper too:
+ * - its glare, where the paper mirrors the lamp into the eye: as wide and soft as matte paper's (a Trowbridge-Reitz lobe,
+ *   PAPER_GLARE.spread wide), sliding across the banknote as it tilts about the eye's distance in mm a radian (6 mm a
+ *   degree on a 150 mm banknote), as real light does, but so wide that it rolls across rather than whipping past. Flat, it
+ *   sits above the banknote's middle, just past a long banknote's top edge, lighting its top half; with its top tipped back
+ *   by half LAMP_HEIGHT_DEG it is in the middle, where magnetic ink's bar rests too;
+ * - its shading (`paperLighting`): the paper a little darker the further it lies from the lamp and the more it turns from
+ *   it, LAMP_SHARE of its light being the lamp's and the rest the room's, and never lighter than flat at its middle. A
+ *   screen can't show light paper any whiter, so this is what lets the glare show there;
+ * - and, fixed to the paper, a light cotton grain, its fibres and a faint cloudiness.
+ * The grain and the glare lie over the design and under every security feature, which has its own light; the shading over
+ * all of it, as the lamp lights all of it, in place of the canvas's own light and shade of turning. On the canvas
+ * (NoteView: the grain painted once, the glare one canvas per banknote that only moves, the shading a small canvas painted
+ * as the tilt changes) and in exports (`drawPaper`, `drawPaperShade`) alike. The numbers are those of the look Keller
+ * picked, and are not settings.
  */
 
 const RAD = Math.PI / 180
 
 /**
- * The glare where the paper mirrors the lamp: how far it spreads, radians off the mirror's direction (the paper's
- * roughness, so mm on the paper at the eye's distance), and how white its middle is
+ * The glare where the paper mirrors the lamp: how wide its lobe is, radians off the mirror's direction (the paper's
+ * roughness, so mm on the paper at the eye's distance: 92 mm on a 150 mm banknote), and how white its middle is. Until 12
+ * November 0.085 and 0.15, a bell curve: a spot that crossed its own width in 8° of tilt
  */
-export const PAPER_GLARE = { spread: 0.085, white: 0.15 }
-/** How far out the glare is drawn, in its spreads: beyond, it would be less than 0.2% white */
-export const LIGHT_REACH = 2.2
+export const PAPER_GLARE = { spread: 0.28, white: 0.3 }
+/** How far out the glare is drawn, in its spreads: beyond, it would be less than 0.3% white */
+export const LIGHT_REACH = 3.2
 
 const dot = (a: readonly number[], b: readonly number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
@@ -56,22 +67,27 @@ export function lampMirror(tilt: Tilt2, eye: number, quarter: Quarter = 0): { x:
 /** How much further the light reaches along each of a banknote's sides at `tilt`, as a reflection stretches seen aslant */
 export const lightStretch = (tilt: Tilt2) => ({ x: 1 / Math.max(Math.cos(tilt.x * RAD), 0.5), y: 1 / Math.max(Math.cos(tilt.y * RAD), 0.5) })
 
-/** How white the glare is `r` of its reach out from its middle (0 to 1): a bell curve */
+/**
+ * How white the glare is `r` of its reach out from its middle (0 to 1): Trowbridge-Reitz's lobe, as rough surfaces reflect
+ * light, a soft middle with a long tail, a quarter as white one spread out
+ */
 export function paperLightAt(r: number) {
-  const bell = PAPER_GLARE.white * Math.exp(-((r * LIGHT_REACH) ** 2))
+  const u = r * LIGHT_REACH
+  const lobe = PAPER_GLARE.white / (1 + u * u) ** 2
   // Faded to nothing over the last stretch, so the drawn circle has no edge
   const edge = Math.min(1, Math.max(0, (1 - r) / 0.15))
-  return bell * edge * edge * (3 - 2 * edge)
+  return lobe * edge * edge * (3 - 2 * edge)
 }
 
 /** The glare's reach on a banknote at `scale` px per mm, px: as far as it spreads at the canvas's eye (`perspectiveFor`) */
 const reachPx = (note: Size, scale: number) => LIGHT_REACH * PAPER_GLARE.spread * perspectiveFor(note, 1) * scale
 
-/** A 2D canvas `size` px square to draw on, where there is one: none outside a page */
-function scratch(size: number) {
+/** A 2D canvas `width` by `height` px (square without it) to draw on, where there is one: none outside a page */
+function scratch(width: number, height = width) {
   if (typeof document === 'undefined') return undefined
   const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = size
+  canvas.width = width
+  canvas.height = height
   const g = canvas.getContext('2d')
   return g ? { canvas, g } : undefined
 }
@@ -112,6 +128,60 @@ export function paintPaperLight(canvas: HTMLCanvasElement) {
   if (!image || !g) return
   g.clearRect(0, 0, canvas.width, canvas.height)
   g.drawImage(image, 0, 0, canvas.width, canvas.height)
+}
+
+/** How much of the paper's light is the lamp's; the rest is the room's, the same everywhere */
+export const LAMP_SHARE = 0.6
+
+/**
+ * The lamp's light on the paper of a banknote turned through `tilt` (turning over included), seen from `eye` mm out from
+ * its middle, rotated `quarter` quarter turns on screen, the lamp staying where it is as for the glare: at a point mm from
+ * the banknote's middle along its own sides (x right, y down), the room's light and the lamp's, which falls off with the
+ * cosine of the angle it comes in at and the square of how far it comes, as a share of all of it flat at the middle
+ */
+export function paperLighting(tilt: Tilt2, eye: number, quarter: Quarter = 0): (x: number, y: number) => number {
+  const m = tiltMatrix(tilt)
+  const above = unturn(0, -Math.tan(LAMP_HEIGHT_DEG * RAD) * eye, quarter)
+  // Flat, at the middle: the lamp LAMP_HEIGHT_DEG off straight on, eye / cos(LAMP_HEIGHT_DEG) away
+  const flat = Math.cos(LAMP_HEIGHT_DEG * RAD) ** 3 / eye ** 2
+  return (x, y) => {
+    // From the point, turned with the banknote, to the lamp
+    const dx = above.x - x * m[0] - y * m[3]
+    const dy = above.y - x * m[1] - y * m[4]
+    const dz = eye - x * m[2] - y * m[5]
+    const facing = Math.max(0, dx * m[6] + dy * m[7] + dz * m[8])
+    return 1 - LAMP_SHARE + (LAMP_SHARE * facing) / Math.hypot(dx, dy, dz) ** 3 / flat
+  }
+}
+
+/** Cells along a banknote's longer side in its shading: the shading is so gradual that stretched to any size they never show */
+const SHADE_CELLS = 96
+
+/** How many cells a banknote's shading has across and down: SHADE_CELLS along its longer side */
+export function shadeSize(note: Size) {
+  const long = Math.max(note.widthMm, note.heightMm)
+  const cells = (mm: number) => Math.max(2, Math.round((SHADE_CELLS * mm) / long))
+  return { width: cells(note.widthMm), height: cells(note.heightMm) }
+}
+
+/**
+ * Paints a banknote's shading at `tilt` and `quarter` (as `paperLighting`) into `canvas`, shadeSize's cells: black as
+ * much as the paper there is darker than flat at its middle, clear where it is as light or lighter
+ */
+export function paintPaperShade(canvas: HTMLCanvasElement, note: Size, tilt: Tilt2, quarter: Quarter = 0) {
+  const g = canvas.getContext('2d')
+  if (!g) return
+  const { width, height } = canvas
+  const lit = paperLighting(tilt, perspectiveFor(note, 1), quarter)
+  const image = g.createImageData(width, height)
+  for (let j = 0; j < height; j++) {
+    const y = ((j + 0.5) / height - 0.5) * note.heightMm
+    for (let i = 0; i < width; i++) {
+      const x = ((i + 0.5) / width - 0.5) * note.widthMm
+      image.data[(j * width + i) * 4 + 3] = Math.round(255 * Math.min(1, Math.max(0, 1 - lit(x, y))))
+    }
+  }
+  g.putImageData(image, 0, 0)
 }
 
 /** Where the light's canvas lies on a banknote at `scale` px per mm, before it moves: square round the banknote's middle */
@@ -274,6 +344,22 @@ export const grainStyle = (url: string, scale: number): CSSProperties =>
   ({ backgroundImage: `url(${url})`, backgroundSize: `${GRAIN_TILE_MM * scale}px ${GRAIN_TILE_MM * scale}px`, backgroundRepeat: 'repeat' })
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+
+/**
+ * The lamp's shading on an export's canvas, as NoteView shows it, over all of the banknote, `ctx` at its top left in px,
+ * at `scale` px per mm, for the banknote turned through `tilt` on screen (turning over included) and rotated `quarter`
+ */
+export function drawPaperShade(ctx: Ctx, note: Size, scale: number, tilt: Tilt2, quarter: Quarter = 0) {
+  const { width, height } = shadeSize(note)
+  const sheet = scratch(width, height)
+  if (!sheet) return
+  paintPaperShade(sheet.canvas, note, tilt, quarter)
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(sheet.canvas, 0, 0, note.widthMm * scale, note.heightMm * scale)
+  ctx.restore()
+}
 
 /**
  * The paper's grain and light on an export's canvas, as NoteView shows them, `ctx` at the banknote's top left in px, at

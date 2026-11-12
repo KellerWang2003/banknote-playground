@@ -44,6 +44,21 @@ describe('Realistic’s paper on a NoteView', () => {
     expect(lightOf(container)!.style.transform).toBe(lightMove(note, 2, { x: 0, y: 10 }, 0).transform)
   })
 
+  it('shades the banknote with the lamp in place of the canvas’s light and shade of turning, over everything', () => {
+    const withWatermark = { ...note, watermark: { ...newWatermark(note), imageId: 'w' } }
+    const { container, rerender } = render(<NoteView note={withWatermark} scale={2} live perspective realistic />)
+    const shade = container.querySelector<HTMLCanvasElement>('[data-paper-shade]')!
+    expect([shade.width, shade.height]).toEqual([96, 48])
+    // Over the glare and the features, which it lights too
+    const under = container.querySelectorAll('[data-paper-light], [data-watermark]')
+    expect(under).toHaveLength(2)
+    for (const part of under) expect(part.compareDocumentPosition(shade) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(container.querySelectorAll('[data-tilt^="shade"]')).toHaveLength(0)
+    rerender(<NoteView note={withWatermark} scale={2} live perspective />)
+    expect(container.querySelector('[data-paper-shade]')).toBeNull()
+    expect(container.querySelectorAll('[data-tilt^="shade"]')).toHaveLength(4)
+  })
+
   it('lights a still note as at its own tilt', () => {
     const { container } = render(<NoteView note={note} scale={3} angle={-6} angleX={5} realistic />)
     expect(lightOf(container)!.style.transform).toBe(lightMove(note, 3, { x: 5, y: -6 }, 0).transform)
@@ -61,5 +76,6 @@ describe('Realistic’s paper on a NoteView', () => {
     const { container } = render(<NoteView note={note} scale={2} live perspective />)
     expect(lightOf(container)).toBeNull()
     expect(container.querySelector('[data-paper-grain]')).toBeNull()
+    expect(container.querySelector('[data-paper-shade]')).toBeNull()
   })
 })

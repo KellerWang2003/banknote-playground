@@ -14,7 +14,7 @@ import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
 import { type PlacedBox, type Size, rotationOf } from './placed'
 import { inkLight } from './realisticInk'
-import { drawPaper } from './paper'
+import { drawPaper, drawPaperShade } from './paper'
 import { copyStarts, imageBox } from './artwork'
 import { extraView, extrasOf } from './extras'
 import { type Feature, hasThread } from './layers'
@@ -275,8 +275,11 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.drawImage(face, (width - w) / 2, (height - h) / 2, w, h)
   }
   // Realistic's paper, as NoteView: its grain and the lamp's glare off it, over the design and under every feature, the
-  // glare turning over with the banknote only as it shows turning, in perspective, as realistic ink's lamp does
-  if (options.realistic) drawPaper(ctx, note, scale, withTurn(tilt, options.perspective ? options.turn ?? 0 : 0), options.quarter)
+  // glare turning over with the banknote only as it shows turning, in perspective, as realistic ink's lamp does; and over
+  // everything, last, the lamp's shading, in place of the light and shade of turning
+  const paperView = withTurn(tilt, options.perspective ? options.turn ?? 0 : 0)
+  if (options.realistic) drawPaper(ctx, note, scale, paperView, options.quarter)
+  const shade = () => (options.realistic ? drawPaperShade(ctx, note, scale, paperView, options.quarter) : drawShade(ctx, width, height, tilt, options.perspective))
   // Every one of a kind: the first, on the banknote itself, then each further one as its view with its assets
   const each = (feature: Feature) => [
     { note, assets },
@@ -288,7 +291,7 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   for (const part of each('watermark')) drawWatermark(ctx, part.note, part.assets, mm, tilt, options)
   if (options.back) {
     // Nothing else shows on the back: no Arc-en-Ciel, no magnetic ink, no thread
-    drawShade(ctx, width, height, tilt, options.perspective)
+    shade()
     ctx.restore()
     return
   }
@@ -311,7 +314,7 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     return [drawThread(ctx, part.note, part.assets, mm, tilt, offsetMm, options.sheen)]
   })
 
-  drawShade(ctx, width, height, tilt, options.perspective)
+  shade()
   if (options.frameNumbers) for (const { label, strip } of labels) if (label) drawFrameNumber(ctx, label, strip, mm)
   ctx.restore()
 }
@@ -772,7 +775,9 @@ export type StillOptions = Pick<FaceOptions, 'sheen' | 'realistic' | 'frameNumbe
  * A still image of one banknote (Keller, 9 November): the banknote flat and face on, filling the image at `scale` px per mm
  * (`imageSize`), turned as the canvas shows it (`quarter`), with only its security features as seen at `tilt`: the
  * thread's frames and sheen, Arc-en-Ciel's bands and magnetic ink, lit as the canvas lights them with Realistic. The
- * banknote itself never turns or shades, and its watermark shows as held to the light, whatever the tilt.
+ * banknote itself never turns or catches the light and shade of turning, and its watermark shows as held to the light,
+ * whatever the tilt; with Realistic its paper is lit as at that tilt, the lamp's glare and shading, as Demo shows a
+ * banknote lying flat on a phone.
  */
 export function drawStill(ctx: Ctx, note: Note, assets: NoteAssets, scale: number, tilt: Tilt2, options: StillOptions) {
   const { width, height } = imageSize(note, scale)

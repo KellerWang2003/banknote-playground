@@ -17,7 +17,7 @@ import { bandLook, embossOutset, fromShape, needsShape, paintArcEnCiel, useBandS
 import { arcLight } from '../lib/arcEnCiel'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
-import { LIGHT_PX, grainStyle, lightBox, lightMove, paintPaperLight, usePaperGrain } from '../lib/paper'
+import { LIGHT_PX, grainStyle, lightBox, lightMove, paintPaperLight, paintPaperShade, shadeSize, usePaperGrain } from '../lib/paper'
 import { type PlacedBox, boxTurn } from '../lib/placed'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { type Layer, extraIdOf, extraView, extrasOf, partLayer } from '../lib/extras'
@@ -424,14 +424,18 @@ export function NoteView({
     const look = canvas && arcEnCiel && bandLook(arcEnCiel, arcShape, tilt, arcLit ? arcLight(arcEnCiel, view, quarter) : undefined)
     if (canvas && look && arcMask?.canvas) paintArcEnCiel(canvas, arcMask.canvas, look)
   }
-  // Realistic's paper (paper.ts): its grain, painted once, and the lamp's glare off it, one small canvas moved to where the
-  // paper mirrors the lamp as the note turns on screen (turning over included) and stretched as seen aslant. The banknote's
-  // own, not again for each further feature drawn alone over it
+  // Realistic's paper (paper.ts): its grain, painted once; the lamp's glare off it, one canvas moved to where the paper
+  // mirrors the lamp as the note turns on screen (turning over included) and stretched as seen aslant; and the lamp's
+  // shading, a few cells painted as the tilt changes and stretched over the note. The banknote's own, not again for each
+  // further feature drawn alone over it
   const paperShown = realistic && !only
   const grain = usePaperGrain(paperShown)
   const paperLight = useRef<HTMLCanvasElement>(null)
+  const paperShade = useRef<HTMLCanvasElement>(null)
+  const shadeCells = shadeSize(note)
   const movePaperLight = (view: Tilt2, quarter: Quarter) => {
     if (paperLight.current) Object.assign(paperLight.current.style, lightMove(note, scale, view, quarter))
+    if (paperShade.current) paintPaperShade(paperShade.current, note, view, quarter)
   }
   useLayoutEffect(() => {
     if (paperShown && paperLight.current) paintPaperLight(paperLight.current)
@@ -568,8 +572,8 @@ export function NoteView({
       {design && face === undefined && <Loading />}
 
       {/* Realistic's paper (paper.ts), over the design and under every feature, which has its own light: its light cotton
-          grain, fixed to it, and the lamp's glare where the paper mirrors the lamp. Flat on a phone it shows too, following
-          the phone's tilt as the features do */}
+          grain, fixed to it, and the lamp's glare where the paper mirrors the lamp (its shading lies over everything, below).
+          Flat on a phone it shows too, following the phone's tilt as the features do */}
       {grain && <div aria-hidden="true" data-paper-grain="" className="pointer-events-none absolute inset-0" style={grainStyle(grain, scale)} />}
       {paperShown && (
         <canvas ref={paperLight} aria-hidden="true" data-paper-light="" width={LIGHT_PX} height={LIGHT_PX} className="pointer-events-none absolute"
@@ -677,9 +681,10 @@ export function NoteView({
       )}
       {further('thread')}
 
-      {perspective && !flat && !only && (
+      {perspective && !flat && !only && !paperShown && (
         // Light and shade as the note turns: they fade in with opacity rather than redrawing a gradient each frame. Not
-        // while it lies flat on a phone, where the room's own light falls on the phone as it turns
+        // while it lies flat on a phone, where the room's own light falls on the phone as it turns, nor with Realistic,
+        // whose lamp shades it instead
         <>
           {/* Turning sideways, the edge turning away darkens a little and the near edge catches the light */}
           <div className="pointer-events-none absolute inset-0" {...tiltPart('shade-right', { background: `linear-gradient(90deg, ${SIDE_LIGHT}, ${SIDE_DARK})` })} />
@@ -688,6 +693,12 @@ export function NoteView({
           <div className="pointer-events-none absolute inset-0" {...tiltPart('shade-up', { background: `linear-gradient(180deg, ${SIDE_LIGHT}, ${SIDE_DARK})` })} />
           <div className="pointer-events-none absolute inset-0" {...tiltPart('shade-down', { background: `linear-gradient(180deg, ${SIDE_DARK}, ${SIDE_LIGHT})` })} />
         </>
+      )}
+      {paperShown && (
+        // Realistic's lamp shading (paper.ts) over all of it, as the lamp lights all of it: darker the further from the lamp
+        // and the more turned from it, flat on a phone too, following the phone's tilt
+        <canvas ref={paperShade} aria-hidden="true" data-paper-shade="" width={shadeCells.width} height={shadeCells.height}
+          className="pointer-events-none absolute inset-0 size-full" />
       )}
 
       {/* Canvas only, never exported. Outside the part, so a thin thread keeps its artwork in view, edged in the background
