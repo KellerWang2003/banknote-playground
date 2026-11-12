@@ -46,12 +46,12 @@ vi.mock('../src/lib/demo', async () => {
   })) }
 })
 
-/** jsdom lays nothing out: Demo, the canvas and everything measured are a 1280 × 800 window, the bar 44 px tall */
+/** jsdom lays nothing out: Demo, the canvas and everything measured are a 1280 × 800 window, the bar 44 px tall, Hide UI 40 */
 const WINDOW = { width: 1280, height: 800 }
 class SizedObserver {
   constructor(private callback: ResizeObserverCallback) {}
   observe(element: Element) {
-    const size = element.hasAttribute('data-demo-bar') ? { width: 600, height: 44 } : WINDOW
+    const size = element.hasAttribute('data-demo-bar') ? { width: 600, height: 44 } : element.hasAttribute('data-demo-hide') ? { width: 110, height: 40 } : WINDOW
     this.callback([{ contentRect: size } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
   }
   unobserve() {}
@@ -70,7 +70,8 @@ beforeEach(() => {
   cloud.rows = []
   cloud.fail = undefined
   cloud.calls = 0
-  setTilt({ source: 'drag', angle: 0, target: 0, angleX: 0, targetX: 0, flipped: false, turn: 0, quarterTurns: 0, backlit: false, peek: false })
+  setTilt({ source: 'drag', angle: 0, target: 0, angleX: 0, targetX: 0, nudge: 0, nudgeX: 0, nudged: 0, nudgedX: 0, flipped: false, turn: 0, quarterTurns: 0,
+    backlit: false, peek: false })
 })
 afterEach(() => {
   cleanup()
@@ -208,7 +209,7 @@ describe('Demo on the laptop', () => {
     expect(useTilt.getState().flipped).toBe(true)
   })
 
-  it('turns over with Flip, hides the UI from a button of its own, and keeps the lamp and Realistic in ⋯, the lamp off as it opens', async () => {
+  it('turns over with Flip, hides the UI from a button of its own at the top centre, saying for 2 s how to bring it back, and keeps the lamp and Realistic in ⋯, the lamp off as it opens', async () => {
     const user = userEvent.setup()
     await openProject()
     // The editor's lamp left on: Demo opens without it, and leaving gives it back
@@ -243,15 +244,39 @@ describe('Demo on the laptop', () => {
     await user.keyboard('l')
     expect(useTilt.getState().backlit).toBe(false)
 
-    // Hide UI is a button of its own, apart from the bar it hides, and hides with it
-    const hideButton = within(hide).getByRole('button', { name: 'Hide UI (H)' })
+    // Hide UI is a button of its own, in words at the top centre, apart from the bar it hides, and hides with it (Keller,
+    // 12 November)
+    const hideButton = within(hide).getByRole('button', { name: 'Hide UI' })
+    expect(hideButton.textContent).toBe('Hide UI')
+    expect(hide.className).toContain('left-1/2')
+    expect(hide.style.right).toBe('')
     expect(bar.contains(hideButton)).toBe(false)
-    await user.click(hideButton)
+    expect(screen.queryByRole('status')).toBeNull()
+    vi.useFakeTimers()
+    fireEvent.click(hideButton)
     expect(bar.className).toContain('invisible')
     expect(hide.className).toContain('invisible')
+    // For 2 s it says how to bring the UI back, then fades out
+    const hint = screen.getByRole('status')
+    expect(hint.textContent).toContain('Double-click to bring back the UI')
+    expect(hint.textContent).toContain('Double-tap to bring back the UI')
+    act(() => { vi.advanceTimersByTime(1900) })
+    expect(hint.className).not.toContain('opacity-0')
+    act(() => { vi.advanceTimersByTime(200) })
+    expect(hint.className).toContain('opacity-0')
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(screen.queryByRole('status')).toBeNull()
     fireEvent.doubleClick(stage())
     expect(bar.className).not.toContain('invisible')
     expect(hide.className).not.toContain('invisible')
+    // H hides it too, saying so, and the UI coming back takes the words away at once
+    fireEvent.keyDown(window, { key: 'h' })
+    expect(bar.className).toContain('invisible')
+    expect(screen.getByRole('status')).toBeDefined()
+    fireEvent.keyDown(window, { key: 'h' })
+    expect(bar.className).not.toContain('invisible')
+    expect(screen.queryByRole('status')).toBeNull()
+    vi.useRealTimers()
 
     await user.click(within(bar).getByRole('button', { name: 'Close Demo (Esc)' }))
     expect(useTilt.getState().backlit).toBe(true)
@@ -267,6 +292,17 @@ describe('Demo on the laptop', () => {
     expect(useTilt.getState()).toMatchObject({ source: 'drag', target: 15, targetX: 30 })
     fireEvent.pointerUp(view, { clientX: 760, clientY: 320, pointerId: 1, pointerType: 'mouse' })
     expect(useTilt.getState()).toMatchObject({ target: 0, targetX: 0 })
+  })
+
+  it('keeps the banknote clear of Hide UI above as of the bar below, taking their room back once they hide', () => {
+    renderDemo({ ...createProject('Tall'), notes: [createNote({ name: 'Tall', x: 0, y: 0, widthMm: 70, heightMm: 150, color: '#E5E5E5' })] })
+    const box = document.querySelector('[data-demo-note]') as HTMLElement
+    // 12 px clear of Hide UI, 40 px tall 12 px from the top, and of the bar, 44 px tall 12 px from the bottom
+    expect(parseFloat(box.style.top)).toBeCloseTo(64)
+    expect(parseFloat(box.style.top) + parseFloat(box.style.height)).toBeCloseTo(732)
+    fireEvent.keyDown(window, { key: 'h' })
+    expect(parseFloat(box.style.top)).toBeCloseTo(16)
+    expect(parseFloat(box.style.height)).toBeCloseTo(768)
   })
 })
 
@@ -331,9 +367,10 @@ describe('Demo on a phone', () => {
     expect(banknote.style.transform).toBe('')
     expect(banknote.querySelectorAll('[data-tilt^="shade"]')).toHaveLength(0)
 
-    // Tilt is on, ticked in ⋯, and Recentre under it makes how it is held now flat, gliding there
+    // No switch for it in ⋯, as it is always on (Keller, 12 November), and Recentre there makes how it is held now flat,
+    // gliding there
     const menu = await openMenu()
-    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Tilt' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(menu).queryByRole('menuitemcheckbox', { name: 'Tilt' })).toBeNull()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Recentre' }))
     now += 100
     orient(0, 60, 20)
@@ -345,19 +382,32 @@ describe('Demo on a phone', () => {
     expect(useTilt.getState().targetX).toBeCloseTo(0, 1)
   })
 
-  it('swipes to the next banknote and holds it to the light while pressed', async () => {
+  it('turns the banknote further in the hand as a finger drags on top of the phone’s tilt, springing back, and holds it to the light while pressed', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
-    const { project, onPick } = renderDemo()
+    const { onPick } = renderDemo()
     orient(0, 60, 0)
     await motionOn()
     const view = demo()
+    // Both at once (Keller, 12 November: "it shouldn't be two modes"): 80 px up and 160 px left turn it 15° up and 30°
+    // left in the hand, the phone's own tilt still the tilt store's
     fireEvent.pointerDown(view, { clientX: 700, clientY: 400, pointerId: 1, pointerType: 'touch' })
-    fireEvent.pointerMove(view, { clientX: 560, clientY: 410, pointerId: 1, pointerType: 'touch' })
-    fireEvent.pointerUp(view, { clientX: 560, clientY: 410, pointerId: 1, pointerType: 'touch' })
-    expect(onPick).toHaveBeenLastCalledWith(project.notes[1].id)
-    // A swipe never tilts it: the phone does
-    expect(useTilt.getState().source).toBe('device')
+    fireEvent.pointerMove(view, { clientX: 540, clientY: 320, pointerId: 1, pointerType: 'touch' })
+    expect(useTilt.getState()).toMatchObject({ source: 'device', nudge: 15, nudgeX: -30 })
+    // The phone still tilts it meanwhile
+    now += 100
+    orient(0, 60, 20)
+    expect(useTilt.getState().targetX).toBeGreaterThan(1)
+    // Let go, it springs back to the phone's tilt; no swipe through the banknotes, as a drag tilts
+    fireEvent.pointerUp(view, { clientX: 540, clientY: 320, pointerId: 1, pointerType: 'touch' })
+    expect(useTilt.getState()).toMatchObject({ source: 'device', nudge: 0, nudgeX: 0 })
+    expect(onPick).not.toHaveBeenCalled()
+    // Drawn flat, it turns on the screen only as far as the drag turned it in the hand
+    const banknote = document.querySelector('[data-demo-note] .shadow-note') as HTMLElement
+    act(() => setTilt({ angle: 35, angleX: -10, nudged: 15, nudgedX: -30 }))
+    expect(banknote.style.transform).toBe('rotateX(15deg) rotateY(-30deg)')
+    act(() => setTilt({ angle: 20, angleX: 20, nudged: 0, nudgedX: 0 }))
+    expect(banknote.style.transform).toBe('')
 
     vi.useFakeTimers()
     fireEvent.pointerDown(view, { clientX: 600, clientY: 400, pointerId: 2, pointerType: 'touch' })
@@ -375,32 +425,41 @@ describe('Demo on a phone', () => {
     expect(stage().style.width).toBe(`${WINDOW.height}px`)
   })
 
-  it('asks for motion on iPhone at the first tap, its Tilt in ⋯, and says there when it is refused', async () => {
+  it('asks iPhone for motion as Demo opens, with a button in the middle that asks, as a tap anywhere does, and says in ⋯ when it is refused', async () => {
     Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
-    const ask = vi.fn(async () => 'granted' as const)
+    // Asked without a tap, Safari says it needs one rather than asking
+    const noTap = async (): Promise<'granted' | 'denied'> => {
+      throw new DOMException('Requesting device orientation or motion access requires a user gesture to prompt', 'NotAllowedError')
+    }
+    const ask = vi.fn(noTap)
     Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { configurable: true, value: ask })
     try {
       renderDemo()
-      // Waiting on a tap: nothing in the bar for it, Tilt in ⋯ not yet ticked
-      await act(() => new Promise((done) => setTimeout(done, 700)))
-      expect(screen.queryByRole('button', { name: 'Tilt' })).toBeNull()
-      // On from the start: the first tap anywhere asks, once, here opening ⋯
-      const menu = await openMenu()
-      await waitFor(() => expect(ask).toHaveBeenCalledOnce())
+      // Asked as it opens (Keller, 12 November: "it should ask for permission immediately"): never asked before, a button
+      // in the middle asks, and no switch for it in ⋯
+      const button = await screen.findByRole('button', { name: 'Tilt with your phone' })
+      expect(ask).toHaveBeenCalledOnce()
+      expect(button.closest('[data-demo-bar]')).toBeNull()
+      // Its tap asks, once, though a tap anywhere asks too; allowed, the phone tilts it and the button goes
+      ask.mockResolvedValueOnce('granted')
+      await userEvent.setup().click(button)
+      expect(ask).toHaveBeenCalledTimes(2)
       orient(0, 45, 0)
       await motionOn()
-      await waitFor(() => expect(within(menu).getByRole('menuitemcheckbox', { name: 'Tilt' }).getAttribute('aria-checked')).toBe('true'))
-      // Switched off, a drag tilts it, the banknote turning in 3D again
-      fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Tilt' }))
-      await waitFor(() => expect(useTilt.getState().source).toBe('drag'))
-      expect(document.querySelectorAll('[data-demo-note] [data-tilt^="shade"]')).toHaveLength(4)
+      expect(screen.queryByRole('button', { name: 'Tilt with your phone' })).toBeNull()
+      const menu = await openMenu()
+      expect(within(menu).queryByRole('menuitemcheckbox', { name: 'Tilt' })).toBeNull()
+      expect(within(menu).getByRole('menuitem', { name: 'Recentre' })).toBeDefined()
       cleanup()
 
-      ask.mockResolvedValueOnce('denied' as never)
+      // The first tap anywhere asks, here on the banknote: refused, it says so in ⋯
+      ask.mockClear()
       renderDemo()
-      await act(() => new Promise((done) => setTimeout(done, 700)))
+      await screen.findByRole('button', { name: 'Tilt with your phone' })
+      ask.mockResolvedValueOnce('denied')
       fireEvent.click(stage())
-      await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Tilt with your phone' })).toBeNull())
+      expect(ask).toHaveBeenCalledTimes(2)
       const refused = within(await openMenu()).getByRole('menuitem', { name: 'Motion not allowed' })
       expect(refused.getAttribute('aria-disabled')).toBe('true')
       await userEvent.setup().keyboard('{Escape}')
@@ -410,6 +469,22 @@ describe('Demo on a phone', () => {
       fireEvent.pointerMove(view, { clientX: 600, clientY: 320, pointerId: 1, pointerType: 'touch' })
       expect(useTilt.getState()).toMatchObject({ source: 'drag', target: 15 })
       expect(document.querySelectorAll('[data-demo-note] [data-tilt^="shade"]')).toHaveLength(4)
+    } finally {
+      delete (DeviceOrientationEvent as unknown as { requestPermission?: unknown }).requestPermission
+      delete (navigator as unknown as { maxTouchPoints?: unknown }).maxTouchPoints
+    }
+  })
+
+  it('tilts at once where Safari was already asked while open, without a tap or the button', async () => {
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+    const ask = vi.fn(async () => 'granted' as const)
+    Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { configurable: true, value: ask })
+    try {
+      renderDemo()
+      await waitFor(() => expect(ask).toHaveBeenCalledOnce())
+      orient(0, 45, 0)
+      await motionOn()
+      expect(screen.queryByRole('button', { name: 'Tilt with your phone' })).toBeNull()
     } finally {
       delete (DeviceOrientationEvent as unknown as { requestPermission?: unknown }).requestPermission
       delete (navigator as unknown as { maxTouchPoints?: unknown }).maxTouchPoints
@@ -567,15 +642,25 @@ describe('Demo links and the phone’s page', () => {
     expect(shownNote()).toBe(project.notes[0].id)
   })
 
-  it('opens projects in Demo from the list on a phone', async () => {
+  it('opens projects in Demo from the list on a phone, the tap asking iPhone for motion as it opens', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)', media: query, addEventListener() {}, removeEventListener() {} }))
     vi.stubGlobal('screen', { width: 390, height: 844 })
-    localStorage.setItem('of-thread-workspace', 'demo-phone-list')
-    render(<TooltipProvider><App /></TooltipProvider>)
-    await waitFor(() => expect(useProjects.getState().loaded).toBe(true))
-    const project = { ...sample(), name: 'Opened on a phone' }
-    act(() => useProjects.getState().add(project))
-    fireEvent.click(await screen.findByText('Opened on a phone'))
-    expect(location.hash).toBe(`#/play/demo-phone-list/${project.id}`)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+    const ask = vi.fn(async () => 'granted' as const)
+    Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { configurable: true, value: ask })
+    try {
+      localStorage.setItem('of-thread-workspace', 'demo-phone-list')
+      render(<TooltipProvider><App /></TooltipProvider>)
+      await waitFor(() => expect(useProjects.getState().loaded).toBe(true))
+      const project = { ...sample(), name: 'Opened on a phone' }
+      act(() => useProjects.getState().add(project))
+      fireEvent.click(await screen.findByText('Opened on a phone'))
+      expect(location.hash).toBe(`#/play/demo-phone-list/${project.id}`)
+      // Asked from the tap itself, as Safari asks only from one
+      expect(ask).toHaveBeenCalledOnce()
+    } finally {
+      delete (DeviceOrientationEvent as unknown as { requestPermission?: unknown }).requestPermission
+      delete (navigator as unknown as { maxTouchPoints?: unknown }).maxTouchPoints
+    }
   })
 })

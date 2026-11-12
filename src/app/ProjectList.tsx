@@ -39,14 +39,19 @@ import { createProject } from '../lib/notes'
 import { updateProject, useProjects } from '../lib/store'
 import type { Note, Project } from '../lib/types'
 import { isPhone } from '../lib/demoLink'
+import { askForMotion } from '../tilt/useDeviceTilt'
 
 /**
  * A project opens in the editor, or on a phone (a small touch screen) in Demo, as the editor isn't made for one (Keller,
- * 10 November); an iPad still opens the editor
+ * 10 November); an iPad still opens the editor. On a phone the tap that opens it also asks iPhone for motion, as Safari
+ * asks only from a tap, so the question comes as Demo opens (Keller, 12 November: "once people open this on the phone, it
+ * should ask for permission")
  */
 const open = (id: string) => {
   const { workspace } = useWorkspace.getState()
-  location.hash = isPhone() && workspace ? `#/play/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}` : `#/p/${id}`
+  const demo = isPhone() && workspace
+  if (demo) void askForMotion()
+  location.hash = demo ? `#/play/${encodeURIComponent(workspace)}/${encodeURIComponent(id)}` : `#/p/${id}`
 }
 
 const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4'

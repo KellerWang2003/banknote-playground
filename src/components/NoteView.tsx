@@ -259,7 +259,27 @@ const SIDE_DARK = `rgba(0,0,0,${0.08 * SHADE_MAX})`
  * The tilt, light and turn a live note follows, the tilt its frames are shown at while the timeline has been scrubbed,
  * and the quarter turns the banknotes are rotated on screen (which realistic magnetic ink's lamp stays still through)
  */
-type LiveState = { angle: number; angleX: number; light: number; turn: number; frameTilts: Record<string, { x: number; y: number }>; quarterTurns?: number }
+type LiveState = {
+  angle: number
+  angleX: number
+  light: number
+  turn: number
+  frameTilts: Record<string, { x: number; y: number }>
+  quarterTurns?: number
+  /** In Demo on a phone, how far a drag has turned the banknote in the hand, beyond the phone's own tilt (`useTilt`) */
+  nudged?: number
+  nudgedX?: number
+}
+
+/**
+ * A flat banknote's turn on screen (Demo on a phone, where the phone itself is what tilts): only as far as a drag turns it
+ * in the hand, and turning over
+ */
+const flatTurn = (state: LiveState, turn: number) => {
+  const y = state.nudged ?? 0
+  const x = state.nudgedX ?? 0
+  return y || x ? `rotateX(${y}deg) rotateY(${x + turn}deg)` : turn ? `rotateY(${turn}deg)` : ''
+}
 
 /**
  * The note with its thread, drawn at `scale` px per mm. The frame shown comes from the tilt (up/down `angle`,
@@ -304,8 +324,8 @@ export function NoteView({
   perspective?: boolean
   /**
    * With `perspective`, keeps the banknote flat on the screen, without the light and shade of turning, while it still turns
-   * over in 3D and its security features change with the tilt: Demo on a phone, where the phone itself is what tilts
-   * (`DemoView`)
+   * over in 3D, turns as far as a drag on top turns it in the hand (`nudged`), and its security features change with the
+   * whole tilt: Demo on a phone, where the phone itself is what tilts (`DemoView`)
    */
   flat?: boolean
   sheen?: boolean
@@ -430,8 +450,9 @@ export function NoteView({
       const blends = hasArt ? blendsAt(note, frameTilt.y, frameTilt.x) : []
       const turn = turnDeg(state.turn)
       const style = tiltStyle(angle, angleX, blends[0] ?? 0, depth, revealOf(state), inkBar, turn)
-      // Flat, only turning over turns it: the phone it shows on is what tilts. Drawn alone, it turns with the banknote it is on
-      if (!only) element.style.transform = !perspective ? '' : !flat ? style.rotate : turn ? `rotateY(${turn}deg)` : ''
+      // Flat, the phone it shows on is what tilts: only a drag on top and turning over turn it. Drawn alone, it turns with
+      // the banknote it is on
+      if (!only) element.style.transform = !perspective ? '' : !flat ? style.rotate : flatTurn(state, turn)
       for (const tilted of element.querySelectorAll<HTMLElement>('[data-tilt]')) {
         // A further feature's own parts are its own NoteView's to set
         const owner = tilted.closest('[data-part-view]')
@@ -462,7 +483,8 @@ export function NoteView({
     if (!live) return
     return useTilt.subscribe((state, previous) => {
       if (state.angle !== previous.angle || state.angleX !== previous.angleX || state.light !== previous.light || state.turn !== previous.turn
-        || state.frameTilts[note.id] !== previous.frameTilts[note.id] || state.quarterTurns !== previous.quarterTurns) apply.current(state)
+        || state.frameTilts[note.id] !== previous.frameTilts[note.id] || state.quarterTurns !== previous.quarterTurns
+        || state.nudged !== previous.nudged || state.nudgedX !== previous.nudgedX) apply.current(state)
     })
   }, [live, note.id])
 

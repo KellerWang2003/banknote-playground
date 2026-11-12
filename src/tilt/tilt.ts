@@ -7,7 +7,7 @@ import { flipsBetween, lightAt, tiltAt, type PlaybackPlan } from '../lib/moves'
 
 /**
  * drag springs back on release, slider scrubs within one cycle, hold stays at a set angle, device is a phone's own tilt in
- * Demo (`useDeviceTilt`), followed as it comes
+ * Demo (`useDeviceTilt`), followed as it comes, a drag on top of it springing back to it (`nudge`)
  */
 export type TiltSource = 'drag' | 'wobble' | 'slider' | 'hold' | 'device'
 
@@ -20,6 +20,16 @@ interface TiltState {
   /** The smoothed side angle; positive tilts right */
   angleX: number
   targetX: number
+  /**
+   * A drag in Demo on top of a phone's own tilt (the `device` source; Keller, 12 November: "drag to tilt ... it shouldn't be
+   * two modes"): how far the finger wants the banknote turned in the hand beyond the phone's tilt, up/down and side, 0
+   * once it lets go
+   */
+  nudge: number
+  nudgeX: number
+  /** The same, on its way there with the drag's spring: added to the phone's tilt, and what a flat banknote turns by on screen */
+  nudged: number
+  nudgedX: number
   /** Keeps manual tilt off one axis: the pad and canvas drag leave it where it is */
   lockX: boolean
   lockY: boolean
@@ -68,6 +78,10 @@ export const useTilt = create<TiltState>()(() => ({
   target: 0,
   angleX: 0,
   targetX: 0,
+  nudge: 0,
+  nudgeX: 0,
+  nudged: 0,
+  nudgedX: 0,
   lockX: false,
   lockY: false,
   springBack: true,
@@ -159,7 +173,8 @@ export function togglePlayback() {
 const approach = (value: number, target: number, step: number) => (value < target ? Math.min(target, value + step) : Math.max(target, value - step))
 
 /**
- * Manual tilt uses a critically damped spring; a phone's own tilt in Demo is followed exactly. Playback follows the
+ * Manual tilt uses a critically damped spring; a phone's own tilt in Demo is followed exactly, and a drag on top of it
+ * with the same spring. Playback follows the
  * project's moves exactly (no spring), from the start each time it begins; a change to the plan while playing keeps the
  * same share of the way through.
  * The light fades towards the switch at a steady rate; while playing it is also at least what the moves say, and
@@ -211,14 +226,31 @@ export function useTiltLoop(plan: PlaybackPlan, limit = TILT_LIMIT, turnsOver = 
         }
       } else if (s.source === 'device') {
         // A phone's own tilt in Demo, steadied already (`useDeviceTilt`): followed exactly, as playback is, with no spring
-        // to lag behind the hand
+        // to lag behind the hand. A drag on top turns the banknote further in the hand (`nudge`), with the drag's spring,
+        // so it springs back to the phone's tilt as the finger lets go
         const light = approach(s.light, lightTarget(s), fade)
         ramp = light
-        velocity = 0
-        velocityX = 0
-        const angle = clamp(s.target, -limit, limit)
-        const angleX = clamp(s.targetX, -limit, limit)
-        if (angle !== s.angle || angleX !== s.angleX || light !== s.light) useTilt.setState({ angle, angleX, light })
+        if (lastSource !== 'device') {
+          velocity = 0
+          velocityX = 0
+        }
+        velocity += ((s.nudge - s.nudged) * stiffness - velocity * damping) * dt
+        velocityX += ((s.nudgeX - s.nudgedX) * stiffness - velocityX * damping) * dt
+        let nudged = s.nudged + velocity * dt
+        let nudgedX = s.nudgedX + velocityX * dt
+        if (Math.abs(s.nudge - nudged) < 0.01 && Math.abs(velocity) < 0.01) {
+          nudged = s.nudge
+          velocity = 0
+        }
+        if (Math.abs(s.nudgeX - nudgedX) < 0.01 && Math.abs(velocityX) < 0.01) {
+          nudgedX = s.nudgeX
+          velocityX = 0
+        }
+        const angle = clamp(s.target + nudged, -limit, limit)
+        const angleX = clamp(s.targetX + nudgedX, -limit, limit)
+        if (angle !== s.angle || angleX !== s.angleX || light !== s.light || nudged !== s.nudged || nudgedX !== s.nudgedX) {
+          useTilt.setState({ angle, angleX, light, nudged, nudgedX })
+        }
       } else {
         const light = approach(s.light, lightTarget(s), fade)
         ramp = light

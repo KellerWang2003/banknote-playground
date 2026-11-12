@@ -31,8 +31,6 @@ import { POPUPS, popupOpen } from '../lib/popups'
 const MARGIN = 16
 /** The bar's distance from the bottom, and the banknote's from the bar while it shows, px */
 const BAR_INSET = 12
-/** A swipe this long, px, steps to the next banknote, while the phone's motion tilts it */
-const SWIPE_PX = 60
 /** Pressed this long without moving, ms, a touch holds the banknote to the light until it lifts */
 const HOLD_MS = 350
 /** Two taps this close, in ms and px, bring the hidden UI back */
@@ -42,6 +40,9 @@ const DOUBLE_TAP_PX = 30
 const SLOP = { mouse: 3, touch: 10 }
 /** The pointer hides this long, ms, after it last moved, while the UI is hidden */
 const IDLE_MS = 1500
+/** How to bring the UI back shows this long, ms, once it hides, then fades out over HINT_FADE_MS */
+const HINT_MS = 2000
+const HINT_FADE_MS = 300
 /** About 160 px of drag tilts the banknote 30°, as on the canvas */
 const DRAG_DEG_PER_PX = 30 / 160
 
@@ -50,14 +51,17 @@ const SIZES: { value: Size; label: string }[] = [{ value: 'fit', label: 'Fit' },
 /** Larger on a touch screen, for a finger */
 const TOUCH = 'pointer-coarse:size-9'
 const TOUCH_ROW = 'pointer-coarse:[&_button]:h-8'
-/** Demo's own controls, which a press or scroll on leaves the banknote alone: the bar and Hide UI */
-const CONTROLS = '[data-demo-bar], [data-demo-hide]'
+/** Demo's own controls, which a press or scroll on leaves the banknote alone: the bar, Hide UI and the button that asks for motion */
+const CONTROLS = '[data-demo-bar], [data-demo-hide], [data-demo-ask]'
 /** What a key goes to instead of Demo: a field, or a popup open over it (the picker, the phone's QR code) */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
 
 type Gesture =
-  /** One finger or the mouse: a drag tilts (with motion on, a finger's swipe steps through the banknotes instead) */
-  | { kind: 'press'; id: number; touch: boolean; x: number; y: number; start: number; startSide: number; moved: boolean; held: boolean; swipe: boolean }
+  /**
+   * One finger or the mouse: a drag tilts, from `start` and `startSide`; with the phone's own tilt on, it turns the
+   * banknote further in the hand (`hand`, the tilt store's `nudge`), springing back to the phone's tilt
+   */
+  | { kind: 'press'; id: number; touch: boolean; x: number; y: number; start: number; startSide: number; moved: boolean; held: boolean; hand: boolean }
   /** Two fingers move the banknote about, at real size bigger than the screen */
   | { kind: 'pan'; x: number; y: number; from: { x: number; y: number } }
 
@@ -65,16 +69,18 @@ type Gesture =
  * Demo (Keller, 10 November: "a dedicated demo mode ... like figma's prototype mode"): one banknote of the project on
  * black, as it would be held, with one bar of controls. The laptop opens it over the editor (`Editor`), where dragging tilts
  * it as on the canvas; a phone opens it by link (`DemoPage`), where the phone's own tilt is the banknote's, 1:1, the
- * banknote lying flat on the screen while only its security features change (`useDeviceTilt`). Fit fills the screen with a
- * 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI, a button of its own in the
- * top right corner rather than one of the bar's, as it hides the bar (Keller, 11 November), leaves only the banknote; ←
- * and → or a swipe step through the banknotes, F or Flip turns them over, L or pressing and holding holds them to the
- * light, H hides and brings back the UI, as does a double-click or double-tap. The phone's tilt, the lamp and Realistic
- * wait in the bar's ⋯ menu, as they rarely change, so the bar is one line (Keller, 11 November: "the default should just
- * be with realistic mode on and lamp off. And this can live in a 3-dotted menu", then "it can be just one line. and tilt
- * should also be in the menu"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint
- * text. Its controls are the canvas's own, in the app's dark colours, so they sit quietly on black (the whole page turns
- * dark while it shows, so the picker's list, the menu and tooltips do too).
+ * banknote lying flat on the screen while only its security features change (`useDeviceTilt`), and a drag turns it further
+ * in the hand, springing back, both at once (Keller, 12 November: "it shouldn't be two modes"). Fit fills the screen with
+ * a 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI, a button of its own at the
+ * top centre rather than one of the bar's, as it hides the bar (Keller, 11 and 12 November), leaves only the banknote,
+ * saying for 2 s how to bring the UI back; ← and → step through the banknotes, F or Flip turns them over, L or pressing
+ * and holding holds them to the light, H hides and brings back the UI, as does a double-click or double-tap. Recentre,
+ * the lamp and Realistic wait in the bar's ⋯ menu, as they rarely change, so the bar is one line (Keller, 11 November:
+ * "the default should just be with realistic mode on and lamp off. And this can live in a 3-dotted menu", then "it can
+ * be just one line"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint text, but for
+ * the one line on hiding the UI and the button iPhone needs to ask for motion. Its controls are the canvas's own, in the
+ * app's dark colours, so they sit quietly on black (the whole page turns dark while it shows, so the picker's list, the
+ * menu and tooltips do too).
  */
 export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   project: Project
@@ -97,8 +103,26 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   const screen = useElementSize(root)
   const bar = useRef<HTMLDivElement>(null)
   const barSize = useElementSize(bar)
+  const hide = useRef<HTMLDivElement>(null)
+  const hideSize = useElementSize(hide)
   const [size, setSize] = useState<Size>('fit')
   const [ui, setUi] = useState(true)
+  // How to bring the UI back, for 2 s once it hides, then fading (Keller, 12 November: "have a like prompt that stays for
+  // like 2 seconds and say something like double click to ... see the UI again")
+  const [hint, setHint] = useState<'shown' | 'fading'>()
+  const hintTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  const hideUi = () => {
+    setUi(false)
+    hintTimers.current.forEach(clearTimeout)
+    setHint('shown')
+    hintTimers.current = [setTimeout(() => setHint('fading'), HINT_MS), setTimeout(() => setHint(undefined), HINT_MS + HINT_FADE_MS)]
+  }
+  const showUi = () => {
+    setUi(true)
+    hintTimers.current.forEach(clearTimeout)
+    setHint(undefined)
+  }
+  useEffect(() => () => hintTimers.current.forEach(clearTimeout), [])
   // Where a banknote bigger than the screen has been moved to, for the banknote and size it was moved at: another starts
   // from its middle again
   const panKey = `${note?.id}|${size}`
@@ -111,33 +135,32 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   const sheen = useTilt((s) => s.sheen)
   const realistic = useRealistic((s) => s.on)
   const checked = useRealSize((s) => s.checked)
-  // A phone's own tilt is the banknote's; drawn flat meanwhile, as the phone is what turns. On from the start, switched in
-  // ⋯ (Keller, 11 November: "tilt should also be in the menu, as it should be just on by default"); off, a drag tilts it
-  const [tiltOn, setTiltOn] = useState(true)
-  const { motion, upright: heldUp, allow, recentre } = useDeviceTilt(tiltOn, quarterTurns)
-  const upright: Quarter = tiltOn ? heldUp : 0
-  const flat = tiltOn && motion === 'on'
+  // A phone's own tilt is the banknote's, always (Keller, 12 November: "I don't think we even need a tilt toggle ... both
+  // should be enabled"); drawn flat meanwhile, as the phone is what turns, and a drag turns it further in the hand
+  const { motion, upright, allow, recentre } = useDeviceTilt(quarterTurns)
+  const flat = motion === 'on'
   useWakeLock(true)
 
   useBlackPage()
 
   // The banknote turns about its own middle on the view, and the view, for a phone held sideways with rotation locked, a
-  // quarter the way round that is upright in the hand; a drag, a swipe and the tilt go by the banknote's own axes
+  // quarter the way round that is upright in the hand; a drag and the tilt go by the banknote's own axes
   const turned = quarterOf(quarterTurns + upright)
   const sideways = onItsSide(upright)
   const width = screen?.width ?? 0
   const height = screen?.height ?? 0
   const view = { width: sideways ? height : width, height: sideways ? width : height }
-  // Room for the banknote: the view, less the margin all round and the bar while it shows
-  const barRoom = ui ? (barSize?.height ?? 44) + 2 * BAR_INSET - MARGIN : 0
-  const area = { width: Math.max(1, view.width - 2 * MARGIN), height: Math.max(1, view.height - 2 * MARGIN - Math.max(0, barRoom)) }
+  // Room for the banknote: the view, less the margin all round, and the bar below and Hide UI above while they show
+  const barRoom = ui ? Math.max(0, (barSize?.height ?? 44) + 2 * BAR_INSET - MARGIN) : 0
+  const hideRoom = ui ? Math.max(0, (hideSize?.height ?? 40) + 2 * BAR_INSET - MARGIN) : 0
+  const area = { width: Math.max(1, view.width - 2 * MARGIN), height: Math.max(1, view.height - 2 * MARGIN - barRoom - hideRoom) }
   const onSide = onItsSide(quarterOf(quarterTurns))
   const shownMm = note ? { width: onSide ? note.heightMm : note.widthMm, height: onSide ? note.widthMm : note.heightMm } : { width: 1, height: 1 }
   const scale = size === 'real' ? realPxPerMm(checked) : Math.min(area.width / shownMm.width, area.height / shownMm.height)
   // Bigger than the room, it moves only as far as its edges
   const room = { x: Math.max(0, (shownMm.width * scale - area.width) / 2), y: Math.max(0, (shownMm.height * scale - area.height) / 2) }
   const at = { x: clamp(pan.x, -room.x, room.x), y: clamp(pan.y, -room.y, room.y) }
-  const middle = { x: view.width / 2 + at.x, y: MARGIN + area.height / 2 + at.y }
+  const middle = { x: view.width / 2 + at.x, y: MARGIN + hideRoom + area.height / 2 + at.y }
   const panTo = (x: number, y: number) => setPanned({ key: panKey, x: clamp(x, -room.x, room.x), y: clamp(y, -room.y, room.y) })
   const panBy = (dx: number, dy: number) => {
     // Along the view, which a phone held sideways turns on the screen
@@ -188,7 +211,10 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
       if (key === 'ArrowLeft') step(-1)
       else if (key === 'ArrowRight') step(1)
       else if (key === 'f') turnOver()
-      else if (key === 'h') setUi((shown) => !shown)
+      else if (key === 'h') {
+        if (ui) hideUi()
+        else showUi()
+      }
       else rotateNotes(event.shiftKey ? -1 : 1)
     }
     const onUp = (event: KeyboardEvent) => {
@@ -255,6 +281,12 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
     if (press.held) releaseLight(performance.now(), false)
     press.held = false
   }
+  /** A drag let go of: back to flat, or on the phone's own tilt, back to the phone's */
+  const letGo = (press: Extract<Gesture, { kind: 'press' }>) => {
+    if (!press.moved) return
+    if (press.hand) setTilt({ nudge: 0, nudgeX: 0 })
+    else if (useTilt.getState().source !== 'device') setTilt({ target: 0, targetX: 0 })
+  }
   const middleOf = () => {
     const [a, b] = [...pointers.current.values()]
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
@@ -275,7 +307,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           const g = gesture.current
           if (g?.kind === 'press') {
             endHold(g)
-            if (g.moved && !g.swipe) setTilt({ target: 0, targetX: 0 })
+            letGo(g)
           }
           gesture.current = { kind: 'pan', ...middleOf(), from: at }
           return
@@ -287,13 +319,15 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         const tap = lastTap.current
         if (touch && tap && e.timeStamp - tap.at < DOUBLE_TAP_MS && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < DOUBLE_TAP_PX) {
           lastTap.current = undefined
-          setUi(true)
+          showUi()
           gesture.current = null
           return
         }
+        // On the phone's own tilt, a drag turns the banknote further in the hand, from where a drag left it springing back
         const s = useTilt.getState()
-        const press: Gesture = { kind: 'press', id: e.pointerId, touch, x: e.clientX, y: e.clientY, start: s.target, startSide: s.targetX,
-          moved: false, held: false, swipe: flat }
+        const hand = s.source === 'device'
+        const press: Gesture = { kind: 'press', id: e.pointerId, touch, x: e.clientX, y: e.clientY, start: hand ? s.nudge : s.target,
+          startSide: hand ? s.nudgeX : s.targetX, moved: false, held: false, hand }
         gesture.current = press
         // Pressed and held still, a finger holds the banknote to the light until it lifts, as holding L does
         if (touch) holdTimer.current = setTimeout(() => {
@@ -322,14 +356,13 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           g.moved = true
           if (!g.held) clearTimeout(holdTimer.current)
         }
-        if (g.swipe) return
-        // Tilts the way the pointer goes on the banknote as it shows, turned or not, springing back on release
+        // Tilts the way the pointer goes on the banknote as it shows, turned or not, springing back on release; on the phone's
+        // own tilt, in the hand. A drag begun before motion came leaves the phone's tilt alone
         const along = unturn(dx, dy, turned)
-        setTilt({
-          source: 'drag',
-          target: clamp(g.start - along.y * DRAG_DEG_PER_PX, -TILT_LIMIT, TILT_LIMIT),
-          targetX: clamp(g.startSide + along.x * DRAG_DEG_PER_PX, -TILT_LIMIT, TILT_LIMIT),
-        })
+        const y = clamp(g.start - along.y * DRAG_DEG_PER_PX, -TILT_LIMIT, TILT_LIMIT)
+        const x = clamp(g.startSide + along.x * DRAG_DEG_PER_PX, -TILT_LIMIT, TILT_LIMIT)
+        if (g.hand) setTilt({ nudge: y, nudgeX: x })
+        else if (useTilt.getState().source !== 'device') setTilt({ source: 'drag', target: y, targetX: x })
       }}
       onPointerUp={(e) => {
         pointers.current.delete(e.pointerId)
@@ -342,12 +375,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         gesture.current = null
         const held = g.held
         endHold(g)
-        if (g.moved && !g.swipe) setTilt({ target: 0, targetX: 0 })
-        if (g.swipe && g.moved && !held) {
-          // Along the view as it shows in the hand
-          const along = unturn(e.clientX - g.x, e.clientY - g.y, upright)
-          if (Math.abs(along.x) > SWIPE_PX && Math.abs(along.x) > 1.5 * Math.abs(along.y)) step(along.x < 0 ? 1 : -1)
-        }
+        letGo(g)
         if (g.touch && !g.moved && !held) lastTap.current = { at: e.timeStamp, x: e.clientX, y: e.clientY }
       }}
       onPointerCancel={(e) => {
@@ -355,17 +383,15 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         const g = gesture.current
         if (g?.kind === 'press' && g.id === e.pointerId) {
           endHold(g)
-          if (g.moved && !g.swipe) setTilt({ target: 0, targetX: 0 })
+          letGo(g)
           gesture.current = null
         } else if (g?.kind === 'pan' && pointers.current.size === 0) gesture.current = null
       }}
       onDoubleClick={(e) => {
-        if (onStage(e.target)) setUi(true)
+        if (onStage(e.target)) showUi()
       }}
-      // iPhone gives motion only once a tap asks for it: the first tap anywhere in Demo asks, so tilt is on from the start
-      onClickCapture={() => {
-        if (tiltOn && motion === 'ask') void allow()
-      }}
+      // iPhone gives motion only once a tap asks for it: the first tap anywhere in Demo asks, as its button does
+      onClickCapture={allow}
     >
       {/* The view: the screen, or for a phone held sideways with rotation locked, turned a quarter to be upright in the hand */}
       <div data-demo-view="" className="absolute transition-transform ease-in-out motion-reduce:transition-none"
@@ -386,14 +412,41 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           </div>
         )}
 
-        {/* Hide UI, apart from the bar it hides, in the view's top right corner; hidden with the rest */}
+        {/* Hide UI in words, at the top centre (Keller, 12 November: "let's have the hide UI button to actually say hide UI,
+            and let's have it at the center top"), apart from the bar it hides; hidden with the rest, not taken away, so it is
+            measured for the room it leaves above the banknote, as the bar is below */}
         {note && (
-          <div data-demo-hide="" className={cn('absolute', !ui && 'invisible')} style={{ top: BAR_INSET, right: BAR_INSET }}>
+          <div ref={hide} data-demo-hide="" className={cn('absolute left-1/2 -translate-x-1/2', !ui && 'invisible')} style={{ top: BAR_INSET }}>
             <Panel className="p-1.5">
-              <IconButton className={TOUCH} label="Hide UI (H)" onClick={() => setUi(false)}>
+              <Button variant="ghost" size="sm" className="pointer-coarse:h-8" title="Hide UI (H)" onClick={hideUi}>
                 <EyeOff />
-              </IconButton>
+                Hide UI
+              </Button>
             </Panel>
+          </div>
+        )}
+
+        {/* Where Hide UI was, for 2 s once the UI hides, how to bring it back; taps go through it to the banknote */}
+        {hint && (
+          <div data-demo-hint="" role="status"
+            className={cn('pointer-events-none absolute left-1/2 -translate-x-1/2 transition-opacity animate-in fade-in motion-reduce:animate-none motion-reduce:transition-none',
+              hint === 'fading' && 'opacity-0')}
+            style={{ top: BAR_INSET, transitionDuration: `${HINT_FADE_MS}ms` }}>
+            <Panel className="px-3 py-2 text-sm whitespace-nowrap">
+              <span className="pointer-coarse:hidden">Double-click to bring back the UI</span>
+              <span className="hidden pointer-coarse:inline">Double-tap to bring back the UI</span>
+            </Panel>
+          </div>
+        )}
+
+        {/* iPhone asks for motion only from a tap: as Demo opens, one button in the middle asks (Keller, 12 November: "once
+            people open this on the phone, it should ask for permission"), as a tap anywhere does. Hidden with the UI */}
+        {note && motion === 'ask' && ui && (
+          <div data-demo-ask="" className="absolute inset-x-0 flex -translate-y-1/2 justify-center" style={{ top: MARGIN + hideRoom + area.height / 2 }}>
+            <Button className="shadow-lg pointer-coarse:h-10 pointer-coarse:px-4" onClick={allow}>
+              <Rotate3d />
+              Tilt with your phone
+            </Button>
           </div>
         )}
 
@@ -419,7 +472,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
               <div className={cn('w-36 shrink-0', TOUCH_ROW)}>
                 <Segmented value={size} options={SIZES} onChange={pickSize} />
               </div>
-              <LookMenu finalFocus={backToDemo} motion={motion} tiltOn={tiltOn} onTilt={setTiltOn} onAllow={allow} onRecentre={recentre}
+              <LookMenu finalFocus={backToDemo} motion={motion} onRecentre={recentre}
                 onCheckSize={size === 'real' ? () => setChecking(true) : undefined} />
               {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
               {onClose && (
@@ -439,28 +492,22 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
 }
 
 /**
- * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first its tilt, on from the
- * start (iPhone asks at the first tap, or here), with Recentre under it while it tilts, or in words once motion was
- * refused (a page can't ask again until Safari is quit and reopened); then the lamp, held to the light until switched
- * off again, and Realistic, the tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp
- * off ("the default should just be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with
- * Real size picked, its check against a bank card. Toggles are ticked while on.
+ * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first Recentre while it tilts,
+ * or in words once motion was refused (a page can't ask again until Safari is quit and reopened), and no switch for its
+ * tilt, always on (Keller, 12 November); then the lamp, held to the light until switched off again, and Realistic, the
+ * tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp off ("the default should just
+ * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with Real size picked, its check
+ * against a bank card. Toggles are ticked while on.
  */
-function LookMenu({ finalFocus, motion, tiltOn, onTilt, onAllow, onRecentre, onCheckSize }: {
+function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
   finalFocus: () => boolean
   motion: Motion
-  tiltOn: boolean
-  onTilt: (on: boolean) => void
-  onAllow: () => void
   onRecentre: () => void
   /** Real size's check, while Real size is picked */
   onCheckSize?: () => void
 }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
-  // A phone, one that tilts by itself or could: none of it on a laptop, or before the phone's motion is known
-  const phone = motion === 'on' || motion === 'ask' || motion === 'denied'
-  const tilting = tiltOn && motion === 'on'
   return (
     <DropdownMenu>
       <Tooltip>
@@ -470,26 +517,17 @@ function LookMenu({ finalFocus, motion, tiltOn, onTilt, onAllow, onRecentre, onC
         <TooltipContent>More</TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="end" className="w-auto" finalFocus={finalFocus}>
-        {phone && (
+        {(motion === 'on' || motion === 'denied') && (
           <>
-            {motion === 'denied' ? (
-              <DropdownMenuItem disabled>
-                <Rotate3d />
-                Motion not allowed
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuCheckboxItem checked={tilting} onCheckedChange={(on) => {
-                if (on && motion === 'ask') onAllow()
-                onTilt(on)
-              }}>
-                <Rotate3d />
-                Tilt
-              </DropdownMenuCheckboxItem>
-            )}
-            {tilting && (
+            {motion === 'on' ? (
               <DropdownMenuItem onClick={onRecentre}>
                 <LocateFixed />
                 Recentre
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem disabled>
+                <Rotate3d />
+                Motion not allowed
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

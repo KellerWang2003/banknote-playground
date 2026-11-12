@@ -295,3 +295,29 @@ describe('the light behind the banknotes', () => {
     expect(useTilt.getState().angle).toBeGreaterThan(0)
   })
 })
+
+describe('a phone’s own tilt in Demo', () => {
+  it('follows the phone exactly, a drag on top turning it further with the drag’s spring and springing back to the phone’s tilt', () => {
+    renderHook(() => useTiltLoop(planFor(30)))
+    setTilt({ source: 'device', target: 20, targetX: -10, nudge: 0, nudgeX: 0, nudged: 0, nudgedX: 0 })
+    tick(20)
+    expect(useTilt.getState()).toMatchObject({ angle: 20, angleX: -10 })
+    // A drag on top: on its way with the spring, not there at once
+    setTilt({ nudge: 15, nudgeX: 30 })
+    tick(20)
+    const { angle, nudged } = useTilt.getState()
+    expect(nudged).toBeGreaterThan(0)
+    expect(nudged).toBeLessThan(15)
+    expect(angle).toBeCloseTo(20 + nudged, 9)
+    advance(1500)
+    expect(useTilt.getState()).toMatchObject({ angle: 35, angleX: 20, nudged: 15, nudgedX: 30 })
+    // The phone moves meanwhile: followed exactly, the drag still on top
+    setTilt({ target: 25 })
+    tick(20)
+    expect(useTilt.getState().angle).toBe(40)
+    // Let go: back to the phone's own tilt
+    setTilt({ nudge: 0, nudgeX: 0 })
+    advance(1500)
+    expect(useTilt.getState()).toMatchObject({ angle: 25, angleX: -10, nudged: 0, nudgedX: 0 })
+  })
+})
