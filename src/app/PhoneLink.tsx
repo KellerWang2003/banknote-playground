@@ -34,12 +34,6 @@ export function PhoneLink({ link, finalFocus = true }: {
   /** Where the keys go once it closes (Demo itself), rather than back to the button, whose tooltip would take the next Esc */
   finalFocus?: ComponentProps<typeof PopoverContent>['finalFocus']
 }) {
-  const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), 1500)
-    return () => clearTimeout(timer)
-  }, [copied])
   return (
     <Popover>
       <Tooltip>
@@ -50,14 +44,27 @@ export function PhoneLink({ link, finalFocus = true }: {
       </Tooltip>
       <PopoverContent side="top" sideOffset={12} className="w-56 items-center" finalFocus={finalFocus}>
         <QrCode text={link} className="size-48 rounded-md" />
-        <Button variant="outline" size="sm" className="w-full"
-          onClick={() => {
-            navigator.clipboard.writeText(link).then(() => setCopied(true), reportError)
-          }}>
-          {copied ? <Check /> : <Copy />}
-          {copied ? 'Copied' : 'Copy link'}
-        </Button>
+        <CopyLink link={link} />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** Copy link, under a QR code: the link for a phone, to send it there another way; Copied for a moment once it is */
+export function CopyLink({ link }: { link: string }) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
+  }, [copied])
+  return (
+    <Button variant="outline" size="sm" className="w-full"
+      onClick={() => {
+        navigator.clipboard.writeText(link).then(() => setCopied(true), reportError)
+      }}>
+      {copied ? <Check /> : <Copy />}
+      {copied ? 'Copied' : 'Copy link'}
+    </Button>
   )
 }

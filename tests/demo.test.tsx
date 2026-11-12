@@ -35,6 +35,15 @@ vi.mock('../src/cloud/repository', async (importOriginal) => {
   }) }
 })
 
+// The sample project's artwork is drawn on a canvas, which jsdom lacks: it opens one plain banknote instead
+vi.mock('../src/lib/demo', async () => {
+  const { createProject, createNote } = await import('../src/lib/notes')
+  return { createDemoProject: vi.fn(async () => ({
+    ...createProject('Sample fixture'),
+    notes: [createNote({ name: 'Sample banknote', x: 0, y: 0, widthMm: 150, heightMm: 70, color: '#123456' })],
+  })) }
+})
+
 /** jsdom lays nothing out: Demo, the canvas and everything measured are a 1280 × 800 window, the bar 44 px tall */
 const WINDOW = { width: 1280, height: 800 }
 class SizedObserver {
@@ -87,8 +96,14 @@ async function openProject(project = sample()) {
   return project
 }
 
+/** ▶ in the corner bar, then Demo on this screen in the panel it opens, under the QR code */
+async function openDemoHere(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(within(document.querySelector('[data-corner-bar]') as HTMLElement).getByRole('button', { name: 'Demo' }))
+  await user.click(await screen.findByRole('button', { name: 'Demo on this screen' }))
+}
+
 describe('Demo on the laptop', () => {
-  it('opens full screen from ▶ left of Export on the banknote picked, over the editor, black and dark, and leaves with Esc', async () => {
+  it('opens from ▶ left of Export, the QR code first and Demo on this screen under it, on the banknote picked, over the editor, black and dark, and leaves with Esc', async () => {
     const user = userEvent.setup()
     const fullScreen = vi.fn(async () => {})
     Object.defineProperty(document.documentElement, 'requestFullscreen', { configurable: true, value: fullScreen })
@@ -102,8 +117,28 @@ describe('Demo on the laptop', () => {
     // Two picked in the Banknotes list, so the + under it shows
     await user.click(screen.getByRole('button', { name: 'Two', exact: true }))
     expect(document.querySelector('[data-add-feature]')).not.toBeNull()
-    await user.click(play)
 
+    // ▶ shows the banknote picked as a QR code for a phone first, then Copy link, and Demo on this screen under them
+    // (Keller, 12 November), with nothing full screen yet; the link carries the username, the project and the banknote
+    await user.click(play)
+    const qr = await screen.findByRole('img', { name: 'QR code for the link' })
+    const panel = qr.closest('[data-demo-panel]') as HTMLElement
+    const copy = within(panel).getByRole('button', { name: 'Copy link' })
+    const here = within(panel).getByRole('button', { name: 'Demo on this screen' })
+    expect(qr.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(copy.compareDocumentPosition(here) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(fullScreen).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Demo' })).toBeNull()
+    await user.click(copy)
+    expect(await navigator.clipboard.readText()).toBe(demoLink('demo-ui-test', project.id, project.notes[1].id))
+    expect(await within(panel).findByRole('button', { name: 'Copied' })).toBeDefined()
+    // Esc closes only the panel, Two still picked
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('img', { name: 'QR code for the link' })).toBeNull())
+    expect(document.querySelector('[data-add-feature]')).not.toBeNull()
+
+    await user.click(play)
+    await user.click(await screen.findByRole('button', { name: 'Demo on this screen' }))
     expect(fullScreen).toHaveBeenCalledOnce()
     expect(demo().className).toContain('bg-black')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
@@ -138,7 +173,7 @@ describe('Demo on the laptop', () => {
     Object.defineProperty(document, 'exitFullscreen', { configurable: true, value: exit })
     Object.defineProperty(document.documentElement, 'requestFullscreen', { configurable: true, value: vi.fn(async () => { full = document.documentElement }) })
     await openProject()
-    await user.click(screen.getByRole('button', { name: 'Demo' }))
+    await openDemoHere(user)
     await user.keyboard('{Escape}')
     expect(demo()).toBeDefined()
     await user.click(within(demo()).getByRole('button', { name: 'Close Demo (Esc)' }))
@@ -149,7 +184,7 @@ describe('Demo on the laptop', () => {
   it('steps through the banknotes with ← and → or the picker, hides the UI with H and brings it back with a double-click', async () => {
     const user = userEvent.setup()
     const project = await openProject()
-    await user.click(screen.getByRole('button', { name: 'Demo' }))
+    await openDemoHere(user)
     expect(shownNote()).toBe(project.notes[0].id)
     await user.keyboard('{ArrowRight}')
     expect(shownNote()).toBe(project.notes[1].id)
@@ -173,7 +208,7 @@ describe('Demo on the laptop', () => {
 
   it('tilts as the pointer drags, the way it goes on the banknote, springing back to flat', async () => {
     await openProject()
-    fireEvent.click(screen.getByRole('button', { name: 'Demo' }))
+    await openDemoHere(userEvent.setup())
     const view = demo()
     fireEvent.pointerDown(view, { button: 0, buttons: 1, clientX: 600, clientY: 400, pointerId: 1, pointerType: 'mouse' })
     // 80 px up and 160 px right: 15° up, 30° right
@@ -181,6 +216,27 @@ describe('Demo on the laptop', () => {
     expect(useTilt.getState()).toMatchObject({ source: 'drag', target: 15, targetX: 30 })
     fireEvent.pointerUp(view, { clientX: 760, clientY: 320, pointerId: 1, pointerType: 'mouse' })
     expect(useTilt.getState()).toMatchObject({ target: 0, targetX: 0 })
+  })
+})
+
+describe('Demo of the sample project', () => {
+  it('opens here straight away from ▶, as no phone can read the sample project, and has no phone button', async () => {
+    const user = userEvent.setup()
+    const fullScreen = vi.fn(async () => {})
+    Object.defineProperty(document.documentElement, 'requestFullscreen', { configurable: true, value: fullScreen })
+    localStorage.setItem('of-thread-workspace', 'demo-ui-test')
+    render(<TooltipProvider><App /></TooltipProvider>)
+    await user.click(await screen.findByRole('button', { name: 'Sample project', exact: true }))
+    const bar = await waitFor(() => {
+      const found = document.querySelector('[data-corner-bar]')
+      if (!(found instanceof HTMLElement)) throw new Error('no corner bar yet')
+      return found
+    })
+    await user.click(within(bar).getByRole('button', { name: 'Demo' }))
+    expect(fullScreen).toHaveBeenCalledOnce()
+    expect(demo()).toBeDefined()
+    expect(screen.queryByRole('img', { name: 'QR code for the link' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open on your phone' })).toBeNull()
   })
 })
 

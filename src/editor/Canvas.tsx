@@ -1,6 +1,6 @@
 import { runAction } from '../cloud/notices'
-import { Maximize, Minus, Play, Plus, Share } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Maximize, Minus, Plus, Share } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { IconButton, Panel } from '../components/controls'
@@ -137,7 +137,7 @@ export function Canvas({
   placing,
   onExitPlacing,
   onExport,
-  onDemo,
+  demoButton,
   covered = false,
   onEditWindow,
   onEditThread,
@@ -167,8 +167,11 @@ export function Canvas({
   onExitPlacing?: () => void
   /** Export, at the end of the corner bar after the zoom controls; left out while the thread editor is open */
   onExport?: () => void
-  /** ▶ Demo, left of Export (Keller, 10 November: a "play button" secondary button); left out while the thread editor is open */
-  onDemo?: () => void
+  /**
+   * ▶ Demo, left of Export (Keller, 10 November: a "play button" secondary button), with the panel it opens (`DemoButton`);
+   * left out while the thread editor is open
+   */
+  demoButton?: ReactNode
   /**
    * Demo is open over the canvas: its banknotes and corner bar aren't drawn, so nothing is drawn twice, while it stays,
    * as it runs the tilt loop
@@ -844,14 +847,10 @@ export function Canvas({
             <IconButton className="rounded-lg" label="Fit all notes" onClick={() => jumpTo(fitView(notes, size, quarter))}>
               <Maximize />
             </IconButton>
-            {(onDemo || onExport) && (
+            {(demoButton || onExport) && (
               <div className="ml-auto flex items-center gap-1">
                 {/* Its icon alone, Demo in its tooltip, as Figma's ▶ (there is just room for it at the bar's narrowest) */}
-                {onDemo && (
-                  <IconButton variant="outline" className="rounded-lg" label="Demo" onClick={onDemo}>
-                    <Play />
-                  </IconButton>
-                )}
+                {demoButton}
                 {onExport && (
                   <Button size="sm" onClick={onExport}>
                     <Share />
