@@ -3,7 +3,7 @@ import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NoteView } from '../src/components/NoteView'
 import { turnDeg } from '../src/lib/back'
-import { WATERMARK_TILTED, watermarkOpacity, watermarkReveal } from '../src/lib/light'
+import { HELD_DEG, WATERMARK_TILTED, roomThrough, watermarkOpacity, watermarkReveal } from '../src/lib/light'
 import { DEFAULT_INK, INK_ROLL_DEG, INK_SHIFT_DEG, barShift, inkShift } from '../src/lib/magneticInk'
 import { createNote } from '../src/lib/notes'
 import type { MagneticInk, Note } from '../src/lib/types'
@@ -31,7 +31,7 @@ vi.mock('../src/lib/inkMask', () => ({
 
 afterEach(() => {
   cleanup()
-  setTilt({ source: 'hold', angle: 0, angleX: 0, target: 0, targetX: 0, light: 0, flipped: false, turn: 0 })
+  setTilt({ source: 'hold', angle: 0, angleX: 0, target: 0, targetX: 0, light: 0, flipped: false, turn: 0, room: undefined, nudged: 0, nudgedX: 0 })
 })
 
 const makeNote = () => createNote({ name: 'Live', x: 0, y: 0, widthMm: 150, heightMm: 70, color: '#112233' })
@@ -118,6 +118,34 @@ describe("a NoteView's watermark", () => {
     act(() => setTilt({ light: 1 }))
     expect(opacity(container)).toBeCloseTo(0.6)
     expect(renders).toBe(before)
+  })
+
+  it('shows in Demo on a phone by the room’s light coming through it as the phone lies in the room, not by tilting', () => {
+    const RAD = Math.PI / 180
+    // As Demo keeps how the phone lies: tipped `beta` from lying flat towards upright and on past it, facing whoever holds it
+    const lying = (beta: number) => ({ x: 0, y: HELD_DEG - beta, up: [0, -Math.sin(beta * RAD), Math.cos(beta * RAD)] as const })
+    const { container } = render(<NoteView note={withWatermark()} scale={1} live perspective flat />)
+    // Held as people hold a phone to look at it, tilted however far from where Demo began: only a hint
+    act(() => setTilt({ source: 'device', target: 35, targetX: -20, angle: 35, angleX: -20, room: lying(HELD_DEG) }))
+    expect(opacity(container)).toBeCloseTo(watermarkOpacity(0.6, 0))
+    // Lying flat on a table, the same
+    act(() => setTilt({ room: lying(0) }))
+    expect(opacity(container)).toBeCloseTo(watermarkOpacity(0.6, 0))
+    // Pointing the camera up, the light behind it: clearer, then clear, whatever the banknote's own tilt
+    act(() => setTilt({ angle: 0, angleX: 0, room: lying(110) }))
+    const through = roomThrough(lying(110).up)
+    expect(through).toBeGreaterThan(0.5)
+    expect(through).toBeLessThan(1)
+    expect(opacity(container)).toBeCloseTo(watermarkOpacity(0.6, through))
+    act(() => setTilt({ room: lying(120) }))
+    expect(opacity(container)).toBeCloseTo(0.6)
+    // A drag turning it back towards upright in the hand
+    act(() => setTilt({ nudged: 20 }))
+    expect(opacity(container)).toBeCloseTo(watermarkOpacity(0.6, roomThrough(lying(120).up, { x: 0, y: 20 })))
+    expect(opacity(container)).toBeLessThan(0.6)
+    // Held to the lamp, clear however it lies
+    act(() => setTilt({ room: lying(HELD_DEG), nudged: 0, light: 1 }))
+    expect(opacity(container)).toBeCloseTo(0.6)
   })
 
   it('takes a press on the canvas, faint or clear, but not in a thumbnail or with no depth', () => {

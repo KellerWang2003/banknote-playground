@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { drawFace, exportReveal, playbackLights, playbackTilts } from '../src/lib/exportRender'
 import {
-  WATERMARK_FAINT, WATERMARK_TILTED, WATERMARK_TILT_DEG, offAxisDeg, tiltReveal, watermarkOpacity, watermarkReveal,
+  HELD_DEG, THROUGH_DEG, THROUGH_FROM_DEG, WATERMARK_FAINT, WATERMARK_TILTED, WATERMARK_TILT_DEG, backRise, offAxisDeg, roomThrough, tiltReveal,
+  watermarkOpacity, watermarkReveal,
 } from '../src/lib/light'
 import { lensState } from '../src/lib/lens'
 import { PAPER } from '../src/lib/back'
@@ -60,6 +61,55 @@ describe('how clearly the watermark shows', () => {
     expect(watermarkOpacity(0.6, 0.5)).toBeCloseTo(0.6 * (WATERMARK_FAINT + (1 - WATERMARK_FAINT) / 2))
     expect(watermarkOpacity(0, 1)).toBe(0)
     expect(watermarkOpacity(1, 2)).toBe(1)
+  })
+})
+
+describe('the room’s light through the watermark, in Demo on a phone', () => {
+  const RAD = Math.PI / 180
+  // The room's up along the banknote's own sides (x right, y down, z out of its face), the phone tipped `beta` from lying
+  // flat towards upright and on past it, facing whoever holds it
+  const pitched = (beta: number): [number, number, number] => [0, -Math.sin(beta * RAD), Math.cos(beta * RAD)]
+
+  it('measures how far the banknote’s back faces up from the room’s up along its sides', () => {
+    expect(backRise(pitched(0))).toBeCloseTo(-90)
+    expect(backRise(pitched(HELD_DEG))).toBeCloseTo(-HELD_DEG)
+    // Upright, then the camera pointing up
+    expect(backRise(pitched(90))).toBeCloseTo(0)
+    expect(backRise(pitched(120))).toBeCloseTo(30)
+    // Face down overhead, the light behind it, and face down flat
+    expect(backRise(pitched(150))).toBeCloseTo(60)
+    expect(backRise(pitched(180))).toBeCloseTo(90)
+    // On its side, level, whichever side; tipped back past it
+    expect(backRise([1, 0, 0])).toBeCloseTo(0)
+    expect(backRise([-0.5, 0, -Math.sqrt(3) / 2])).toBeCloseTo(60)
+    // However long the up it is given
+    expect(backRise([0, -2, 0])).toBeCloseTo(0)
+  })
+
+  it('takes a drag as turning the banknote further in the hand', () => {
+    // Upright, its top pushed away: its face turns up to the room, its back as far down
+    expect(backRise(pitched(90), { x: 0, y: 20 })).toBeCloseTo(-20)
+    // Held, its top pulled back to upright
+    expect(backRise(pitched(HELD_DEG), { x: 0, y: -HELD_DEG })).toBeCloseTo(0)
+    // Lying flat, turned onto its side
+    expect(backRise(pitched(0), { x: 90, y: 0 })).toBeCloseTo(0)
+  })
+
+  it('comes through only as the back turns up to the light: none lying flat or held, some upright, all of it camera up', () => {
+    expect(roomThrough(pitched(0))).toBe(0)
+    expect(roomThrough(pitched(HELD_DEG))).toBe(0)
+    expect(roomThrough(pitched(90 + THROUGH_FROM_DEG))).toBeCloseTo(0)
+    const upright = roomThrough(pitched(90))
+    expect(upright).toBeGreaterThan(0)
+    expect(upright).toBeLessThan(0.3)
+    expect(roomThrough(pitched(100))).toBeGreaterThan(upright)
+    expect(roomThrough(pitched(90 + THROUGH_DEG))).toBeCloseTo(1)
+    expect(roomThrough(pitched(150))).toBe(1)
+    expect(roomThrough(pitched(180))).toBe(1)
+    // On its side, as upright
+    expect(roomThrough([1, 0, 0])).toBeCloseTo(upright)
+    // The camera pointing up, a drag turning it back to upright
+    expect(roomThrough(pitched(90 + THROUGH_DEG), { x: 0, y: THROUGH_DEG })).toBeCloseTo(upright)
   })
 })
 

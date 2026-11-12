@@ -319,7 +319,7 @@ describe('Arc-en-Ciel in an export', () => {
 })
 
 describe('Realistic’s lamp in an export', () => {
-  it('shades the banknote last, over everything, turned over and rotated as it shows, in place of the light and shade of turning', () => {
+  it('shades the paper under the watermarks and the thread in its windows, turned over and rotated as it shows, in place of the light and shade of turning', () => {
     const calls: unknown[][] = []
     const ctx = new Proxy({} as Record<string, unknown>, {
       get(target, key) {
@@ -332,25 +332,38 @@ describe('Realistic’s lamp in an export', () => {
         return true
       },
     }) as unknown as CanvasRenderingContext2D
-    const note = { ...makeNote(150, 70), noThread: true }
-    const assets = { frames: new Map() }
+    const light = { width: 1, height: 1 } as unknown as HTMLCanvasElement
+    const note = { ...makeNote(150, 70), watermark: { imageId: 'w', xMm: 10, yMm: 5, widthMm: 20, heightMm: 30, depth: 0.6 } }
+    const assets = { frames: new Map(), relief: { canvas: light } as unknown as Relief }
     paperShade.calls = []
     paperShade.order = calls
     try {
       drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, realistic: true, turn: 0.3, quarter: 3 })
-      // On the banknote's own canvas (a proxy, so compared by itself)
-      expect(paperShade.calls).toHaveLength(1)
-      expect(paperShade.calls[0][0]).toBe(ctx)
-      expect(paperShade.calls[0].slice(1)).toEqual([note, 2, { x: turnDeg(0.3), y: 10 }, 3])
-      expect(calls.slice(-2)).toEqual([['paperShade'], ['restore']])
+      // On the banknote's own canvas (a proxy, so compared by itself), over all of it: once over the paper, again in the
+      // thread's windows
+      expect(paperShade.calls).toHaveLength(2)
+      for (const call of paperShade.calls) {
+        expect(call[0]).toBe(ctx)
+        expect(call.slice(1)).toEqual([note, 2, { x: turnDeg(0.3), y: 10 }, 3])
+      }
+      const keys = calls.map(([key]) => key)
+      const watermark = calls.findIndex(([key, image]) => key === 'drawImage' && image === light)
+      expect(keys.indexOf('paperShade')).toBeLessThan(watermark)
+      // The thread's: within its clip, from the banknote's top left, then the clip let go
+      const inThread = keys.lastIndexOf('paperShade')
+      expect(inThread).toBeGreaterThan(watermark)
+      expect(keys.lastIndexOf('clip', inThread)).toBeGreaterThan(watermark)
+      expect(calls[inThread - 1]).toEqual(['translate', -2 * (note.thread.positionMm - note.thread.widthMm / 2), -0])
+      expect(keys[inThread + 1]).toBe('restore')
       expect(calls.some(([key]) => key === 'createLinearGradient')).toBe(false)
       // The back too, and without perspective turning over leaves the lamp's light as it was, as it does the ink's
       drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, back: true, turn: 0.3, quarter: 3 })
-      expect(paperShade.calls[1].slice(1)).toEqual([note, 2, { x: 0, y: 10 }, 3])
-      // With Realistic off, the light and shade of turning, as before
+      expect(paperShade.calls).toHaveLength(3)
+      expect(paperShade.calls[2].slice(1)).toEqual([note, 2, { x: 0, y: 10 }, 3])
+      // With Realistic off, the light and shade of turning over everything, as before
       calls.length = 0
       drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
-      expect(paperShade.calls).toHaveLength(2)
+      expect(paperShade.calls).toHaveLength(3)
       expect(calls.filter(([key]) => key === 'createLinearGradient')).toHaveLength(1)
     } finally {
       paperShade.order = undefined

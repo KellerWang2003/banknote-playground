@@ -10,7 +10,8 @@ import { type Quarter, unturn } from './rotate'
  * glare, or anything, just so that it would look real"; of the looks he was shown he kept "just the lamp glare", with its
  * light grain; 12 November, of that glare: "isn't that apparent ... it's moving so fast ... I think it can be bigger ... a
  * bigger thing that moves slowly", and of four looks rendered tilting in a hand he took the bigger glare with the lamp
- * shading the paper, not easing after the tilt). The lamp that lights magnetic ink and Arc-en-Ciel (realisticInk.ts, hanging
+ * shading the paper, not easing after the tilt; then, of the shading on a phone pointing its camera up, "too dim ... maybe
+ * like 60% of the dimness of right now"). The lamp that lights magnetic ink and Arc-en-Ciel (realisticInk.ts, hanging
  * LAMP_HEIGHT_DEG over the viewer's head) lights the paper too:
  * - its glare, where the paper mirrors the lamp into the eye: as wide and soft as matte paper's (a Trowbridge-Reitz lobe,
  *   PAPER_GLARE.spread wide), sliding across the banknote as it tilts about the eye's distance in mm a radian (6 mm a
@@ -21,10 +22,13 @@ import { type Quarter, unturn } from './rotate'
  *   it, LAMP_SHARE of its light being the lamp's and the rest the room's, and never lighter than flat at its middle. A
  *   screen can't show light paper any whiter, so this is what lets the glare show there;
  * - and, fixed to the paper, a light cotton grain, its fibres and a faint cloudiness.
- * The grain and the glare lie over the design and under every security feature, which has its own light; the shading over
- * all of it, as the lamp lights all of it, in place of the canvas's own light and shade of turning. On the canvas
- * (NoteView: the grain painted once, the glare one canvas per banknote that only moves, the shading a small canvas painted
- * as the tilt changes) and in exports (`drawPaper`, `drawPaperShade`) alike. The numbers are those of the look Keller
+ * The grain, the glare and the shading lie over the design, in place of the canvas's own light and shade of turning, and
+ * under every security feature: the watermarks, as light coming through the paper brightens it past its shading (in Demo
+ * on a phone, the room's light: light.ts), Arc-en-Ciel and magnetic ink, which the lamp lights itself, and the thread,
+ * which has no light of its own, so it is shaded alike where it shows. On the canvas (NoteView: the grain painted once, the
+ * glare one canvas per banknote that only moves, the shading a small canvas painted as the tilt changes, again in the
+ * thread's windows) and in exports (`drawPaper`, `drawPaperShade`) alike. In Demo on a phone all of it is lit as the
+ * phone lies in the room, not as it was held when Demo began (`lightTiltOf`). The numbers are those of the look Keller
  * picked, and are not settings.
  */
 
@@ -130,8 +134,11 @@ export function paintPaperLight(canvas: HTMLCanvasElement) {
   g.drawImage(image, 0, 0, canvas.width, canvas.height)
 }
 
-/** How much of the paper's light is the lamp's; the rest is the room's, the same everywhere */
-export const LAMP_SHARE = 0.6
+/**
+ * How much of the paper's light is the lamp's; the rest is the room's, the same everywhere. The paper is at most this much
+ * darker, with the lamp behind it: until 12 November 0.6, which Keller found too dark on a phone pointing its camera up
+ */
+export const LAMP_SHARE = 0.36
 
 /**
  * The lamp's light on the paper of a banknote turned through `tilt` (turning over included), seen from `eye` mm out from

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto'
+import { HELD_DEG } from '../src/lib/light'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -380,6 +381,35 @@ describe('Demo on a phone', () => {
       orient(0, 60, 20)
     }
     expect(useTilt.getState().targetX).toBeCloseTo(0, 1)
+  })
+
+  it('lights the banknote as the phone lies in the room, which Recentre leaves: flat on a table, held, camera up', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    renderDemo()
+    const settle = (alpha: number, beta: number, gamma: number) => {
+      for (let i = 0; i < 20; i++) {
+        now += 100
+        orient(alpha, beta, gamma)
+      }
+    }
+    // Held tipped back 60°, 15° more upright than the light's own no tilt: its top 15° forward in the room's light
+    orient(0, 60, 0)
+    await motionOn()
+    expect(useTilt.getState().room!.y).toBeCloseTo(HELD_DEG - 60, 6)
+    expect(useTilt.getState().room!.x).toBeCloseTo(0, 6)
+    // Recentred while tipped further, its own tilt starts again from flat; the light stays as the phone lies
+    settle(0, 80, 0)
+    const menu = await openMenu()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Recentre' }))
+    settle(0, 80, 0)
+    expect(useTilt.getState().target).toBeCloseTo(0, 1)
+    expect(useTilt.getState().room!.y).toBeCloseTo(HELD_DEG - 80, 1)
+    // Lying flat on a table, tipped back in the light, and pointing the camera up, forward past upright
+    settle(30, 0, 0)
+    expect(useTilt.getState().room!.y).toBeCloseTo(HELD_DEG, 1)
+    settle(30, 120, 0)
+    expect(useTilt.getState().room!.y).toBeCloseTo(HELD_DEG - 120, 1)
   })
 
   it('turns the banknote further in the hand as a finger drags on top of the phone’s tilt, springing back, and holds it to the light while pressed', async () => {

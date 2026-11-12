@@ -274,12 +274,20 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     const w = face.naturalWidth * k, h = face.naturalHeight * k
     ctx.drawImage(face, (width - w) / 2, (height - h) / 2, w, h)
   }
-  // Realistic's paper, as NoteView: its grain and the lamp's glare off it, over the design and under every feature, the
-  // glare turning over with the banknote only as it shows turning, in perspective, as realistic ink's lamp does; and over
-  // everything, last, the lamp's shading, in place of the light and shade of turning
+  // Realistic's paper, as NoteView: its grain, the lamp's glare off it and the lamp's shading over them, in place of the
+  // light and shade of turning, over the design and under every feature, the glare and shading turning over with the
+  // banknote only as it shows turning, in perspective, as realistic ink's lamp does. The watermarks lie over the shading, as
+  // light comes through them, and the thread is shaded alike in its windows. Without Realistic, the light and shade of
+  // turning over everything, last
   const paperView = withTurn(tilt, options.perspective ? options.turn ?? 0 : 0)
-  if (options.realistic) drawPaper(ctx, note, scale, paperView, options.quarter)
-  const shade = () => (options.realistic ? drawPaperShade(ctx, note, scale, paperView, options.quarter) : drawShade(ctx, width, height, tilt, options.perspective))
+  const paperShade = () => drawPaperShade(ctx, note, scale, paperView, options.quarter)
+  if (options.realistic) {
+    drawPaper(ctx, note, scale, paperView, options.quarter)
+    paperShade()
+  }
+  const shade = () => {
+    if (!options.realistic) drawShade(ctx, width, height, tilt, options.perspective)
+  }
   // Every one of a kind: the first, on the banknote itself, then each further one as its view with its assets
   const each = (feature: Feature) => [
     { note, assets },
@@ -311,7 +319,7 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   const labels = each('thread').flatMap((part, i) => {
     if (!hasThread(part.note)) return []
     const offsetMm = (i === 0 ? options.offsetMm : options.offsets?.[part.note.id]) ?? 0
-    return [drawThread(ctx, part.note, part.assets, mm, tilt, offsetMm, options.sheen)]
+    return [drawThread(ctx, part.note, part.assets, mm, tilt, offsetMm, options.sheen, options.realistic ? paperShade : undefined)]
   })
 
   shade()
@@ -351,10 +359,10 @@ function drawWatermark(ctx: Ctx, note: Note, assets: NoteAssets, mm: (value: num
 
 /**
  * A thread, as NoteView draws it, through its windows: each section of its pattern showing its own frames through its
- * areas, each frame's image once in every repeat from `offsetMm`, and the sheen. Returns where it runs and the frame it
- * shows, for its number
+ * areas, each frame's image once in every repeat from `offsetMm`, the sheen, and with `shaded` what that draws over the
+ * banknote, from its top left, there: Realistic's lamp shading. Returns where it runs and the frame it shows, for its number
  */
-function drawThread(ctx: Ctx, note: Note, assets: NoteAssets, mm: (value: number) => number, tilt: Tilt2, offsetMm: number, sheen: boolean) {
+function drawThread(ctx: Ctx, note: Note, assets: NoteAssets, mm: (value: number) => number, tilt: Tilt2, offsetMm: number, sheen: boolean, shaded?: () => void) {
   const { thread, frames } = note
   const { y: angle } = tilt
   const horizontal = thread.direction === 'horizontal'
@@ -442,6 +450,10 @@ function drawThread(ctx: Ctx, note: Note, assets: NoteAssets, mm: (value: number
     ctx.fillStyle = gradient
     ctx.fillRect(0, 0, strip.w, strip.h)
     ctx.globalCompositeOperation = 'source-over'
+  }
+  if (shaded) {
+    ctx.translate(-strip.x, -strip.y)
+    shaded()
   }
   ctx.restore()
   return { strip, label: frames.length > 0 ? shownLabel(mixes.map((mix) => mix.current)) : undefined }

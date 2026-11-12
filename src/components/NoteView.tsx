@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { PAPER, backOf, mirrored, turnDeg, type Side } from '../lib/back'
 import { SHADE_DEG, TILT_LIMIT, perspectiveFor } from '../lib/frames'
 import { lensMix, type Tilt2 } from '../lib/lens'
-import { watermarkOpacity, watermarkReveal } from '../lib/light'
+import { roomThrough, watermarkOpacity, watermarkReveal } from '../lib/light'
 import { THUMB_PX, designPx, devicePx, useImageUrl, useWarmImages } from '../lib/images'
 import { copyStarts, imageBox } from '../lib/artwork'
 import { patternMix, patternOf, preparePattern, sectionClip, shownLabel } from '../lib/pattern'
@@ -22,7 +22,7 @@ import { type PlacedBox, boxTurn } from '../lib/placed'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { type Layer, extraIdOf, extraView, extrasOf, partLayer } from '../lib/extras'
 import { type Feature, hasThread } from '../lib/layers'
-import { framesTiltOf, showsBack, useTilt } from '../tilt/tilt'
+import { type TiltSource, framesTiltOf, lightTiltOf, showsBack, useTilt } from '../tilt/tilt'
 
 // Height ÷ width of each image, once loaded
 const aspects = new Map<string, number>()
@@ -269,6 +269,9 @@ type LiveState = {
   /** In Demo on a phone, how far a drag has turned the banknote in the hand, beyond the phone's own tilt (`useTilt`) */
   nudged?: number
   nudgedX?: number
+  /** In Demo on a phone, the `device` source and how the phone lies in the room, which the paper's light and the watermark follow */
+  source?: TiltSource
+  room?: { x: number; y: number; up: readonly [number, number, number] }
 }
 
 /**
@@ -432,15 +435,23 @@ export function NoteView({
   const grain = usePaperGrain(paperShown)
   const paperLight = useRef<HTMLCanvasElement>(null)
   const paperShade = useRef<HTMLCanvasElement>(null)
+  // The thread is in the paper and has no light of its own: the lamp shades it in its windows as it shades the paper, but
+  // the watermarks lie over the paper's shading, as light comes through them
+  const threadShade = useRef<HTMLCanvasElement>(null)
   const shadeCells = shadeSize(note)
   const movePaperLight = (view: Tilt2, quarter: Quarter) => {
     if (paperLight.current) Object.assign(paperLight.current.style, lightMove(note, scale, view, quarter))
     if (paperShade.current) paintPaperShade(paperShade.current, note, view, quarter)
+    if (threadShade.current) paintPaperShade(threadShade.current, note, view, quarter)
   }
   useLayoutEffect(() => {
     if (paperShown && paperLight.current) paintPaperLight(paperLight.current)
   }, [paperShown])
-  const revealOf = (state: LiveState) => reveal ?? watermarkReveal(state.light, { x: state.angleX, y: state.angle })
+  // In Demo on a phone, by the room's light coming through it as the phone lies in the room (light.ts), or held to the
+  // lamp; elsewhere by the light or the tilt
+  const revealOf = (state: LiveState) => reveal ?? (state.source === 'device' && state.room
+    ? Math.max(Math.min(Math.max(state.light, 0), 1), roomThrough(state.room.up, { x: state.nudgedX ?? 0, y: state.nudged ?? 0 }))
+    : watermarkReveal(state.light, { x: state.angleX, y: state.angle }))
 
   // Live: write the continuous parts straight onto the elements, after every render and on every tilt change
   const apply = useRef((_state: LiveState) => {})
@@ -469,7 +480,9 @@ export function NoteView({
       const view = { x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }
       const quarter = quarterOf(state.quarterTurns ?? 0)
       if (inkLit) paintInk(view, quarter)
-      movePaperLight(view, quarter)
+      // The paper's light, as the banknote lies in the light: in Demo on a phone, the room's, which Recentre doesn't move
+      const lit = lightTiltOf(state)
+      movePaperLight({ x: lit.x + (perspective ? turnDeg(state.turn) : 0), y: lit.y }, quarter)
       // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen; Realistic, its ridges
       // turn from the lamp as the ink does
       paintArc({ x: angleX, y: angle }, view, quarter)
@@ -488,7 +501,8 @@ export function NoteView({
     return useTilt.subscribe((state, previous) => {
       if (state.angle !== previous.angle || state.angleX !== previous.angleX || state.light !== previous.light || state.turn !== previous.turn
         || state.frameTilts[note.id] !== previous.frameTilts[note.id] || state.quarterTurns !== previous.quarterTurns
-        || state.nudged !== previous.nudged || state.nudgedX !== previous.nudgedX) apply.current(state)
+        || state.nudged !== previous.nudged || state.nudgedX !== previous.nudgedX || state.room !== previous.room
+        || state.source !== previous.source) apply.current(state)
     })
   }, [live, note.id])
 
@@ -572,12 +586,18 @@ export function NoteView({
       {design && face === undefined && <Loading />}
 
       {/* Realistic's paper (paper.ts), over the design and under every feature, which has its own light: its light cotton
-          grain, fixed to it, and the lamp's glare where the paper mirrors the lamp (its shading lies over everything, below).
-          Flat on a phone it shows too, following the phone's tilt as the features do */}
+          grain, fixed to it, the lamp's glare where the paper mirrors the lamp, and the lamp's shading over the paper, its
+          design, grain and glare: darker the further from the lamp and the more turned from it. Under the watermarks, which
+          light coming through the paper brightens past its shading, and Arc-en-Ciel and magnetic ink, which the lamp lights
+          itself; the thread is shaded in its own windows. Flat on a phone it shows too, lit as the phone lies in the room */}
       {grain && <div aria-hidden="true" data-paper-grain="" className="pointer-events-none absolute inset-0" style={grainStyle(grain, scale)} />}
       {paperShown && (
         <canvas ref={paperLight} aria-hidden="true" data-paper-light="" width={LIGHT_PX} height={LIGHT_PX} className="pointer-events-none absolute"
           style={{ ...lightBox(note, scale), willChange: live ? 'transform, opacity' : undefined }} />
+      )}
+      {paperShown && (
+        <canvas ref={paperShade} aria-hidden="true" data-paper-shade="" width={shadeCells.width} height={shadeCells.height}
+          className="pointer-events-none absolute inset-0 size-full" />
       )}
 
       {watermarkBox && watermark?.imageId && (
@@ -656,6 +676,12 @@ export function NoteView({
               })}
             />
           )}
+          {realistic && (
+            // Realistic's lamp shading where the thread shows, as over the paper round it: the whole banknote's, in its windows
+            <canvas ref={threadShade} aria-hidden="true" data-thread-shade="" width={shadeCells.width} height={shadeCells.height}
+              className="pointer-events-none absolute"
+              style={{ left: -Number(strip.left), top: -Number(strip.top), width: mm(note.widthMm), height: mm(note.heightMm) }} />
+          )}
         </div>
       )}
 
@@ -693,12 +719,6 @@ export function NoteView({
           <div className="pointer-events-none absolute inset-0" {...tiltPart('shade-up', { background: `linear-gradient(180deg, ${SIDE_LIGHT}, ${SIDE_DARK})` })} />
           <div className="pointer-events-none absolute inset-0" {...tiltPart('shade-down', { background: `linear-gradient(180deg, ${SIDE_DARK}, ${SIDE_LIGHT})` })} />
         </>
-      )}
-      {paperShown && (
-        // Realistic's lamp shading (paper.ts) over all of it, as the lamp lights all of it: darker the further from the lamp
-        // and the more turned from it, flat on a phone too, following the phone's tilt
-        <canvas ref={paperShade} aria-hidden="true" data-paper-shade="" width={shadeCells.width} height={shadeCells.height}
-          className="pointer-events-none absolute inset-0 size-full" />
       )}
 
       {/* Canvas only, never exported. Outside the part, so a thin thread keeps its artwork in view, edged in the background

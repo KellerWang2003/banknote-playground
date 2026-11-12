@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { eyeFrom, oneEuro, orientationMatrix, tiltFromEye, uprightQuarter, type Matrix } from '../src/lib/deviceTilt'
+import { eyeFrom, nearestTurn, oneEuro, orientationMatrix, roomTilt, tiltFromEye, uprightQuarter, type Matrix } from '../src/lib/deviceTilt'
+import { HELD_DEG } from '../src/lib/light'
 import { type Quarter } from '../src/lib/rotate'
 
 const RAD = Math.PI / 180
@@ -89,6 +90,79 @@ describe('the phone’s tilt as the banknote’s', () => {
     expect(tiltFromEye(eyeFrom(REST, now), 0, 0, 60).x).toBe(60)
     const behind = flat(times(rows(REST), cssTilt(0, 120)))
     expect(tiltFromEye(eyeFrom(REST, behind), 0, 0).x).toBe(90)
+  })
+})
+
+describe('how the phone lies in the room, for the light', () => {
+  const pitched = (beta: number, alpha = 0, gamma = 0) => orientationMatrix({ alpha, beta, gamma })
+  const close = (tilt: { x: number; y: number }, y: number, x = 0, digits = 9) => {
+    expect(tilt.y).toBeCloseTo(y, digits)
+    expect(tilt.x).toBeCloseTo(x, digits)
+  }
+
+  it('is no tilt held HELD_DEG from lying flat, the top tipped back lying flat, forward upright and past it, camera up', () => {
+    close(roomTilt(pitched(HELD_DEG), 0, 0, 0), 0)
+    close(roomTilt(pitched(0), 0, 0, 0), HELD_DEG)
+    close(roomTilt(pitched(90), 0, 0, 0), HELD_DEG - 90)
+    close(roomTilt(pitched(120), 0, 0, 0), HELD_DEG - 120)
+  })
+
+  it('needs no start: wherever the phone faces, however it was held before', () => {
+    for (const alpha of [0, 37, 140, 275]) {
+      close(roomTilt(pitched(60, alpha), 0, 0, 0), HELD_DEG - 60)
+      close(roomTilt(pitched(0, alpha), 0, 0, 0), HELD_DEG)
+    }
+  })
+
+  it('turns to the side as a hand rocks the phone about its length, near enough as far as the phone turns', () => {
+    const rocked = roomTilt(pitched(HELD_DEG, 0, 20), 0, 0, 0)
+    expect(rocked.x).toBeGreaterThan(15)
+    expect(rocked.x).toBeLessThan(20)
+    expect(Math.abs(rocked.y)).toBeLessThan(1)
+    expect(roomTilt(pitched(HELD_DEG, 0, -20), 0, 0, 0).x).toBeCloseTo(-rocked.x, 9)
+  })
+
+  it('reads whoever holds the phone from the view as it shows: in landscape, and turned for a phone with rotation locked', () => {
+    // Held sideways at HELD_DEG, the page turned itself (top to the left: the page's up is the phone's right)
+    const sideways = flat(times(rows(pitched(HELD_DEG)), rotZ(90)))
+    close(roomTilt(sideways, 90, 0, 0), 0)
+    close(roomTilt(flat(times(rows(pitched(0)), rotZ(90))), 90, 0, 0), HELD_DEG)
+    // The same with rotation locked: the view turned a quarter in its stead
+    close(roomTilt(sideways, 0, 1, 1), 0)
+    close(roomTilt(flat(times(rows(pitched(0)), rotZ(90))), 0, 1, 1), HELD_DEG)
+  })
+
+  it('measures along the banknote’s own sides once it is rotated on the page, as its own tilt is', () => {
+    // Its top to the page's right: lying flat, the room's light is off its left, which is the view's top
+    close(roomTilt(pitched(0), 0, 0, 1), 0, -HELD_DEG)
+  })
+
+  it('tips on forward past edge-on, face down overhead, keeping the room’s up above the view’s top', () => {
+    close(roomTilt(pitched(150), 0, 0, 0), HELD_DEG - 150)
+    close(roomTilt(pitched(179), 0, 0, 0), HELD_DEG - 179)
+    // Rocked onto its side and past, it turns on to the side instead
+    const rolled = roomTilt(pitched(HELD_DEG, 0, 80), 0, 0, 0)
+    expect(rolled.x).toBeGreaterThan(40)
+    expect(Math.abs(rolled.y)).toBeLessThan(30)
+  })
+
+  it('gives the room’s up along the banknote’s own sides, which says how the light comes through it', () => {
+    const up = (m: Parameters<typeof roomTilt>[0], quarter: 0 | 1 | 2 | 3 = 0) => roomTilt(m, 0, 0, quarter).up.map((v) => v + 0)
+    const near = (got: number[], want: number[]) => want.forEach((v, i) => expect(got[i]).toBeCloseTo(v, 9))
+    const s = Math.sin(HELD_DEG * Math.PI / 180)
+    near(up(pitched(0)), [0, 0, 1])
+    near(up(pitched(HELD_DEG, 140)), [0, -s, s])
+    near(up(pitched(90)), [0, -1, 0])
+    near(up(pitched(180)), [0, 0, -1])
+    // Rotated a quarter on the page, its top to the right: the room's up, held upright, is off its left
+    near(up(pitched(90), 1), [-1, 0, 0])
+  })
+
+  it('steadies an angle that wraps round from where it was', () => {
+    expect(nearestTurn(-179, 179)).toBeCloseTo(181)
+    expect(nearestTurn(179, -179)).toBeCloseTo(-181)
+    expect(nearestTurn(10, 20)).toBeCloseTo(10)
+    expect(nearestTurn(370, 0)).toBeCloseTo(10)
   })
 })
 

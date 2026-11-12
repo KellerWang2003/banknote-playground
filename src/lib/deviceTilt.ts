@@ -11,6 +11,8 @@
  * would show the same view at (`tiltFromEye`): ↕ and ↔ as NoteView turns a banknote, rotateX(↕) then rotateY(↔).
  */
 import { TILT_LIMIT, clamp } from './frames'
+import { HELD_DEG, roomUp } from './light'
+import { tiltMatrix } from './realisticInk'
 import { type Quarter, unturn } from './rotate'
 
 /** As `deviceorientation` gives it, degrees: alpha about the screen's normal, beta about its width, gamma about its height */
@@ -72,6 +74,74 @@ export function tiltFromEye([ex, ey, ez]: Vector, screenAngle: number, quarter: 
   const x = Math.atan2(-own.x, ez) * DEG
   return { x: clamp(x, -limit, limit), y: clamp(y, -limit, limit) }
 }
+
+/**
+ * How much more the way the view's foot points (or its top, tipped forward past upright) says where whoever holds the
+ * phone stands than the way the screen faces, but upright: so turning it about its own length, as a hand rocks it side to
+ * side, turns it in the room's light, which can't tell that from turning round
+ */
+const FOOT_WEIGHT = 10
+
+/**
+ * How the phone lies in the room, as the tilt the room's light falls on the banknote at in Demo (light.ts: from above, so
+ * lying flat is as bright as held, and pointing the camera up puts the light behind the paper), from the room's up alone
+ * (`now`'s last row), so neither Recentre nor where the phone was held when Demo began moves it. It is the tilt of the
+ * banknote from being held HELD_DEG from lying flat, facing whoever holds it: there none; lying flat, its top tipped back
+ * HELD_DEG; upright, tipped forward as far. Whoever holds it is taken to stand level with it where the screen faces, the
+ * foot of the view (`screenAngle`, and `upright` for a phone with rotation locked, whose view turns itself:
+ * `uprightQuarter`) pointing their way as the phone lies back, its top as it tips forward past upright; `quarter` measures
+ * it along the banknote's own sides, as `tiltFromEye` does. Neither tilt is kept within a limit: the light can come from
+ * behind. With it, the room's up itself along the banknote's own sides (`up`: x right, y down, z out of its face), which
+ * says how the light comes through it (`roomThrough`) as two angles can't quite once the eye is edge-on.
+ */
+export function roomTilt(now: Matrix, screenAngle: number, upright: Quarter, quarter: Quarter) {
+  const up: Vector = [now[6], now[7], now[8]]
+  // Level, along the room's floor: `v` less its share of the room's up
+  const level = ([x, y, z]: Vector): Vector => {
+    const d = x * up[0] + y * up[1] + z * up[2]
+    return [x - d * up[0], y - d * up[1], z - d * up[2]]
+  }
+  // The view's up on the phone: the page's, turned as far as the view is turned on it
+  const turn = (screenAngle + 90 * upright) * RAD
+  const foot = level([-Math.sin(turn), -Math.cos(turn), 0])
+  const screen = level([0, 0, 1])
+  // Lying back, whoever holds it is past the view's foot; tipped forward past upright, past its top
+  const lying = FOOT_WEIGHT * up[2]
+  let toward: Vector = [screen[0] + lying * foot[0], screen[1] + lying * foot[1], screen[2] + lying * foot[2]]
+  // Should the two ever cancel out, the screen alone
+  if (Math.hypot(...toward) < 1e-6) toward = screen
+  const length = Math.hypot(...toward) || 1
+  // The eye where it would be were the phone held HELD_DEG from lying flat facing it
+  const c = Math.cos(HELD_DEG * RAD), s = Math.sin(HELD_DEG * RAD)
+  const eye: Vector = [c * up[0] + (s * toward[0]) / length, c * up[1] + (s * toward[1]) / length, c * up[2] + (s * toward[2]) / length]
+  // Both along the banknote's own sides, as `tiltFromEye` takes the eye there
+  const own = ([x, y, z]: Vector): Vector => {
+    const cs = Math.cos(screenAngle * RAD), sn = Math.sin(screenAngle * RAD)
+    const on = unturn(cs * x - sn * y, -(sn * x + cs * y), quarter)
+    return [on.x, on.y, z]
+  }
+  const e = own(eye)
+  const u = own(up)
+  // Two tilts put the eye there, the second half a turn round its line from the first, past edge-on the other way: the
+  // one that keeps the room's up where it is, so the light comes from above the view's top, and past edge-on, pointing the
+  // camera up, the banknote tips on forward rather than turning over
+  const y = Math.asin(clamp(e[1], -1, 1)) * DEG
+  const x = Math.atan2(-e[0], e[2]) * DEG
+  const wrap = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180
+  const tilts = [{ x, y }, { x: wrap(x + 180), y: wrap(180 - y) }]
+  const room = roomUp(quarter)
+  const keeps = (tilt: { x: number; y: number }) => {
+    const m = tiltMatrix(tilt)
+    const seen = [0, 3, 6].map((i) => m[i] * room[0] + m[i + 1] * room[1] + m[i + 2] * room[2])
+    return seen[0] * u[0] + seen[1] * u[1] + seen[2] * u[2]
+  }
+  const best = keeps(tilts[1]) > keeps(tilts[0]) + 1e-9 ? tilts[1] : tilts[0]
+  // + 0 turns a −0 into 0
+  return { x: best.x + 0, y: best.y + 0, up: [u[0] + 0, u[1] + 0, u[2] + 0] as Vector }
+}
+
+/** `angle`, degrees, a whole number of turns from it as near to `near` as can be: for steadying an angle that wraps round */
+export const nearestTurn = (angle: number, near: number) => near + ((((angle - near) % 360) + 540) % 360) - 180
 
 /** How far, degrees, a phone turns from the way it was held before the page turns with it: past halfway (45°), so it never flickers */
 const SWITCH_DEG = 55

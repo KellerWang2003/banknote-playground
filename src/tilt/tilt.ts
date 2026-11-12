@@ -30,6 +30,12 @@ interface TiltState {
   /** The same, on its way there with the drag's spring: added to the phone's tilt, and what a flat banknote turns by on screen */
   nudged: number
   nudgedX: number
+  /**
+   * With the `device` source, how the phone lies in the room (`roomTilt`, steadied): the tilt the room's light falls on
+   * the banknotes at (`lightTiltOf`), and the room's up along their own sides, which says how its light comes through
+   * them (`roomThrough`). Recentre leaves it where it is. None otherwise
+   */
+  room?: { x: number; y: number; up: readonly [number, number, number] }
   /** Keeps manual tilt off one axis: the pad and canvas drag leave it where it is */
   lockX: boolean
   lockY: boolean
@@ -104,6 +110,13 @@ const IN_SYNC: TiltState['frameTilts'] = {}
 
 export const setTilt = (patch: Partial<TiltState>) =>
   useTilt.setState(!('frameTilts' in patch) && TILT_KEYS.some((key) => key in patch) ? { ...patch, frameTilts: IN_SYNC } : patch)
+
+/**
+ * The tilt the lamp lights the paper at, its glare and shading: in Demo on a phone, how the phone lies in the room
+ * (`room`), turned further as far as a drag turns the banknote in the hand; elsewhere the tilt itself
+ */
+export const lightTiltOf = (s: Pick<TiltState, 'angle' | 'angleX'> & Partial<Pick<TiltState, 'source' | 'room' | 'nudged' | 'nudgedX'>>) =>
+  s.source === 'device' && s.room ? { x: s.room.x + (s.nudgedX ?? 0), y: s.room.y + (s.nudged ?? 0) } : { x: s.angleX, y: s.angle }
 
 /** The tilt a banknote's frames are shown at: where its timeline was scrubbed to, else the tilt itself */
 export const framesTiltOf = (s: Pick<TiltState, 'angle' | 'angleX' | 'frameTilts'>, noteId: string) =>
