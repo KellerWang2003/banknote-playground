@@ -6,6 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { reportError } from '../cloud/notices'
+import { forPhone } from '../lib/demoLink'
+import { usePhoneDoor } from './usePhoneDoor'
 
 /** A QR code, drawn as one SVG path of square modules, black on white with the quiet border scanners need */
 export function QrCode({ text, className }: { text: string; className?: string }) {
@@ -27,13 +29,15 @@ export function QrCode({ text, className }: { text: string; className?: string }
 
 /**
  * The phone button in Demo's bar on the laptop: the banknote shown, on a phone, by its QR code, or its link to copy
- * (Keller, 10 November: like Figma's prototype mode, mirrored on the phone)
+ * (Keller, 10 November: like Figma's prototype mode, mirrored on the phone). From the dev server on localhost both go
+ * through its door for phones on the Wi-Fi (Keller, 11 November: "when im on local, the link on my phone still works")
  */
 export function PhoneLink({ link, finalFocus = true }: {
   link: string
   /** Where the keys go once it closes (Demo itself), rather than back to the button, whose tooltip would take the next Esc */
   finalFocus?: ComponentProps<typeof PopoverContent>['finalFocus']
 }) {
+  const shown = forPhone(link, usePhoneDoor())
   return (
     <Popover>
       <Tooltip>
@@ -43,8 +47,8 @@ export function PhoneLink({ link, finalFocus = true }: {
         <TooltipContent>Open on your phone</TooltipContent>
       </Tooltip>
       <PopoverContent side="top" sideOffset={12} className="w-56 items-center" finalFocus={finalFocus}>
-        <QrCode text={link} className="size-48 rounded-md" />
-        <CopyLink link={link} />
+        <QrCode text={shown} className="size-48 rounded-md" />
+        <CopyLink link={shown} />
       </PopoverContent>
     </Popover>
   )

@@ -3,6 +3,7 @@ import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig, type Connect, type Plugin } from 'vite'
+import { phoneDoor } from './dev/phoneDoor.ts'
 
 /**
  * Intaglio Studio is its own page, intaglio/index.html: at /intaglio, without the slash, Vite would serve Banknote
@@ -28,13 +29,17 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
     intaglioPage(),
+    phoneDoor(),
   ],
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
-  // Demo on a phone while developing: the phone needs https for its motion, so the dev server is opened through a
-  // Cloudflare quick tunnel (`cloudflared tunnel --url http://localhost:5174`), whose address Vite would otherwise refuse
+  // Demo on a phone while developing: the dev server answers on the Wi-Fi too, with a door for phones over https beside
+  // it, where Demo's QR code points (dev/phoneDoor.ts). On a Wi-Fi that keeps its devices apart (some school and office
+  // networks do), a Cloudflare quick tunnel does instead (`cloudflared tunnel --url http://localhost:5174`, the app opened
+  // on the laptop through it), whose address Vite would otherwise refuse
   server: {
+    host: true,
     allowedHosts: ['.trycloudflare.com'],
   },
   build: {

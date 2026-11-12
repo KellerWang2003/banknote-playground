@@ -4,9 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '../src/App'
+import { DemoButton } from '../src/app/DemoButton'
 import { DemoView } from '../src/app/DemoView'
+import { PhoneLink } from '../src/app/PhoneLink'
 import { TooltipProvider } from '../src/components/ui/tooltip'
-import { demoLink, readDemoLink } from '../src/lib/demoLink'
+import { demoLink, forPhone, readDemoLink } from '../src/lib/demoLink'
 import { createNote, createProject } from '../src/lib/notes'
 import { CARD_MM, guessPxPerMm, isChecked, realPxPerMm, screenKey, setRealPxPerMm, useRealSize, type Device } from '../src/lib/realSize'
 import { useProjects } from '../src/lib/store'
@@ -411,6 +413,49 @@ describe('Demo links and the phone’s page', () => {
     expect(readDemoLink('#/demo')).toBeUndefined()
     expect(readDemoLink('#/p/p-1')).toBeUndefined()
     expect(readDemoLink('#/play/keller')).toBeUndefined()
+  })
+
+  it('goes through the dev server’s door for phones from a page on plain http, and as it is anywhere else', () => {
+    const local = 'http://localhost:5174/#/play/keller/p-1/n%202'
+    expect(forPhone(local, 'https://192.168.1.23:6174', 'http:')).toBe('https://192.168.1.23:6174/#/play/keller/p-1/n%202')
+    expect(forPhone(local, undefined, 'http:')).toBe(local)
+    const live = 'https://banknote-playground.vercel.app/#/play/keller/p-1'
+    expect(forPhone(live, 'https://192.168.1.23:6174', 'https:')).toBe(live)
+  })
+
+  it('puts the dev server’s door on the Wi-Fi in the QR code and Copy link, as a phone can’t open localhost', async () => {
+    const user = userEvent.setup()
+    const asked = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ origin: 'https://192.168.1.23:6174' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', asked)
+    render(<TooltipProvider><PhoneLink link="http://localhost:3000/#/play/keller/p-1/n-2" /></TooltipProvider>)
+    await waitFor(() => expect(asked).toHaveBeenCalledWith('/__phone-address', expect.anything()))
+    await user.click(screen.getByRole('button', { name: 'Open on your phone' }))
+    await user.click(await screen.findByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe('https://192.168.1.23:6174/#/play/keller/p-1/n-2')
+  })
+
+  it('puts the door in ▶’s panel too, its QR code and Copy link', async () => {
+    const user = userEvent.setup()
+    const asked = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ origin: 'https://192.168.1.23:6174' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', asked)
+    render(<TooltipProvider><DemoButton link="http://localhost:3000/#/play/keller/p-1/n-2" onOpen={vi.fn()} /></TooltipProvider>)
+    await waitFor(() => expect(asked).toHaveBeenCalledWith('/__phone-address', expect.anything()))
+    await user.click(screen.getByRole('button', { name: 'Demo' }))
+    await user.click(await screen.findByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe('https://192.168.1.23:6174/#/play/keller/p-1/n-2')
+  })
+
+  it('keeps its own link where the dev server says of no door', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } })))
+    render(<TooltipProvider><PhoneLink link="http://localhost:3000/#/play/keller/p-1/n-2" /></TooltipProvider>)
+    await user.click(screen.getByRole('button', { name: 'Open on your phone' }))
+    await user.click(await screen.findByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe('http://localhost:3000/#/play/keller/p-1/n-2')
   })
 
   it('opens ahead of the username screen, reads the project, and picks up the laptop’s edits every 3 s', async () => {

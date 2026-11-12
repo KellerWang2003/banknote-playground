@@ -8,6 +8,17 @@
 export const demoLink = (workspace: string, projectId: string, noteId?: string) =>
   `${location.origin}${location.pathname}#/play/${encodeURIComponent(workspace)}/${encodeURIComponent(projectId)}${noteId ? `/${encodeURIComponent(noteId)}` : ''}`
 
+/**
+ * The link for a phone, from a page on the dev server open on plain http: through the dev server's door for phones on
+ * the Wi-Fi (`door`, dev/phoneDoor.ts), as a phone can't open localhost (on it, the phone itself) and an iPhone gives plain
+ * http no motion. Anywhere else, or with no door, the link as it is
+ */
+export function forPhone(link: string, door: string | undefined, protocol = location.protocol) {
+  if (!door || protocol !== 'http:') return link
+  const { pathname, search, hash } = new URL(link)
+  return `${door}${pathname}${search}${hash}`
+}
+
 /** What a Demo link opens, read from the page's address; nothing for any other */
 export function readDemoLink(hash: string) {
   const match = hash.match(/^#\/play\/([^/]+)\/([^/]+)(?:\/([^/]+))?\/?$/)
