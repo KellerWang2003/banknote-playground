@@ -5,6 +5,8 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -67,9 +69,10 @@ type Gesture =
  * 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI, a button of its own in the
  * top right corner rather than one of the bar's, as it hides the bar (Keller, 11 November), leaves only the banknote; ←
  * and → or a swipe step through the banknotes, F or Flip turns them over, L or pressing and holding holds them to the
- * light, H hides and brings back the UI, as does a double-click or double-tap. The lamp and Realistic wait in the bar's ⋯
- * menu, as they rarely change (Keller, 11 November: "the default should just be with realistic mode on and lamp off. And
- * this can live in a 3-dotted menu"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint
+ * light, H hides and brings back the UI, as does a double-click or double-tap. The phone's tilt, the lamp and Realistic
+ * wait in the bar's ⋯ menu, as they rarely change, so the bar is one line (Keller, 11 November: "the default should just
+ * be with realistic mode on and lamp off. And this can live in a 3-dotted menu", then "it can be just one line. and tilt
+ * should also be in the menu"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint
  * text. Its controls are the canvas's own, in the app's dark colours, so they sit quietly on black (the whole page turns
  * dark while it shows, so the picker's list, the menu and tooltips do too).
  */
@@ -108,9 +111,12 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   const sheen = useTilt((s) => s.sheen)
   const realistic = useRealistic((s) => s.on)
   const checked = useRealSize((s) => s.checked)
-  // A phone's own tilt is the banknote's; drawn flat meanwhile, as the phone is what turns
-  const { motion, upright, allow, recentre } = useDeviceTilt(true, quarterTurns)
-  const flat = motion === 'on'
+  // A phone's own tilt is the banknote's; drawn flat meanwhile, as the phone is what turns. On from the start, switched in
+  // ⋯ (Keller, 11 November: "tilt should also be in the menu, as it should be just on by default"); off, a drag tilts it
+  const [tiltOn, setTiltOn] = useState(true)
+  const { motion, upright: heldUp, allow, recentre } = useDeviceTilt(tiltOn, quarterTurns)
+  const upright: Quarter = tiltOn ? heldUp : 0
+  const flat = tiltOn && motion === 'on'
   useWakeLock(true)
 
   useBlackPage()
@@ -356,6 +362,10 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
       onDoubleClick={(e) => {
         if (onStage(e.target)) setUi(true)
       }}
+      // iPhone gives motion only once a tap asks for it: the first tap anywhere in Demo asks, so tilt is on from the start
+      onClickCapture={() => {
+        if (tiltOn && motion === 'ask') void allow()
+      }}
     >
       {/* The view: the screen, or for a phone held sideways with rotation locked, turned a quarter to be upright in the hand */}
       <div data-demo-view="" className="absolute transition-transform ease-in-out motion-reduce:transition-none"
@@ -387,41 +397,36 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           </div>
         )}
 
-        {/* Hidden with Hide UI, not taken away, so it is measured for the room it leaves */}
+        {/* One line, on a phone too (Keller, 11 November: "it can be just one line"): the picker gives up width, its name
+            cut short, before anything else does, and only a screen under 360 px wraps it. Hidden with Hide UI, not taken
+            away, so it is measured for the room it leaves */}
         {note && (
           <div ref={bar} data-demo-bar="" className={cn('absolute inset-x-3 flex justify-center', !ui && 'invisible')} style={{ bottom: BAR_INSET }}>
-            <Panel className="flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1.5 p-1.5">
-              <div className="flex items-center gap-1.5">
-                <Select value={note.id} items={notes.map((n) => ({ value: n.id, label: n.name }))} onValueChange={(id) => { if (id) onPick(id) }}>
-                  <SelectTrigger aria-label="Banknote" size="sm" className="w-40 pointer-coarse:h-8"><SelectValue /></SelectTrigger>
-                  <SelectContent side="top" alignItemWithTrigger={false} finalFocus={backToDemo}>
-                    {notes.map((n) => <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {/* One button that turns it over, as F does, not Front | Back (Keller, 11 November) */}
-                <Button variant="ghost" size="sm" className="pointer-coarse:h-8" title="Turn it over (F)" onClick={() => turnOver()}>
-                  <FlipHorizontal2 />
-                  Flip
-                </Button>
+            <Panel className="flex max-w-full items-center justify-center gap-1.5 p-1.5 max-[359px]:flex-wrap pointer-coarse:gap-1">
+              <Select value={note.id} items={notes.map((n) => ({ value: n.id, label: n.name }))} onValueChange={(id) => { if (id) onPick(id) }}>
+                <SelectTrigger aria-label="Banknote" size="sm" className="w-40 min-w-0 pointer-coarse:h-8 *:data-[slot=select-value]:block *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:truncate">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent side="top" alignItemWithTrigger={false} finalFocus={backToDemo}>
+                  {notes.map((n) => <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {/* One button that turns it over, as F does, not Front | Back (Keller, 11 November) */}
+              <Button variant="ghost" size="sm" className="pointer-coarse:h-8" title="Turn it over (F)" onClick={() => turnOver()}>
+                <FlipHorizontal2 />
+                Flip
+              </Button>
+              <div className={cn('w-36 shrink-0', TOUCH_ROW)}>
+                <Segmented value={size} options={SIZES} onChange={pickSize} />
               </div>
-              <div className="flex items-center gap-1">
-                <div className={cn('w-36', TOUCH_ROW)}>
-                  <Segmented value={size} options={SIZES} onChange={pickSize} />
-                </div>
-                {size === 'real' && (
-                  <IconButton className={TOUCH} label="Check real size against a bank card" onClick={() => setChecking(true)}>
-                    <Ruler />
-                  </IconButton>
-                )}
-                <MotionControl motion={motion} onAllow={allow} onRecentre={recentre} />
-                <LookMenu finalFocus={backToDemo} />
-                {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
-                {onClose && (
-                  <IconButton className={TOUCH} label="Close Demo (Esc)" onClick={onClose}>
-                    <X />
-                  </IconButton>
-                )}
-              </div>
+              <LookMenu finalFocus={backToDemo} motion={motion} tiltOn={tiltOn} onTilt={setTiltOn} onAllow={allow} onRecentre={recentre}
+                onCheckSize={size === 'real' ? () => setChecking(true) : undefined} />
+              {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
+              {onClose && (
+                <IconButton className={TOUCH} label="Close Demo (Esc)" onClick={onClose}>
+                  <X />
+                </IconButton>
+              )}
             </Panel>
           </div>
         )}
@@ -434,13 +439,28 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
 }
 
 /**
- * ⋯: the lamp, held to the light until switched off again, and Realistic, the tilt card's two toggles, each ticked while
- * on. Behind ⋯ rather than out in the bar, as they rarely change: Realistic is on until switched off, and Demo opens with
- * the lamp off (Keller, 11 November)
+ * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first its tilt, on from the
+ * start (iPhone asks at the first tap, or here), with Recentre under it while it tilts, or in words once motion was
+ * refused (a page can't ask again until Safari is quit and reopened); then the lamp, held to the light until switched
+ * off again, and Realistic, the tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp
+ * off ("the default should just be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with
+ * Real size picked, its check against a bank card. Toggles are ticked while on.
  */
-function LookMenu({ finalFocus }: { finalFocus: () => boolean }) {
+function LookMenu({ finalFocus, motion, tiltOn, onTilt, onAllow, onRecentre, onCheckSize }: {
+  finalFocus: () => boolean
+  motion: Motion
+  tiltOn: boolean
+  onTilt: (on: boolean) => void
+  onAllow: () => void
+  onRecentre: () => void
+  /** Real size's check, while Real size is picked */
+  onCheckSize?: () => void
+}) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
+  // A phone, one that tilts by itself or could: none of it on a laptop, or before the phone's motion is known
+  const phone = motion === 'on' || motion === 'ask' || motion === 'denied'
+  const tilting = tiltOn && motion === 'on'
   return (
     <DropdownMenu>
       <Tooltip>
@@ -450,6 +470,31 @@ function LookMenu({ finalFocus }: { finalFocus: () => boolean }) {
         <TooltipContent>More</TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="end" className="w-auto" finalFocus={finalFocus}>
+        {phone && (
+          <>
+            {motion === 'denied' ? (
+              <DropdownMenuItem disabled>
+                <Rotate3d />
+                Motion not allowed
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuCheckboxItem checked={tilting} onCheckedChange={(on) => {
+                if (on && motion === 'ask') onAllow()
+                onTilt(on)
+              }}>
+                <Rotate3d />
+                Tilt
+              </DropdownMenuCheckboxItem>
+            )}
+            {tilting && (
+              <DropdownMenuItem onClick={onRecentre}>
+                <LocateFixed />
+                Recentre
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuCheckboxItem checked={backlit} onCheckedChange={(on) => setTilt({ backlit: on })}>
           <Lamp />
           Hold up to the light
@@ -459,33 +504,18 @@ function LookMenu({ finalFocus }: { finalFocus: () => boolean }) {
           <Sparkles />
           Realistic
         </DropdownMenuCheckboxItem>
+        {onCheckSize && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onCheckSize}>
+              <Ruler />
+              Check real size
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-/**
- * The phone's motion: Recentre once it tilts the banknote, the pink Tilt button while iPhone waits on a tap to allow it,
- * and in words once it was refused (a page can't ask again until Safari is quit and reopened); nothing on a laptop
- */
-function MotionControl({ motion, onAllow, onRecentre }: { motion: Motion; onAllow: () => void; onRecentre: () => void }) {
-  if (motion === 'on') {
-    return (
-      <IconButton className={TOUCH} label="Recentre: flat is how you hold it now" onClick={onRecentre}>
-        <LocateFixed />
-      </IconButton>
-    )
-  }
-  if (motion === 'ask') {
-    return (
-      <Button size="sm" className="pointer-coarse:h-9" onClick={onAllow}>
-        <Rotate3d />
-        Tilt
-      </Button>
-    )
-  }
-  if (motion === 'denied') return <span className="px-1.5 text-xs text-muted-foreground">Motion not allowed</span>
-  return null
 }
 
 /**

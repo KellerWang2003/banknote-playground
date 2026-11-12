@@ -292,6 +292,13 @@ describe('Demo of the sample project', () => {
 })
 
 /** The phone's sensor, as the browser sends it */
+/** Demo's ⋯ menu, open: the phone's tilt and Recentre, the lamp, Realistic and Real size's check live there */
+async function openMenu() {
+  await userEvent.setup().click(screen.getByRole('button', { name: 'More' }))
+  return screen.findByRole('menu')
+}
+const motionOn = () => waitFor(() => expect(useTilt.getState().source).toBe('device'))
+
 const orient = (alpha: number, beta: number, gamma: number) =>
   act(() => { window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha, beta, gamma })) })
 
@@ -308,8 +315,7 @@ describe('Demo on a phone', () => {
     renderDemo()
     // Held tipped back 60°: that is flat
     orient(0, 60, 0)
-    expect(await screen.findByRole('button', { name: 'Recentre: flat is how you hold it now' })).toBeDefined()
-    expect(useTilt.getState().source).toBe('device')
+    await motionOn()
     expect(useTilt.getState().target).toBeCloseTo(0, 9)
     expect(useTilt.getState().targetX).toBeCloseTo(0, 9)
     // Its right edge turned 20° away: 20° right, once the filter has settled
@@ -325,8 +331,10 @@ describe('Demo on a phone', () => {
     expect(banknote.style.transform).toBe('')
     expect(banknote.querySelectorAll('[data-tilt^="shade"]')).toHaveLength(0)
 
-    // Recentre makes how it is held now flat, gliding there
-    fireEvent.click(screen.getByRole('button', { name: 'Recentre: flat is how you hold it now' }))
+    // Tilt is on, ticked in ⋯, and Recentre under it makes how it is held now flat, gliding there
+    const menu = await openMenu()
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Tilt' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Recentre' }))
     now += 100
     orient(0, 60, 20)
     expect(useTilt.getState().targetX).toBeCloseTo(20, 1)
@@ -342,7 +350,7 @@ describe('Demo on a phone', () => {
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     const { project, onPick } = renderDemo()
     orient(0, 60, 0)
-    await screen.findByRole('button', { name: 'Recentre: flat is how you hold it now' })
+    await motionOn()
     const view = demo()
     fireEvent.pointerDown(view, { clientX: 700, clientY: 400, pointerId: 1, pointerType: 'touch' })
     fireEvent.pointerMove(view, { clientX: 560, clientY: 410, pointerId: 1, pointerType: 'touch' })
@@ -367,23 +375,35 @@ describe('Demo on a phone', () => {
     expect(stage().style.width).toBe(`${WINDOW.height}px`)
   })
 
-  it('asks for motion with the pink Tilt button on iPhone, and says so when it is refused', async () => {
+  it('asks for motion on iPhone at the first tap, its Tilt in ⋯, and says there when it is refused', async () => {
     Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
     const ask = vi.fn(async () => 'granted' as const)
     Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { configurable: true, value: ask })
     try {
       renderDemo()
-      const tilt = await screen.findByRole('button', { name: 'Tilt' }, { timeout: 2000 })
-      fireEvent.click(tilt)
+      // Waiting on a tap: nothing in the bar for it, Tilt in ⋯ not yet ticked
+      await act(() => new Promise((done) => setTimeout(done, 700)))
+      expect(screen.queryByRole('button', { name: 'Tilt' })).toBeNull()
+      // On from the start: the first tap anywhere asks, once, here opening ⋯
+      const menu = await openMenu()
       await waitFor(() => expect(ask).toHaveBeenCalledOnce())
       orient(0, 45, 0)
-      expect(await screen.findByRole('button', { name: 'Recentre: flat is how you hold it now' })).toBeDefined()
+      await motionOn()
+      await waitFor(() => expect(within(menu).getByRole('menuitemcheckbox', { name: 'Tilt' }).getAttribute('aria-checked')).toBe('true'))
+      // Switched off, a drag tilts it, the banknote turning in 3D again
+      fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Tilt' }))
+      await waitFor(() => expect(useTilt.getState().source).toBe('drag'))
+      expect(document.querySelectorAll('[data-demo-note] [data-tilt^="shade"]')).toHaveLength(4)
       cleanup()
 
       ask.mockResolvedValueOnce('denied' as never)
       renderDemo()
-      fireEvent.click(await screen.findByRole('button', { name: 'Tilt' }, { timeout: 2000 }))
-      expect(await screen.findByText('Motion not allowed')).toBeDefined()
+      await act(() => new Promise((done) => setTimeout(done, 700)))
+      fireEvent.click(stage())
+      await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+      const refused = within(await openMenu()).getByRole('menuitem', { name: 'Motion not allowed' })
+      expect(refused.getAttribute('aria-disabled')).toBe('true')
+      await userEvent.setup().keyboard('{Escape}')
       // Dragging stands in, the banknote turning in 3D, with the canvas's light and shade
       const view = demo()
       fireEvent.pointerDown(view, { clientX: 600, clientY: 400, pointerId: 1, pointerType: 'touch' })
@@ -444,11 +464,14 @@ describe('real size', () => {
     expect(isChecked()).toBe(true)
     expect(realPxPerMm()).toBeCloseTo(guess * 1.005)
     expect(parseFloat((document.querySelector('[data-demo-note]') as HTMLElement).style.width)).toBeCloseTo(150 * guess * 1.005)
-    // Checked once: Real size again doesn't ask, but the ruler checks again
+    // Checked once: Real size again doesn't ask, but ⋯ has it checked again, only with Real size picked
     await user.click(screen.getByRole('button', { name: 'Fit' }))
+    expect(within(await openMenu()).queryByRole('menuitem', { name: 'Check real size' })).toBeNull()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     await user.click(screen.getByRole('button', { name: 'Real size' }))
     expect(document.querySelector('[data-card-check]')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Check real size against a bank card' }))
+    await user.click(within(await openMenu()).getByRole('menuitem', { name: 'Check real size' }))
     expect(document.querySelector('[data-card-check]')).not.toBeNull()
   })
 })

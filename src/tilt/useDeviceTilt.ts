@@ -123,10 +123,15 @@ export function useDeviceTilt(enabled: boolean, turns: number) {
     }
   }, [enabled, asked])
 
-  /** Asks for motion, from a tap (iPhone): on once it is allowed, refused for good (until Safari restarts) otherwise */
+  /**
+   * Asks for motion, from a tap (iPhone): on once it is allowed, refused for good (until Safari restarts) otherwise. Once
+   * at a time, as one tap can ask twice (Demo asks at any first tap, and its menu's Tilt too)
+   */
+  const asking = useRef(false)
   const allow = async () => {
     const ask = (DeviceOrientationEvent as unknown as Asks).requestPermission
-    if (!ask) return
+    if (!ask || asking.current) return
+    asking.current = true
     try {
       const answer = await ask.call(DeviceOrientationEvent)
       if (answer !== 'granted') return setMotion('denied')
@@ -135,6 +140,8 @@ export function useDeviceTilt(enabled: boolean, turns: number) {
       setAsked((n) => n + 1)
     } catch {
       setMotion('denied')
+    } finally {
+      asking.current = false
     }
   }
 
