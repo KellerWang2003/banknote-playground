@@ -46,8 +46,8 @@ function holdAt(next: { x?: number; y?: number }, limit: number, respectLocks = 
  * drag in any direction to tilt them (up/down vertically, side to side horizontally), held where you let go; the pad
  * folds away by default (Keller), and the browser remembers which. On that row, so they work folded, the lamp holds every
  * banknote up to the light, Realistic beside it lights every magnetic ink as metal and every Arc-en-Ciel as embossed
- * ridges, and back to flat, just left of the chevron, shows once tilted. Turning the banknotes over is the Front | Back
- * switch at the top of the canvas (`SideSwitch`).
+ * ridges, and back to flat, just left of the chevron, shows once tilted. Turning the banknotes over is Flip at the top
+ * of the canvas (`SideSwitch`).
  */
 export function TiltRail({ limit = TILT_LIMIT, playback }: {
   limit?: number

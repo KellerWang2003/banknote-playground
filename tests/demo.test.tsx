@@ -208,6 +208,55 @@ describe('Demo on the laptop', () => {
     expect(useTilt.getState().flipped).toBe(true)
   })
 
+  it('turns over with Flip, hides the UI from a button of its own, and keeps the lamp and Realistic in ⋯, the lamp off as it opens', async () => {
+    const user = userEvent.setup()
+    await openProject()
+    // The editor's lamp left on: Demo opens without it, and leaving gives it back
+    act(() => setTilt({ backlit: true }))
+    await openDemoHere(user)
+    expect(useTilt.getState().backlit).toBe(false)
+    const bar = document.querySelector('[data-demo-bar]') as HTMLElement
+    const hide = document.querySelector('[data-demo-hide]') as HTMLElement
+
+    // One Flip, not Front | Back (Keller, 11 November)
+    expect(within(bar).queryByRole('button', { name: 'Front', exact: true })).toBeNull()
+    expect(within(bar).queryByRole('button', { name: 'Back', exact: true })).toBeNull()
+    await user.click(within(bar).getByRole('button', { name: 'Flip' }))
+    expect(useTilt.getState().flipped).toBe(true)
+    await user.click(within(bar).getByRole('button', { name: 'Flip' }))
+    expect(useTilt.getState().flipped).toBe(false)
+
+    // The lamp and Realistic aren't in the bar but its ⋯ menu, ticked while on: Realistic on, as it starts, the lamp off
+    expect(within(bar).queryByRole('button', { name: /Hold up to the light/ })).toBeNull()
+    expect(within(bar).queryByRole('button', { name: 'Realistic' })).toBeNull()
+    await user.click(within(bar).getByRole('button', { name: 'More' }))
+    const menu = await screen.findByRole('menu')
+    const lamp = within(menu).getByRole('menuitemcheckbox', { name: /Hold up to the light/ })
+    expect(lamp.getAttribute('aria-checked')).toBe('false')
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Realistic' }).getAttribute('aria-checked')).toBe('true')
+    await user.click(lamp)
+    expect(useTilt.getState().backlit).toBe(true)
+    // Esc closes the menu, not Demo, and the keys are Demo's again: L switches the lamp off
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(demo()).toBeDefined()
+    await user.keyboard('l')
+    expect(useTilt.getState().backlit).toBe(false)
+
+    // Hide UI is a button of its own, apart from the bar it hides, and hides with it
+    const hideButton = within(hide).getByRole('button', { name: 'Hide UI (H)' })
+    expect(bar.contains(hideButton)).toBe(false)
+    await user.click(hideButton)
+    expect(bar.className).toContain('invisible')
+    expect(hide.className).toContain('invisible')
+    fireEvent.doubleClick(stage())
+    expect(bar.className).not.toContain('invisible')
+    expect(hide.className).not.toContain('invisible')
+
+    await user.click(within(bar).getByRole('button', { name: 'Close Demo (Esc)' }))
+    expect(useTilt.getState().backlit).toBe(true)
+  })
+
   it('tilts as the pointer drags, the way it goes on the banknote, springing back to flat', async () => {
     await openProject()
     await openDemoHere(userEvent.setup())

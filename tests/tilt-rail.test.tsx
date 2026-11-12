@@ -105,6 +105,10 @@ describe('tilt pad', () => {
     expect(localStorage.getItem('of-playground.realistic')).toBe('off')
     vi.resetModules()
     expect((await import('../src/lib/realistic')).useRealistic.getState().on).toBe(false)
+    // A browser that has never switched it starts with it on (Keller, 11 November)
+    localStorage.removeItem('of-playground.realistic')
+    vi.resetModules()
+    expect((await import('../src/lib/realistic')).useRealistic.getState().on).toBe(true)
   })
 
   it('ignores a right-click', () => {

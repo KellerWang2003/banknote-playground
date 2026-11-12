@@ -32,10 +32,16 @@ export function EditorSkeleton({ isDemo = false }: { isDemo?: boolean }) {
         <NoteSkeleton widthMm={150} heightMm={70} scale={SCALE} />
       </div>
 
-      {/* Top middle: Front | Back, centred between the Banknotes panel and the corner bar, as `SideSwitch` is */}
+      {/* Top middle: Flip, then Rotate left and right, centred between the Banknotes panel and the corner bar, as
+          `SideSwitch` is, each mark where the real button's icon or word sits */}
       <div className="pointer-events-none absolute top-3 right-[calc(var(--panel-w)+20px)] left-[244px] flex justify-center">
-        <Panel className="flex h-11 items-center p-1.5">
-          <Skeleton className="h-8 w-44 rounded-lg" />
+        <Panel className="flex h-11 items-center gap-0.5 p-1.5">
+          <div className="flex h-7 items-center gap-1 px-2.5">
+            <Skeleton className="size-3.5 rounded" />
+            <Skeleton className="h-3 w-6 rounded-sm" />
+          </div>
+          <div className="flex size-7 items-center justify-center"><Skeleton className="size-4 rounded" /></div>
+          <div className="flex size-7 items-center justify-center"><Skeleton className="size-4 rounded" /></div>
         </Panel>
       </div>
 

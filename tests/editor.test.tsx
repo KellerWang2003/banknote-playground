@@ -11,7 +11,7 @@ import { createDemoProject } from '../src/lib/demo'
 import { newWatermark } from '../src/lib/watermark'
 import { presetPattern } from '../src/lib/patternPresets'
 import { setTiltPadOpen } from '../src/lib/tiltPad'
-import { useRealistic } from '../src/lib/realistic'
+import { setRealistic, useRealistic } from '../src/lib/realistic'
 import { setTilt, togglePlayback, useTilt } from '../src/tilt/tilt'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 
@@ -1306,19 +1306,20 @@ describe('username workspace editor', () => {
     const shown = (selector: string) => document.querySelector(`[data-note-body] ${selector}`)
     // Turning over takes a moment, the loop easing it round; here it is done at once
     const finishTurn = () => act(() => setTilt({ turn: useTilt.getState().flipped ? 1 : 0 }))
-    // Front | Back at the top of the canvas (Keller, 4 November: on the tilt card it was too hidden)
-    const side = (name: 'Front' | 'Back') => screen.getByRole('button', { name, exact: true })
+    // Flip at the top of the canvas (Keller, 4 November: on the tilt card it was too hidden; 11 November: one button, not
+    // Front | Back)
+    const flip = () => screen.getByRole('button', { name: 'Flip', exact: true })
     // The selected banknote's frames, as clips on the timeline while its thread is picked
     const clips = () => document.querySelectorAll('[data-frame-clip]').length
     expect(screen.queryByRole('button', { name: 'Show the back' })).toBeNull()
-    expect(side('Front').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByRole('button', { name: 'Back', exact: true })).toBeNull()
+    expect(flip().hasAttribute('aria-pressed')).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Security thread', exact: true }))
     expect(clips()).toBeGreaterThan(0)
 
-    // F turns every banknote over, as the switch shows: the back has no thread, the watermark mirrored
+    // F turns every banknote over, as Flip does: the back has no thread, the watermark mirrored
     fireEvent.keyDown(window, { key: 'f' })
     expect(useTilt.getState().flipped).toBe(true)
-    expect(side('Back').getAttribute('aria-pressed')).toBe('true')
     // The back has no thread, so the timeline shows no frames, though the banknote is still selected (Keller)
     expect(clips()).toBe(0)
     expect(picked()).toBe('Demo banknote')
@@ -1348,8 +1349,8 @@ describe('username workspace editor', () => {
     finishTurn()
     expect(shown('[data-thread]')).not.toBeNull()
     expect(document.querySelector('[data-side-label]')).toBeNull()
-    // Turned over again, the thread can't stay picked: the banknote itself is
-    await user.click(side('Back'))
+    // Turned over again with Flip, the thread can't stay picked: the banknote itself is
+    await user.click(flip())
     expect(useTilt.getState().flipped).toBe(true)
     expect(picked()).toBe('Demo banknote')
     expect(clips()).toBe(0)
@@ -1370,7 +1371,7 @@ describe('username workspace editor', () => {
     expect(saves).not.toHaveBeenCalled()
   })
 
-  it('rotates every banknote a quarter turn left or right beside Front | Back, its name upright and drags going the way the pointer goes', async () => {
+  it('rotates every banknote a quarter turn left or right beside Flip, its name upright and drags going the way the pointer goes', async () => {
     vi.stubGlobal('ResizeObserver', class {
       callback: ResizeObserverCallback
       constructor(callback: ResizeObserverCallback) { this.callback = callback }
@@ -1404,7 +1405,7 @@ describe('username workspace editor', () => {
     expect(turned().style.transform).toBe('')
     expect(turned().dataset.noteTurn).toBeUndefined()
 
-    // Rotate right, beside Front | Back: every banknote a quarter turn clockwise about its middle
+    // Rotate right, beside Flip: every banknote a quarter turn clockwise about its middle
     await user.click(screen.getByRole('button', { name: 'Rotate right' }))
     expect(quarterTurns()).toBe(1)
     expect(turned().style.transform).toBe('rotate(90deg)')
@@ -1592,6 +1593,7 @@ describe('username workspace editor', () => {
     // Realistic isn't on the tab: it is the toggle beside the lamp, for every banknote, and saves nothing on the ink (here,
     // without WebGL, the ink keeps its flat look)
     expect(screen.queryByRole('switch', { name: 'Realistic' })).toBeNull()
+    act(() => setRealistic(false))
     await user.click(screen.getByRole('button', { name: 'Realistic' }))
     expect(useRealistic.getState().on).toBe(true)
     expect(ink()).toEqual(moved)

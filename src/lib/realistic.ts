@@ -5,15 +5,16 @@ import { create } from 'zustand'
  * ridges (arcEnCiel.ts), both in the lamp's light, where the browser can (WebGL); off, they keep their flat looks. One
  * switch for every banknote, beside the lamp on the tilt card (Keller, 9 November: one universal toggle in place of a
  * switch on each layer's tab, which saved it on the layer). A way of looking, not part of a project: remembered per
- * browser, as the tilt pad's open or folded is, and exports follow it as they follow the lamp.
+ * browser, as the tilt pad's open or folded is, and exports follow it as they follow the lamp. On until switched off in
+ * the browser (Keller, 11 November: "the default should just be with realistic mode on and lamp off"; it started off).
  */
 const KEY = 'of-playground.realistic'
 
 function load() {
   try {
-    return localStorage.getItem(KEY) === 'on'
-  } catch { /* storage blocked: off */ }
-  return false
+    return localStorage.getItem(KEY) !== 'off'
+  } catch { /* storage blocked: on */ }
+  return true
 }
 
 export const useRealistic = create<{ on: boolean }>(() => ({ on: load() }))

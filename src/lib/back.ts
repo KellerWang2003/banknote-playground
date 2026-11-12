@@ -9,7 +9,7 @@ import type { Note, NoteBack } from './types'
 
 export type Side = 'front' | 'back'
 
-/** Seconds the banknotes take to turn over, or back: by F or Front | Back, and by a Flip move at 1× */
+/** Seconds the banknotes take to turn over, or back: by F or Flip, and by a Flip move at 1× */
 export const FLIP_SECONDS = 0.5
 
 /** Whether banknotes `turn` of the way over (0 front, 1 back) show their backs: from halfway, edge-on, where the face changes */

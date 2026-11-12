@@ -2,7 +2,7 @@ import { undoProject, redoProject, updateNote } from '../lib/store'
 import { beginHistoryGroup, endHistoryGroup, breakHistoryGroup } from '../lib/history'
 import { pressLight, releaseLight, rotateNotes, setTilt, springToFlat, togglePlayback, turnOver, useTilt } from '../tilt/tilt'
 import { playbackLens, playbackTilt } from '../lib/pattern'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Project } from '../lib/types'
 import { AddNoteDialog } from '../editor/AddNoteDialog'
@@ -96,13 +96,19 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   const [demoNoteId, setDemoNoteId] = useState<string>()
   const demo = demoNoteId !== undefined
   const workspace = useWorkspace((s) => s.workspace)
+  // Demo opens with the lamp off (Keller, 11 November: "the default should just be with realistic mode on and lamp off"),
+  // its switch now in Demo's ⋯ menu, and leaving gives the editor back the lamp it had
+  const lampBefore = useRef(false)
   const openDemo = () => {
+    lampBefore.current = useTilt.getState().backlit
+    setTilt({ backlit: false })
     setDemoNoteId(note?.id ?? project.notes[0]?.id)
     // The whole page, so what opens over Demo (its picker's list, tooltips) shows too
     document.documentElement.requestFullscreen?.().catch(() => {})
   }
   const closeDemo = () => {
     setDemoNoteId(undefined)
+    setTilt({ backlit: lampBefore.current })
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
   }
   const [adding, setAdding] = useState(false)
@@ -223,7 +229,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
   }, [])
 
   // F turns every banknote over to its back, or back to its front, and R rotates every banknote a quarter turn right
-  // (Shift+R left), as the buttons beside Front | Back do; not in Thread Studio, as the thread is only on the front
+  // (Shift+R left), as Flip and the buttons beside it do; not in Thread Studio, as the thread is only on the front
   const inStudio = threadNoteId !== undefined && note?.id === hostNoteId(threadNoteId)
   useEffect(() => {
     if (inStudio) return
@@ -385,7 +391,7 @@ export function Editor({ project, isDemo = false }: { project: Project; isDemo?:
       ) : (
         <>
           {tiltPad && <TiltRail limit={lens?.viewDeg} playback={reference && lens ? { projectId: project.id, tilt: playbackTilt(reference), lens } : undefined} />}
-          {/* Front | Back and Rotate left and right, where they can't be missed (Keller); F, Shift+R and R do the same */}
+          {/* Flip and Rotate left and right, where they can't be missed (Keller); F, Shift+R and R do the same */}
           {!isEmpty && <SideSwitch />}
           <ProjectPanel isDemo={isDemo} project={project} selectedId={note?.id} layer={shownLayer} onSelect={selectFromList} onAdd={() => setAdding(true)} aboveTilt={tiltPad}
             addTip={isEmpty && !adding} onAddLayer={addFrom} onRemoveLayer={dropLayer} />

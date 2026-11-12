@@ -1,13 +1,18 @@
-import { EyeOff, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, Sparkles, X } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, Sparkles, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { IconButton, Panel, Segmented } from '../components/controls'
 import { NoteView } from '../components/NoteView'
-import type { Side } from '../lib/back'
 import { TILT_LIMIT, clamp, perspectiveFor } from '../lib/frames'
 import { CARD_MM, CARD_RADIUS_MM, isChecked, realPxPerMm, setRealPxPerMm, useRealSize } from '../lib/realSize'
 import { setRealistic, useRealistic } from '../lib/realistic'
@@ -40,10 +45,11 @@ const DRAG_DEG_PER_PX = 30 / 160
 
 type Size = 'fit' | 'real'
 const SIZES: { value: Size; label: string }[] = [{ value: 'fit', label: 'Fit' }, { value: 'real', label: 'Real size' }]
-const SIDES: { value: Side; label: string }[] = [{ value: 'front', label: 'Front' }, { value: 'back', label: 'Back' }]
 /** Larger on a touch screen, for a finger */
 const TOUCH = 'pointer-coarse:size-9'
 const TOUCH_ROW = 'pointer-coarse:[&_button]:h-8'
+/** Demo's own controls, which a press or scroll on leaves the banknote alone: the bar and Hide UI */
+const CONTROLS = '[data-demo-bar], [data-demo-hide]'
 /** What a key goes to instead of Demo: a field, or a popup open over it (the picker, the phone's QR code) */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
 
@@ -58,11 +64,14 @@ type Gesture =
  * black, as it would be held, with one bar of controls. The laptop opens it over the editor (`Editor`), where dragging tilts
  * it as on the canvas; a phone opens it by link (`DemoPage`), where the phone's own tilt is the banknote's, 1:1, the
  * banknote lying flat on the screen while only its security features change (`useDeviceTilt`). Fit fills the screen with a
- * 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI leaves only the banknote; ← and
- * → or a swipe step through the banknotes, F turns them over, L or pressing and holding holds them to the light, H hides
- * and brings back the UI, as does a double-click or double-tap. Left out on purpose: playback, the timeline, panels,
- * labels, the tilt pad and hint text. Its controls are the canvas's own, in the app's dark colours, so they sit quietly
- * on black (the whole page turns dark while it shows, so the picker's list and tooltips do too).
+ * 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI, a button of its own in the
+ * top right corner rather than one of the bar's, as it hides the bar (Keller, 11 November), leaves only the banknote; ←
+ * and → or a swipe step through the banknotes, F or Flip turns them over, L or pressing and holding holds them to the
+ * light, H hides and brings back the UI, as does a double-click or double-tap. The lamp and Realistic wait in the bar's ⋯
+ * menu, as they rarely change (Keller, 11 November: "the default should just be with realistic mode on and lamp off. And
+ * this can live in a 3-dotted menu"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint
+ * text. Its controls are the canvas's own, in the app's dark colours, so they sit quietly on black (the whole page turns
+ * dark while it shows, so the picker's list, the menu and tooltips do too).
  */
 export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   project: Project
@@ -194,8 +203,8 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
     root.current?.focus({ preventScroll: true })
     return () => releaseLight(performance.now(), false)
   }, [])
-  // The picker or the phone's QR code closed, the keys come back to Demo itself: Base UI would give them to the first control
-  // in the bar, Demo taking focus but not Tab, and the picker takes a letter as a banknote's name
+  // The picker, the ⋯ menu or the phone's QR code closed, the keys come back to Demo itself: Base UI would give them to the
+  // first control in the bar, Demo taking focus but not Tab, and the picker takes a letter as a banknote's name
   const backToDemo = () => {
     queueMicrotask(() => root.current?.focus({ preventScroll: true }))
     return false
@@ -208,7 +217,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
     const element = root.current
     if (!element) return
     const onWheel = (event: WheelEvent) => {
-      if (!(event.target instanceof Node) || !element.contains(event.target) || (event.target as Element).closest?.('[data-demo-bar]')) return
+      if (!(event.target instanceof Node) || !element.contains(event.target) || (event.target as Element).closest?.(CONTROLS)) return
       event.preventDefault()
       if (event.ctrlKey || event.metaKey) return
       panRef.current(-event.deltaX, -event.deltaY)
@@ -244,9 +253,9 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
     const [a, b] = [...pointers.current.values()]
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
   }
-  /** On the view, not over its bar or the card check, nor anything opened from them */
+  /** On the view, not over its controls or the card check, nor anything opened from them */
   const onStage = (target: EventTarget) =>
-    target instanceof Element && !!root.current?.contains(target) && !target.closest('[data-demo-bar], [data-card-check]')
+    target instanceof Element && !!root.current?.contains(target) && !target.closest(`${CONTROLS}, [data-card-check]`)
 
   return (
     <div ref={root} role="dialog" aria-modal="true" aria-label="Demo" data-demo="" tabIndex={-1}
@@ -367,6 +376,17 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           </div>
         )}
 
+        {/* Hide UI, apart from the bar it hides, in the view's top right corner; hidden with the rest */}
+        {note && (
+          <div data-demo-hide="" className={cn('absolute', !ui && 'invisible')} style={{ top: BAR_INSET, right: BAR_INSET }}>
+            <Panel className="p-1.5">
+              <IconButton className={TOUCH} label="Hide UI (H)" onClick={() => setUi(false)}>
+                <EyeOff />
+              </IconButton>
+            </Panel>
+          </div>
+        )}
+
         {/* Hidden with Hide UI, not taken away, so it is measured for the room it leaves */}
         {note && (
           <div ref={bar} data-demo-bar="" className={cn('absolute inset-x-3 flex justify-center', !ui && 'invisible')} style={{ bottom: BAR_INSET }}>
@@ -378,10 +398,13 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
                     {notes.map((n) => <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <SideRow />
+                {/* One button that turns it over, as F does, not Front | Back (Keller, 11 November) */}
+                <Button variant="ghost" size="sm" className="pointer-coarse:h-8" title="Turn it over (F)" onClick={() => turnOver()}>
+                  <FlipHorizontal2 />
+                  Flip
+                </Button>
               </div>
               <div className="flex items-center gap-1">
-                <LightToggles />
                 <div className={cn('w-36', TOUCH_ROW)}>
                   <Segmented value={size} options={SIZES} onChange={pickSize} />
                 </div>
@@ -391,9 +414,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
                   </IconButton>
                 )}
                 <MotionControl motion={motion} onAllow={allow} onRecentre={recentre} />
-                <IconButton className={TOUCH} label="Hide UI (H)" onClick={() => setUi(false)}>
-                  <EyeOff />
-                </IconButton>
+                <LookMenu finalFocus={backToDemo} />
                 {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
                 {onClose && (
                   <IconButton className={TOUCH} label="Close Demo (Esc)" onClick={onClose}>
@@ -412,37 +433,34 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   )
 }
 
-/** Front | Back, turning every banknote over in 3D as F does */
-function SideRow() {
-  const side: Side = useTilt((s) => (s.flipped ? 'back' : 'front'))
-  return (
-    <div className={cn('w-32', TOUCH_ROW)} title="Turn it over (F)">
-      <Segmented value={side} options={SIDES} onChange={(next) => turnOver(next === 'back')} />
-    </div>
-  )
-}
-
-/** The lamp, held to the light until pressed again, and Realistic, as beside the tilt card on the canvas */
-function LightToggles() {
+/**
+ * ⋯: the lamp, held to the light until switched off again, and Realistic, the tilt card's two toggles, each ticked while
+ * on. Behind ⋯ rather than out in the bar, as they rarely change: Realistic is on until switched off, and Demo opens with
+ * the lamp off (Keller, 11 November)
+ */
+function LookMenu({ finalFocus }: { finalFocus: () => boolean }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
   return (
-    <>
-      <BarToggle label="Hold up to the light (L)" pressed={backlit} onChange={(on) => setTilt({ backlit: on })}><Lamp /></BarToggle>
-      <BarToggle label="Realistic" pressed={realistic} onChange={setRealistic}><Sparkles /></BarToggle>
-    </>
-  )
-}
-
-function BarToggle({ label, pressed, onChange, children }: { label: string; pressed: boolean; onChange: (on: boolean) => void; children: ReactNode }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<Toggle aria-label={label} size="sm" pressed={pressed} onPressedChange={onChange}
-        className={cn('size-7 min-w-7 p-0 aria-pressed:bg-primary aria-pressed:text-primary-foreground', TOUCH)} />}>
-        {children}
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger render={<DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" className={TOUCH} />} />}>
+          <Ellipsis />
+        </TooltipTrigger>
+        <TooltipContent>More</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side="top" align="end" className="w-auto" finalFocus={finalFocus}>
+        <DropdownMenuCheckboxItem checked={backlit} onCheckedChange={(on) => setTilt({ backlit: on })}>
+          <Lamp />
+          Hold up to the light
+          <DropdownMenuShortcut className="pl-4 pointer-coarse:hidden">L</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem checked={realistic} onCheckedChange={setRealistic}>
+          <Sparkles />
+          Realistic
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

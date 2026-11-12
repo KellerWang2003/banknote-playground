@@ -39,7 +39,7 @@ interface TiltState {
    * over LIGHT_RAMP_SECONDS, or what playback's moves say while playing (whichever is more)
    */
   light: number
-  /** The turn-over switch: every banknote shows its back, until turned back (F, Front | Back, or a Flip move in playback) */
+  /** The turn-over switch: every banknote shows its back, until turned back (F, Flip, or a Flip move in playback) */
   flipped: boolean
   /**
    * How far the banknotes have turned over, 0 (front) to 1 (back), as everything renders it: the switch, turned over
