@@ -81,7 +81,6 @@ export function EditorSkeleton({ isDemo = false }: { isDemo?: boolean }) {
         <Skeleton className="size-4 rounded" />
         <Skeleton className="h-3.5 w-9 rounded-sm" />
         <Skeleton className="size-4 rounded" />
-        <Skeleton className="size-4 rounded" />
         <div className="ml-auto flex items-center gap-1">
           <Skeleton className="size-7 rounded-lg" />
           <Skeleton className="h-7 w-[78px] rounded-lg" />

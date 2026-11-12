@@ -1,5 +1,5 @@
 import { runAction } from '../cloud/notices'
-import { Maximize, Minus, Plus, Share } from 'lucide-react'
+import { Minus, Plus, Share } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -312,9 +312,9 @@ export function Canvas({
 
   /**
    * Rotating (Rotate left and right): a view that has been panned or zoomed stays where it is, so the banknotes turn in
-   * place, and Fit takes them all in again; a view still fitting every banknote glides, as they turn, to fit them as they
-   * show once turned, so none turns off the screen. The glide is a live view, as a pan's is, never committed, so the view
-   * goes on fitting; a pan, zoom or press stops it where it is.
+   * place; a view still fitting every banknote glides, as they turn, to fit them as they show once turned, so none turns
+   * off the screen. The glide is a live view, as a pan's is, never committed, so the view goes on fitting; a pan, zoom or
+   * press stops it where it is.
    */
   const turnFrom = useRef<View>(undefined)
   const glide = useRef(0)
@@ -824,18 +824,17 @@ export function Canvas({
 
       {current && size && !covered && (
         // The corner bar, built like Thread Studio's top bar: fixed top right, as wide as the properties panel that
-        // opens under it, with the zoom controls, then ▶ Demo and Export, in the same place whatever is selected.
-        // Export, filled, sits 12 px in from the right edge, as far as − shows in from the left inside its ghost button
-        // (Keller, 11 November: at 6 px the right end looked squeezed). Its own pointer events, or the canvas captures
-        // the pointer and the buttons never get a click
+        // opens under it, with the zoom controls (−, the percentage and +; Keller took fit out on 11 November), then
+        // ▶ Demo and Export, in the same place whatever is selected. Export, filled, sits 12 px in from the right edge,
+        // as far as − shows in from the left inside its ghost button (Keller, 11 November: at 6 px the right end looked
+        // squeezed). Its own pointer events, or the canvas captures the pointer and the buttons never get a click
         <div data-corner-bar="" className="absolute top-3 right-3 w-(--panel-w)" onPointerDown={(e) => e.stopPropagation()}>
           <Panel className="flex h-11 items-center gap-0.5 pr-3 pl-1.5">
             <IconButton className="rounded-lg" label="Zoom out" onClick={() => zoomAround(1 / 1.25, size.width / 2, size.height / 2)}>
               <Minus />
             </IconButton>
             {/* 100% is about true size, at the screen's 96 px an inch (Keller wanted the readout back on 4 November). 44 px
-                holds 800%, the most it reads, and leaves − and + about as far from it as + is from fit: at 56 px it took
-                the room the bar's right end lacked (Keller, 11 November) */}
+                holds 800%, the most it reads; at 56 px it left too much room between − and + (Keller, 11 November) */}
             <Button
               variant="ghost"
               size="sm"
@@ -847,9 +846,6 @@ export function Canvas({
             </Button>
             <IconButton className="rounded-lg" label="Zoom in" onClick={() => zoomAround(1.25, size.width / 2, size.height / 2)}>
               <Plus />
-            </IconButton>
-            <IconButton className="rounded-lg" label="Fit all notes" onClick={() => jumpTo(fitView(notes, size, quarter))}>
-              <Maximize />
             </IconButton>
             {(demoButton || onExport) && (
               <div className="ml-auto flex items-center gap-1">
