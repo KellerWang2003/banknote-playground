@@ -108,22 +108,22 @@ describe('Arc-en-Ciel settings', () => {
 })
 
 describe('Arc-en-Ciel’s bands', () => {
-  it('slide half a band each way over 20° across the ridges, and not at all along them', () => {
+  it('slide half a band each way by ARC_SLIDE_DEG across the ridges, and not at all along them', () => {
     expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 0 })).toBe(0)
     expect(bandSlide({ angleDeg: 0 }, { x: 15, y: ARC_SLIDE_DEG })).toBe(ARC_SLIDE_BANDS)
     // Halfway there, a quarter of the way along, as it comes out the further it turns (`arcTurned`)
     expect(bandSlide({ angleDeg: 0 }, { x: 0, y: -ARC_SLIDE_DEG / 2 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 9)
     expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 60 })).toBe(ARC_SLIDE_BANDS)
     expect(bandSlide({ angleDeg: 0 }, { x: 25, y: 0 })).toBe(0)
-    expect(bandSlide({ angleDeg: -90 }, { x: -40, y: 10 })).toBe(-ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: -90 }, { x: -60, y: 10 })).toBe(-ARC_SLIDE_BANDS)
     expect(bandSlide({ angleDeg: -90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(ARC_SLIDE_BANDS / 4, 9)
     expect(bandSlide({ angleDeg: 90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 9)
   })
 
   it('slide on the tilt across ridges at any angle, and not on the tilt along them', () => {
     // Ridges rising to the right at 30°: the eye moving down and right across them, or up and right along them
-    expect(bandSlide({ angleDeg: 30 }, { x: -12.5, y: 21.65 })).toBe(ARC_SLIDE_BANDS)
-    expect(bandSlide({ angleDeg: 30 }, { x: 5, y: -8.66 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 2)
+    expect(bandSlide({ angleDeg: 30 }, { x: -25, y: 43.3 })).toBe(ARC_SLIDE_BANDS)
+    expect(bandSlide({ angleDeg: 30 }, { x: 11.25, y: -19.49 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 2)
     expect(Math.abs(bandSlide({ angleDeg: 30 }, { x: -8.66, y: -5 }))).toBeLessThan(0.01)
     // The same tilt slides ridges at −30° by as much as level ones would by the up/down tilt alone, less
     expect(Math.abs(bandSlide({ angleDeg: -30 }, { x: 0, y: 10 }))).toBeLessThan(Math.abs(bandSlide({ angleDeg: 0 }, { x: 0, y: 10 })))
@@ -299,14 +299,14 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(fitArcEnCiel({ ...arc(), realistic: 'yes' } as unknown as ArcEnCiel, note)).not.toHaveProperty('realistic')
   })
 
-  it('shows as much of each slope as of the other flat, and only the slopes facing the eye by 20° across the ridges', () => {
+  it('shows as much of each slope as of the other flat, and only the slopes facing the eye by ARC_SLIDE_DEG across the ridges', () => {
     expect(arcLight(arc(), { x: 0, y: 0 }).share).toBe(0)
-    // Tilting the top away shows the slopes facing down the banknote, which carry the colours half a band back: by 20°,
+    // Tilting the top away shows the slopes facing down the banknote, which carry the colours half a band back: by ARC_SLIDE_DEG,
     // only they show, and the bands are where step 1 slides them
     expect(arcLight(arc(), { x: 0, y: ARC_SLIDE_DEG })).toMatchObject({ across: [0, 1] })
     expect(arcLight(arc(), { x: 0, y: ARC_SLIDE_DEG }).share).toBeCloseTo(1)
     expect(arcLight(arc(), { x: 0, y: -ARC_SLIDE_DEG }).share).toBeCloseTo(-1)
-    expect(arcLight(arc(), { x: 0, y: 40 }).share).toBe(1)
+    expect(arcLight(arc(), { x: 0, y: 60 }).share).toBe(1)
     // Between, as far as the slopes' shares of each ridge on screen move, eased in
     expect(arcLight(arc(), { x: 0, y: 10 }).share).toBeCloseTo((Math.tan(10 * RAD) / Math.tan(ARC_SLIDE_DEG * RAD)) ** ARC_EASE)
     // Tilting along the ridges changes nothing; upright ones go by the side to side tilt, the right side turning away
@@ -322,14 +322,17 @@ describe('Arc-en-Ciel, Realistic', () => {
     // Keller, 13 November: "even as I turn a little bit ... from the flat, the pattern shows. And that's not how
     // realistically it works"
     const at = (deg: number) => arcLight(arc(), { x: 0, y: deg }).share
-    // A hand's few degrees: hardly any of it
+    // A hand's few degrees, even ten: hardly any of it
     expect(at(2)).toBeLessThan(0.01)
-    expect(at(5)).toBeLessThan(0.07)
-    // Then each 5° shows more than the 5° before did, a quarter of the way by 10° and over half by 15°
-    const steps = [0, 5, 10, 15, 20].map(at)
+    expect(at(5)).toBeLessThan(0.01)
+    expect(at(10)).toBeLessThan(0.05)
+    // Then each 9° shows more than the 9° before did, a quarter of the way by 27°, over half by 36°, all of it by 45°
+    // (Keller, 13 November: "lets do 45. so a total of 90 for both ends")
+    const steps = [0, 9, 18, 27, 36, 45].map(at)
     for (let i = 2; i < steps.length; i++) expect(steps[i] - steps[i - 1]).toBeGreaterThan(steps[i - 1] - steps[i - 2])
-    expect(at(10)).toBeGreaterThan(0.2)
-    expect(at(15)).toBeGreaterThan(0.5)
+    expect(at(27)).toBeGreaterThan(0.25)
+    expect(at(36)).toBeGreaterThan(0.5)
+    expect(at(45)).toBeCloseTo(1, 12)
     // Either way alike
     expect(at(-7)).toBeCloseTo(-at(7), 12)
     expect(arcTurned(-0)).toBe(0)

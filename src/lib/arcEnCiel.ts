@@ -41,16 +41,20 @@ export const ARC_ANGLE = { min: -90, max: 90 }
 export const ARC_EDGE = { min: 0.5, max: 3, step: 0.1, initial: 1 }
 /** The colour of the edge round the shape: the one picked for it, or the paper's own, bare paper, as it starts */
 export const edgeColorOf = (arc: Pick<ArcEnCiel, 'edgeColor'>) => arc.edgeColor ?? PAPER
-/** Tilt across the ridges, either way, that slides the bands all the way */
-export const ARC_SLIDE_DEG = 20
+/**
+ * Tilt across the ridges, either way, that slides the bands all the way: 90° from one end to the other (Keller, 13 November:
+ * "lets do 45. so a total of 90 for both ends"; 20° before)
+ */
+export const ARC_SLIDE_DEG = 45
 /** How far the bands slide from flat to either end, in bands: half a band each way, one band in all, the most two slopes give */
 export const ARC_SLIDE_BANDS = 0.5
 /**
  * How Arc-en-Ciel comes out as it turns from flat: the power its way to ARC_SLIDE_DEG is raised to (`arcTurned`), so the
  * first few degrees barely change it and the further it turns the more it shows (Keller, 13 November: "even as I turn a
  * little bit ... from the flat, the pattern shows. And that's not how realistically it works"; "the first couple of like
- * degrees wouldn't change it that much ... when you change it more, it's more apparent"). At 2: by 5° a sixteenth of the
- * way, by 10° a quarter, by 15° over half
+ * degrees wouldn't change it that much ... when you change it more, it's more apparent"). At 2, all the way by 45°: by 10°
+ * a twentieth of the way, by 22.5° a quarter, by 32° over half; Realistic's `share`, going by tan θ, a little behind (a
+ * quarter by 27°, over half by 36°)
  */
 export const ARC_EASE = 2
 /** Each band blends into the next over this share of it at its far end, as two inks' lines meet in a screen */
