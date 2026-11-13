@@ -1,4 +1,4 @@
-import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, Sparkles, X } from 'lucide-react'
+import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Orbit, Plus, Rotate3d, Ruler, Smartphone, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { IconButton, Panel, Segmented } from '../components/controls'
@@ -22,6 +23,7 @@ import { type Quarter, ROTATE_SECONDS, onItsSide, quarterOf, unturn } from '../l
 import type { Project } from '../lib/types'
 import { pressLight, releaseLight, rotateNotes, setTilt, turnOver, useTilt } from '../tilt/tilt'
 import { type Motion, useDeviceTilt, useWakeLock } from '../tilt/useDeviceTilt'
+import { setViewing, useViewing } from '../tilt/viewing'
 import { useElementSize } from '../editor/useElementSize'
 import { PhoneLink } from './PhoneLink'
 import { useBlackPage } from './useBlackPage'
@@ -122,6 +124,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
     hintTimers.current.forEach(clearTimeout)
     setHint(undefined)
   }
+  const toggleUi = () => (ui ? hideUi() : showUi())
   useEffect(() => () => hintTimers.current.forEach(clearTimeout), [])
   // Where a banknote bigger than the screen has been moved to, for the banknote and size it was moved at: another starts
   // from its middle again
@@ -211,10 +214,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
       if (key === 'ArrowLeft') step(-1)
       else if (key === 'ArrowRight') step(1)
       else if (key === 'f') turnOver()
-      else if (key === 'h') {
-        if (ui) hideUi()
-        else showUi()
-      }
+      else if (key === 'h') toggleUi()
       else rotateNotes(event.shiftKey ? -1 : 1)
     }
     const onUp = (event: KeyboardEvent) => {
@@ -276,6 +276,8 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const lastTap = useRef<{ at: number; x: number; y: number }>(undefined)
+  /** The UI hidden or brought back by a double tap's taps, which the browser then makes a double-click of as well */
+  const doubleTapped = useRef(false)
   const endHold = (press: Extract<Gesture, { kind: 'press' }>) => {
     clearTimeout(holdTimer.current)
     if (press.held) releaseLight(performance.now(), false)
@@ -300,6 +302,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
       className={cn('fixed inset-0 z-40 touch-none overflow-hidden bg-black text-foreground outline-none select-none', !ui && idle && 'cursor-none')}
       onPointerDown={(e) => {
         if (!onStage(e.target)) return
+        doubleTapped.current = false
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
         const touch = e.pointerType !== 'mouse'
         if (pointers.current.size === 2) {
@@ -315,11 +318,13 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         if (pointers.current.size > 2) return
         if (!touch && e.button !== 0) return
         e.currentTarget.setPointerCapture?.(e.pointerId)
-        // A second tap soon after the first, near it: the UI back
+        // A second tap soon after the first, near it: the UI hidden, or back (Keller, 13 November: "we have double tap to
+        // ... get back the UI. We should also have double tap to get rid of the UI")
         const tap = lastTap.current
         if (touch && tap && e.timeStamp - tap.at < DOUBLE_TAP_MS && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < DOUBLE_TAP_PX) {
           lastTap.current = undefined
-          showUi()
+          doubleTapped.current = true
+          toggleUi()
           gesture.current = null
           return
         }
@@ -388,7 +393,8 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         } else if (g?.kind === 'pan' && pointers.current.size === 0) gesture.current = null
       }}
       onDoubleClick={(e) => {
-        if (onStage(e.target)) showUi()
+        // Once for a double tap: its taps have done it, unless they were too slow or too far apart for that
+        if (onStage(e.target) && !doubleTapped.current) toggleUi()
       }}
       // iPhone gives motion only once a tap asks for it: the first tap anywhere in Demo asks, as its button does
       onClickCapture={allow}
@@ -494,7 +500,9 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
 /**
  * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first Recentre while it tilts,
  * or in words once motion was refused (a page can't ask again until Safari is quit and reopened), and no switch for its
- * tilt, always on (Keller, 12 November); then the lamp, held to the light until switched off again, and Realistic, the
+ * tilt, always on (Keller, 12 November); with it how the tilt is taken (Keller, 13 November): head-aware, and the neutral,
+ * how far from lying flat the phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees");
+ * then the lamp, held to the light until switched off again, and Realistic, the
  * tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp off ("the default should just
  * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with Real size picked, its check
  * against a bank card. Toggles are ticked while on.
@@ -508,6 +516,7 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
 }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
+  const headAware = useViewing((s) => s.headAware)
   return (
     <DropdownMenu>
       <Tooltip>
@@ -520,10 +529,17 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
         {(motion === 'on' || motion === 'denied') && (
           <>
             {motion === 'on' ? (
-              <DropdownMenuItem onClick={onRecentre}>
-                <LocateFixed />
-                Recentre
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem onClick={onRecentre}>
+                  <LocateFixed />
+                  Recentre
+                </DropdownMenuItem>
+                <DropdownMenuCheckboxItem checked={headAware} onCheckedChange={(on) => setViewing({ headAware: on })}>
+                  <Orbit />
+                  Head-aware tilt
+                </DropdownMenuCheckboxItem>
+                <NeutralDial />
+              </>
             ) : (
               <DropdownMenuItem disabled>
                 <Rotate3d />
@@ -553,6 +569,24 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/**
+ * The neutral's dial: how far from lying flat, 0° to 90°, the phone is looked at square on as Demo opens, upright unless
+ * moved. Moving it puts the eye there at once, so the banknote shows what it does
+ */
+function NeutralDial() {
+  const neutralDeg = useViewing((s) => s.neutralDeg)
+  return (
+    // Its arrows move the dial, not the menu's highlight
+    <div data-neutral-dial="" className="flex items-center gap-1.5 py-1 pr-2 pl-1.5 text-sm" onKeyDown={(e) => e.stopPropagation()}>
+      <Smartphone className="size-4 shrink-0" />
+      <span className="mr-1.5">Neutral</span>
+      <Slider className="w-24 pointer-coarse:w-28" value={[neutralDeg]} min={0} max={90} step={5} thumbLabel={() => 'Neutral'}
+        onValueChange={(value) => setViewing({ neutralDeg: Array.isArray(value) ? value[0] : value })} />
+      <span className="w-8 shrink-0 text-right text-muted-foreground tabular-nums">{neutralDeg}°</span>
+    </div>
   )
 }
 

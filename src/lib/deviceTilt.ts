@@ -4,11 +4,12 @@
  * a phone held 20° away shows what the same banknote shows on the canvas tilted 20° away.
  *
  * The browser gives the phone's orientation (`deviceorientation`: alpha, beta, gamma) as a turn from the earth's axes.
- * Where the phone was held when Demo began (or Recentre was pressed) the viewer was looking straight at the screen; the
- * eye stays put in the room, so as the phone turns, the eye's direction seen from the phone (`eyeFrom`) says how it is
- * tilted from there. That direction, turned to the screen's own axes as the page shows them (landscape too) and to the
- * banknote's own (rotated on screen, or the view turned for a phone with rotation locked), gives the tilt the canvas
- * would show the same view at (`tiltFromEye`): ↕ and ↔ as NoteView turns a banknote, rotateX(↕) then rotateY(↔).
+ * The viewer's eye is a direction seen from the phone, followed as it turns (src/lib/viewer.ts: from the phone held
+ * upright, square on, it stays put in the room, or goes round with the phone as it goes round the head); an eye that
+ * stays put, straight out of the screen as the phone was held at rest, is where `eyeFrom` says. That direction, turned to
+ * the screen's own axes as the page shows them (landscape too) and to the banknote's own (rotated on screen, or the view
+ * turned for a phone with rotation locked), gives the tilt the canvas would show the same view at (`tiltFromEye`): ↕ and
+ * ↔ as NoteView turns a banknote, rotateX(↕) then rotateY(↔).
  */
 import { TILT_LIMIT, clamp } from './frames'
 import { HELD_DEG, roomUp } from './light'
@@ -83,18 +84,14 @@ export function tiltFromEye([ex, ey, ez]: Vector, screenAngle: number, quarter: 
 const FOOT_WEIGHT = 10
 
 /**
- * How the phone lies in the room, as the tilt the room's light falls on the banknote at in Demo (light.ts: from above, so
- * lying flat is as bright as held, and pointing the camera up puts the light behind the paper), from the room's up alone
- * (`now`'s last row), so neither Recentre nor where the phone was held when Demo began moves it. It is the tilt of the
- * banknote from being held HELD_DEG from lying flat, facing whoever holds it: there none; lying flat, its top tipped back
- * HELD_DEG; upright, tipped forward as far. Whoever holds it is taken to stand level with it where the screen faces, the
- * foot of the view (`screenAngle`, and `upright` for a phone with rotation locked, whose view turns itself:
- * `uprightQuarter`) pointing their way as the phone lies back, its top as it tips forward past upright; `quarter` measures
- * it along the banknote's own sides, as `tiltFromEye` does. Neither tilt is kept within a limit: the light can come from
- * behind. With it, the room's up itself along the banknote's own sides (`up`: x right, y down, z out of its face), which
- * says how the light comes through it (`roomThrough`) as two angles can't quite once the eye is edge-on.
+ * Where whoever holds the phone would look at it from, were it held `deg` from lying flat facing them: a direction in the
+ * phone's own axes, straight up the room at 0, level towards them at 90 (`now`'s last row is the room's up). Whoever
+ * holds it is taken to stand level with it where the screen faces, the foot of the view (`screenAngle`, and `upright` for
+ * a phone with rotation locked, whose view turns itself: `uprightQuarter`) pointing their way as the phone lies back, its
+ * top as it tips forward past upright. Both the room's light (`roomTilt`, at HELD_DEG) and Demo's neutral (viewer.ts)
+ * take the eye from here
  */
-export function roomTilt(now: Matrix, screenAngle: number, upright: Quarter, quarter: Quarter) {
+export function heldEye(now: Matrix, screenAngle: number, upright: Quarter, deg: number): Vector {
   const up: Vector = [now[6], now[7], now[8]]
   // Level, along the room's floor: `v` less its share of the room's up
   const level = ([x, y, z]: Vector): Vector => {
@@ -111,9 +108,24 @@ export function roomTilt(now: Matrix, screenAngle: number, upright: Quarter, qua
   // Should the two ever cancel out, the screen alone
   if (Math.hypot(...toward) < 1e-6) toward = screen
   const length = Math.hypot(...toward) || 1
+  const c = Math.cos(deg * RAD), s = Math.sin(deg * RAD)
+  return [c * up[0] + (s * toward[0]) / length, c * up[1] + (s * toward[1]) / length, c * up[2] + (s * toward[2]) / length]
+}
+
+/**
+ * How the phone lies in the room, as the tilt the room's light falls on the banknote at in Demo (light.ts: from above, so
+ * lying flat is as bright as held, and pointing the camera up puts the light behind the paper), from the room's up alone
+ * (`now`'s last row), so neither Recentre nor where the phone was held when Demo began moves it. It is the tilt of the
+ * banknote from being held HELD_DEG from lying flat, facing whoever holds it (`heldEye`): there none; lying flat, its top
+ * tipped back HELD_DEG; upright, tipped forward as far. `quarter` measures it along the banknote's own sides, as
+ * `tiltFromEye` does. Neither tilt is kept within a limit: the light can come from behind. With it, the room's up itself
+ * along the banknote's own sides (`up`: x right, y down, z out of its face), which says how the light comes through it
+ * (`roomThrough`) as two angles can't quite once the eye is edge-on.
+ */
+export function roomTilt(now: Matrix, screenAngle: number, upright: Quarter, quarter: Quarter) {
+  const up: Vector = [now[6], now[7], now[8]]
   // The eye where it would be were the phone held HELD_DEG from lying flat facing it
-  const c = Math.cos(HELD_DEG * RAD), s = Math.sin(HELD_DEG * RAD)
-  const eye: Vector = [c * up[0] + (s * toward[0]) / length, c * up[1] + (s * toward[1]) / length, c * up[2] + (s * toward[2]) / length]
+  const eye = heldEye(now, screenAngle, upright, HELD_DEG)
   // Both along the banknote's own sides, as `tiltFromEye` takes the eye there
   const own = ([x, y, z]: Vector): Vector => {
     const cs = Math.cos(screenAngle * RAD), sn = Math.sin(screenAngle * RAD)

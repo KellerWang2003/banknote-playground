@@ -15,6 +15,7 @@ import { CARD_MM, guessPxPerMm, isChecked, realPxPerMm, screenKey, setRealPxPerM
 import { useProjects } from '../src/lib/store'
 import type { Project } from '../src/lib/types'
 import { setTilt, useTilt } from '../src/tilt/tilt'
+import { useViewing } from '../src/tilt/viewing'
 
 const cloud = vi.hoisted(() => ({ rows: [] as unknown[], fail: undefined as Error | undefined, calls: 0 }))
 vi.mock('../src/cloud/client', () => ({
@@ -67,6 +68,7 @@ beforeEach(() => {
   }
   localStorage.clear()
   useRealSize.setState({ checked: {} })
+  useViewing.setState({ headAware: true, neutralDeg: 90 })
   location.hash = ''
   cloud.rows = []
   cloud.fail = undefined
@@ -203,6 +205,31 @@ describe('Demo on the laptop', () => {
     expect(bar.className).toContain('invisible')
     // Only the banknote: it grows into the room the bar left, to the margin
     expect(parseFloat((document.querySelector('[data-demo-note]') as HTMLElement).style.width)).toBeCloseTo(1248)
+    fireEvent.doubleClick(stage())
+    expect(bar.className).not.toContain('invisible')
+    // A double-click hides it too (Keller, 13 November: "we have double tap to ... get back the UI. We should also have
+    // double tap to get rid of the UI"), and so does a double tap, which brings it back as well
+    fireEvent.doubleClick(stage())
+    expect(bar.className).toContain('invisible')
+    const tap = () => {
+      fireEvent.pointerDown(stage(), { clientX: 300, clientY: 300, pointerId: 7, pointerType: 'touch' })
+      fireEvent.pointerUp(stage(), { clientX: 300, clientY: 300, pointerId: 7, pointerType: 'touch' })
+    }
+    // The browser makes a double-click of the two taps as well: once, not back again
+    const doubleTap = () => {
+      tap()
+      tap()
+      fireEvent.doubleClick(stage())
+    }
+    doubleTap()
+    expect(bar.className).not.toContain('invisible')
+    doubleTap()
+    expect(bar.className).toContain('invisible')
+    // Taps too far apart for the double tap: the double-click the browser makes of them does it
+    fireEvent.pointerDown(stage(), { clientX: 300, clientY: 300, pointerId: 7, pointerType: 'touch' })
+    fireEvent.pointerUp(stage(), { clientX: 300, clientY: 300, pointerId: 7, pointerType: 'touch' })
+    fireEvent.pointerDown(stage(), { clientX: 350, clientY: 300, pointerId: 7, pointerType: 'touch' })
+    fireEvent.pointerUp(stage(), { clientX: 350, clientY: 300, pointerId: 7, pointerType: 'touch' })
     fireEvent.doubleClick(stage())
     expect(bar.className).not.toContain('invisible')
     // F turns it over, as on the canvas
@@ -346,19 +373,19 @@ function renderDemo(project = sample(), noteId = project.notes[0].id) {
 }
 
 describe('Demo on a phone', () => {
-  it('takes the phone’s tilt from how it was held as it started, 1:1, drawing the banknote flat', async () => {
+  it('takes the phone’s tilt 1:1 from held upright, drawing the banknote flat', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     renderDemo()
-    // Held tipped back 60°: that is flat
-    orient(0, 60, 0)
+    // Held upright: square on, as Demo opens (the neutral)
+    orient(0, 90, 0)
     await motionOn()
     expect(useTilt.getState().target).toBeCloseTo(0, 9)
     expect(useTilt.getState().targetX).toBeCloseTo(0, 9)
     // Its right edge turned 20° away: 20° right, once the filter has settled
     for (let i = 0; i < 20; i++) {
       now += 100
-      orient(0, 60, 20)
+      orient(0, 90, 20)
     }
     expect(useTilt.getState().targetX).toBeCloseTo(20, 1)
     expect(useTilt.getState().target).toBeCloseTo(0, 1)
@@ -368,19 +395,92 @@ describe('Demo on a phone', () => {
     expect(banknote.style.transform).toBe('')
     expect(banknote.querySelectorAll('[data-tilt^="shade"]')).toHaveLength(0)
 
-    // No switch for it in ⋯, as it is always on (Keller, 12 November), and Recentre there makes how it is held now flat,
-    // gliding there
+    // No switch for it in ⋯, as it is always on (Keller, 12 November), and Recentre there makes how it is held now square
+    // on, gliding there
     const menu = await openMenu()
     expect(within(menu).queryByRole('menuitemcheckbox', { name: 'Tilt' })).toBeNull()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Recentre' }))
     now += 100
-    orient(0, 60, 20)
+    orient(0, 90, 20)
     expect(useTilt.getState().targetX).toBeCloseTo(20, 1)
     for (let i = 0; i < 5; i++) {
       now += 100
-      orient(0, 60, 20)
+      orient(0, 90, 20)
     }
     expect(useTilt.getState().targetX).toBeCloseTo(0, 1)
+  })
+
+  it('opens square on held upright, not wherever it happened to be held, and its neutral dial in ⋯ moves that', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    renderDemo()
+    // Held tipped back 60° as it opens: 30° short of upright, its top 30° away (Keller, 13 November: "the default position
+    // is set to be wherever the site loads ... Let's keep it fixed")
+    orient(0, 60, 0)
+    await motionOn()
+    expect(useTilt.getState().target).toBeCloseTo(30, 9)
+    // Head-aware is on, and the dial at 90°; set to 60°, held there is square on, at once
+    const menu = await openMenu()
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Head-aware tilt' }).getAttribute('aria-checked')).toBe('true')
+    // Found by its label: its thumb stays hidden until it is laid out, which jsdom never does
+    const dial = within(menu).getByLabelText('Neutral')
+    expect(dial.getAttribute('aria-valuenow')).toBe('90')
+    for (let i = 0; i < 6; i++) fireEvent.keyDown(dial, { key: 'ArrowLeft' })
+    expect(useViewing.getState().neutralDeg).toBe(60)
+    expect(within(menu).getByText('60°')).toBeDefined()
+    now += 100
+    orient(0, 60, 0)
+    expect(useTilt.getState().target).toBeCloseTo(0, 6)
+    // Remembered in this browser
+    expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ headAware: true, neutralDeg: 60 })
+  })
+
+  /**
+   * The phone moved down from upright over 0.6 s, its top tipping 40° back as it goes, then held still: round a point
+   * `lever` m in front of its screen (0.35, the eye, as it goes round the head; 0, turned in the hand), with the
+   * accelerometer's readings such a turn makes, α × r + ω × (ω × r), and gravity's
+   */
+  async function tipBack(lever: number, first = true) {
+    let now = 1000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const RAD = Math.PI / 180
+    const seconds = 0.6
+    if (first) {
+      orient(0, 90, 0)
+      await motionOn()
+    }
+    for (let i = 1; i <= 120; i++) {
+      now = 1000 + (i * 1000) / 60
+      const t = i / 60
+      const k = Math.min(t / seconds, 1)
+      const beta = 90 - 40 * k * k * (3 - 2 * k)
+      const w = t < seconds ? ((-40 * 6 * k * (1 - k)) / seconds) * RAD : 0
+      const dw = t < seconds ? ((-40 * 6 * (1 - 2 * k)) / (seconds * seconds)) * RAD : 0
+      const a = { x: 0, y: dw * lever, z: w * w * lever }
+      const up = [0, Math.sin(beta * RAD), Math.cos(beta * RAD)]
+      const g = 9.80665
+      act(() => {
+        window.dispatchEvent(new DeviceMotionEvent('devicemotion', {
+          acceleration: a, accelerationIncludingGravity: { x: a.x + g * up[0], y: a.y + g * up[1], z: a.z + g * up[2] },
+        }))
+        window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta, gamma: 0 }))
+      })
+    }
+    return useTilt.getState().target
+  }
+
+  it('keeps the banknote square on as the phone goes round the head, head-aware, Arc-en-Ciel hidden as on a real one', async () => {
+    renderDemo()
+    expect(Math.abs(await tipBack(0.35))).toBeLessThan(4)
+  })
+
+  it('tilts the banknote as the phone turns in the hand, head-aware or not, and as it goes round the head without', async () => {
+    renderDemo()
+    expect(await tipBack(0)).toBeCloseTo(40, 0)
+    cleanup()
+    act(() => useViewing.setState({ headAware: false }))
+    renderDemo()
+    expect(await tipBack(0.35)).toBeCloseTo(40, 0)
   })
 
   it('lights the banknote as the phone lies in the room, which Recentre leaves: flat on a table, held, camera up', async () => {
