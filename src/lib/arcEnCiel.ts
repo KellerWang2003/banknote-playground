@@ -45,6 +45,14 @@ export const edgeColorOf = (arc: Pick<ArcEnCiel, 'edgeColor'>) => arc.edgeColor 
 export const ARC_SLIDE_DEG = 20
 /** How far the bands slide from flat to either end, in bands: half a band each way, one band in all, the most two slopes give */
 export const ARC_SLIDE_BANDS = 0.5
+/**
+ * How Arc-en-Ciel comes out as it turns from flat: the power its way to ARC_SLIDE_DEG is raised to (`arcTurned`), so the
+ * first few degrees barely change it and the further it turns the more it shows (Keller, 13 November: "even as I turn a
+ * little bit ... from the flat, the pattern shows. And that's not how realistically it works"; "the first couple of like
+ * degrees wouldn't change it that much ... when you change it more, it's more apparent"). At 2: by 5° a sixteenth of the
+ * way, by 10° a quarter, by 15° over half
+ */
+export const ARC_EASE = 2
 /** Each band blends into the next over this share of it at its far end, as two inks' lines meet in a screen */
 export const BAND_BLEND = 0.3
 /** Bands narrower than this share of a pixel's width start to fade to their colours' average, as they do to the eye */
@@ -141,7 +149,14 @@ export const withArcImage = (arc: ArcEnCiel, imageId: string, aspect: number | u
   fitArcEnCiel({ ...withBoxAspect(arc, aspect, note), imageId }, note)
 
 /**
+ * How far into its turn Arc-en-Ciel is, −1 to 1, from how far the tilt across its ridges has gone to ARC_SLIDE_DEG either
+ * way (`way`, −1 to 1): eased in (ARC_EASE), so it barely changes near flat and comes out the more the further it turns
+ */
+export const arcTurned = (way: number) => Math.sign(way) * Math.abs(way) ** ARC_EASE + 0
+
+/**
  * How far the bands have slid at a tilt, in bands: none flat, up to ARC_SLIDE_BANDS by ARC_SLIDE_DEG across the ridges,
+ * little in the first few degrees and more the further it turns (`arcTurned`),
  * away from where the bands start as the tilt moves the eye across them (`ridgeAcross`: under level ridges as the top
  * tips away, under upright ones at −90° as the right side turns away), back towards it the other way. Tilting along the
  * ridges changes nothing. Rotated on its banknote, its ridges turn with it, so they lie at their angle plus its rotation.
@@ -151,7 +166,7 @@ export function bandSlide(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt
   // The tilt across the ridges, degrees: the eye moves left on the banknote as its right side turns away, and down it as
   // the top tips away, so level ridges go by the up/down tilt alone and upright ones by the side to side, as Moves on did
   const across = -tilt.x * x + tilt.y * y
-  return clamp(across / ARC_SLIDE_DEG, -1, 1) * ARC_SLIDE_BANDS || 0
+  return arcTurned(clamp(across / ARC_SLIDE_DEG, -1, 1)) * ARC_SLIDE_BANDS || 0
 }
 
 /** A colour as red, green and blue in linear light, 0 to 1, where colours mix as light does */
@@ -197,7 +212,8 @@ export function bandColour(colours: Rgb[], phase: number, blur = 0, average = av
  * layer's angle ARC_RIDGE_MM apart, in register with the print, and every ridge carries all the colours as fine lines, one
  * each, in order, shifted across the ridge by a line for every band the design moves on: flat, every ridge shows them all,
  * so the design nearly hides and only bows the lines; tilted across the ridges, the slopes facing the eye take more of
- * each ridge, until by ARC_SLIDE_DEG only they show, each half the lines, and the design comes out as soft rings of mixed
+ * each ridge, little in the first few degrees and more the further it turns (`arcTurned`), until by ARC_SLIDE_DEG only
+ * they show, each half the lines, and the design comes out as soft rings of mixed
  * colours, the other half of them tilted the other way. The ridges are round, steepest down in a groove and flat along the
  * crest, and shaded by how they face magnetic ink's lamp, LAMP_HEIGHT_DEG above the eye, staying where it is as the
  * banknote is rotated, in a room that lights them a little more from all round than the lamp does, so the light is soft,
@@ -276,7 +292,10 @@ const unit = (v: Vec3): Vec3 => {
 export interface ArcLight {
   /** Which way the ridges are counted, across them (`ridgeAcross`): each ridge's lines run in order this way across it */
   across: [number, number]
-  /** How much more of each ridge the slopes facing `across` show than the others, −1 to 1: 0 flat, all of it by ARC_SLIDE_DEG */
+  /**
+   * How much more of each ridge the slopes facing `across` show than the others, −1 to 1: 0 flat, all of it by
+   * ARC_SLIDE_DEG, eased in (`arcTurned`)
+   */
   share: number
   /** Which way the lamp is, and halfway between it and the eye, where a slope facing it shines */
   lamp: Vec3
@@ -342,7 +361,9 @@ export function arcLight(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt:
   // ridge's lines, turning with the ridges
   const across = ridgeAcross(arc)
   const tan = (eye[0] * across[0] + eye[1] * across[1]) / Math.max(eye[2], 1e-6)
-  const share = clamp(tan / Math.tan(ARC_SLIDE_DEG * RAD), -1, 1)
+  // As far as the slopes' shares of each ridge on screen move, eased in, so the design barely shows the first few degrees
+  // from flat and comes out the further it turns
+  const share = arcTurned(clamp(tan / Math.tan(ARC_SLIDE_DEG * RAD), -1, 1))
   const light = { across, lamp, half: unit([lamp[0] + eye[0], lamp[1] + eye[1], lamp[2] + eye[2]]) }
   const mean = (from: number) => {
     let shade = 0, sheen = 0

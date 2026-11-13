@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ARC_BAND, ARC_EDGE, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
-  bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeAcross, ridgeAngle,
+  ARC_BAND, ARC_EASE, ARC_EDGE, ARC_LINE_POINTS, ARC_POINTS, ARC_SHEEN, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, CURVE_STEPS, DEFAULT_ARC, arcLight, averageRgb,
+  arcTurned, bandColour, bandSlide, canRemove, curveControls, curvePoints, fitArcEnCiel, lineDistance, linearRgb, newArcEnCiel, ridgeAcross, ridgeAngle,
   ridgeLight, sampleCurve, srgbBytes, withArcImage, withBend, withLineMoved, withPoint, withSpot, withoutSpot,
 } from '../src/lib/arcEnCiel'
 import { PAPER } from '../src/lib/back'
@@ -111,18 +111,19 @@ describe('Arc-en-Ciel’s bands', () => {
   it('slide half a band each way over 20° across the ridges, and not at all along them', () => {
     expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 0 })).toBe(0)
     expect(bandSlide({ angleDeg: 0 }, { x: 15, y: ARC_SLIDE_DEG })).toBe(ARC_SLIDE_BANDS)
-    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: -ARC_SLIDE_DEG / 2 })).toBeCloseTo(-ARC_SLIDE_BANDS / 2, 9)
+    // Halfway there, a quarter of the way along, as it comes out the further it turns (`arcTurned`)
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: -ARC_SLIDE_DEG / 2 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 9)
     expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 60 })).toBe(ARC_SLIDE_BANDS)
     expect(bandSlide({ angleDeg: 0 }, { x: 25, y: 0 })).toBe(0)
     expect(bandSlide({ angleDeg: -90 }, { x: -40, y: 10 })).toBe(-ARC_SLIDE_BANDS)
-    expect(bandSlide({ angleDeg: -90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(ARC_SLIDE_BANDS / 2, 9)
-    expect(bandSlide({ angleDeg: 90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(-ARC_SLIDE_BANDS / 2, 9)
+    expect(bandSlide({ angleDeg: -90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(ARC_SLIDE_BANDS / 4, 9)
+    expect(bandSlide({ angleDeg: 90 }, { x: ARC_SLIDE_DEG / 2, y: 0 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 9)
   })
 
   it('slide on the tilt across ridges at any angle, and not on the tilt along them', () => {
     // Ridges rising to the right at 30°: the eye moving down and right across them, or up and right along them
     expect(bandSlide({ angleDeg: 30 }, { x: -12.5, y: 21.65 })).toBe(ARC_SLIDE_BANDS)
-    expect(bandSlide({ angleDeg: 30 }, { x: 5, y: -8.66 })).toBeCloseTo(-ARC_SLIDE_BANDS / 2, 2)
+    expect(bandSlide({ angleDeg: 30 }, { x: 5, y: -8.66 })).toBeCloseTo(-ARC_SLIDE_BANDS / 4, 2)
     expect(Math.abs(bandSlide({ angleDeg: 30 }, { x: -8.66, y: -5 }))).toBeLessThan(0.01)
     // The same tilt slides ridges at −30° by as much as level ones would by the up/down tilt alone, less
     expect(Math.abs(bandSlide({ angleDeg: -30 }, { x: 0, y: 10 }))).toBeLessThan(Math.abs(bandSlide({ angleDeg: 0 }, { x: 0, y: 10 })))
@@ -306,8 +307,8 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(arcLight(arc(), { x: 0, y: ARC_SLIDE_DEG }).share).toBeCloseTo(1)
     expect(arcLight(arc(), { x: 0, y: -ARC_SLIDE_DEG }).share).toBeCloseTo(-1)
     expect(arcLight(arc(), { x: 0, y: 40 }).share).toBe(1)
-    // Between, as far as the slopes' shares of each ridge on screen move
-    expect(arcLight(arc(), { x: 0, y: 10 }).share).toBeCloseTo(Math.tan(10 * RAD) / Math.tan(ARC_SLIDE_DEG * RAD))
+    // Between, as far as the slopes' shares of each ridge on screen move, eased in
+    expect(arcLight(arc(), { x: 0, y: 10 }).share).toBeCloseTo((Math.tan(10 * RAD) / Math.tan(ARC_SLIDE_DEG * RAD)) ** ARC_EASE)
     // Tilting along the ridges changes nothing; upright ones go by the side to side tilt, the right side turning away
     // showing the slopes facing left
     expect(arcLight(arc(), { x: 15, y: 0 }).share).toBeCloseTo(0)
@@ -315,6 +316,25 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(arcLight(upright, { x: 0, y: 0 }).across).toEqual([-1, 0])
     expect(arcLight(upright, { x: ARC_SLIDE_DEG, y: 0 }).share).toBeCloseTo(1)
     expect(arcLight(upright, { x: 0, y: 12 }).share).toBeCloseTo(0)
+  })
+
+  it('barely shows the first few degrees from flat, and comes out the more the further it turns', () => {
+    // Keller, 13 November: "even as I turn a little bit ... from the flat, the pattern shows. And that's not how
+    // realistically it works"
+    const at = (deg: number) => arcLight(arc(), { x: 0, y: deg }).share
+    // A hand's few degrees: hardly any of it
+    expect(at(2)).toBeLessThan(0.01)
+    expect(at(5)).toBeLessThan(0.07)
+    // Then each 5° shows more than the 5° before did, a quarter of the way by 10° and over half by 15°
+    const steps = [0, 5, 10, 15, 20].map(at)
+    for (let i = 2; i < steps.length; i++) expect(steps[i] - steps[i - 1]).toBeGreaterThan(steps[i - 1] - steps[i - 2])
+    expect(at(10)).toBeGreaterThan(0.2)
+    expect(at(15)).toBeGreaterThan(0.5)
+    // Either way alike
+    expect(at(-7)).toBeCloseTo(-at(7), 12)
+    expect(arcTurned(-0)).toBe(0)
+    // Without Realistic, the bands slide the same way
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 3 })).toBeCloseTo((3 / ARC_SLIDE_DEG) ** ARC_EASE * ARC_SLIDE_BANDS, 12)
   })
 
   it('lights the slopes from magnetic ink’s lamp over the eye, which stays put as the banknote is rotated', () => {
