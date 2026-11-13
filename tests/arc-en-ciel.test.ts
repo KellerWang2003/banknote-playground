@@ -318,20 +318,30 @@ describe('Arc-en-Ciel, Realistic', () => {
     expect(arcLight(upright, { x: 0, y: 12 }).share).toBeCloseTo(0)
   })
 
-  it('comes out in step with the turn from flat, the curve off for now', () => {
-    // Keller, 13 November: eased in from flat that evening ("even as I turn a little bit ... from the flat, the pattern
-    // shows"), then "i think we can do 40 degrees and get rid of the curve to test"
+  it('comes out a little slower than the turn from flat, and the more the further it turns', () => {
+    // Keller, 13 November: "even as I turn a little bit ... from the flat, the pattern shows. And that's not how
+    // realistically it works"; then, after trying it without the curve, "still keep the curve a little bit"
     const at = (deg: number) => arcLight(arc(), { x: 0, y: deg }).share
-    // As far as the slopes' shares of each ridge on screen move, all of it by ARC_SLIDE_DEG
-    for (const deg of [2, 5, 10, 20, 30]) expect(at(deg)).toBeCloseTo(Math.tan(deg * RAD) / Math.tan(ARC_SLIDE_DEG * RAD), 12)
+    const inStep = (deg: number) => Math.tan(deg * RAD) / Math.tan(ARC_SLIDE_DEG * RAD)
+    // As far as the slopes' shares of each ridge on screen move, eased in: behind them near flat, though not as far
+    // behind as when it was squared
+    for (const deg of [2, 5, 10, 20, 30]) {
+      expect(at(deg)).toBeCloseTo(inStep(deg) ** ARC_EASE, 12)
+      expect(at(deg)).toBeLessThan(inStep(deg))
+      expect(at(deg)).toBeGreaterThan(inStep(deg) ** 2)
+    }
+    // Each 7° shows more than the 7° before did, all of it by ARC_SLIDE_DEG (Keller: "about 70 degress, so 35 degress
+    // each side")
+    const steps = [0, 7, 14, 21, 28, 35].map(at)
+    for (let i = 2; i < steps.length; i++) expect(steps[i] - steps[i - 1]).toBeGreaterThan(steps[i - 1] - steps[i - 2])
     expect(at(ARC_SLIDE_DEG)).toBeCloseTo(1, 12)
     expect(at(60)).toBe(1)
     // Either way alike
     expect(at(-7)).toBeCloseTo(-at(7), 12)
     expect(arcTurned(-0)).toBe(0)
-    // Without Realistic, the bands slide the same way: twice the turn, twice as far
-    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 3 })).toBeCloseTo((3 / ARC_SLIDE_DEG) * ARC_SLIDE_BANDS, 12)
-    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 20 })).toBeCloseTo(2 * bandSlide({ angleDeg: 0 }, { x: 0, y: 10 }), 12)
+    // Without Realistic, the bands slide the same way: twice the turn, more than twice as far
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 3 })).toBeCloseTo((3 / ARC_SLIDE_DEG) ** ARC_EASE * ARC_SLIDE_BANDS, 12)
+    expect(bandSlide({ angleDeg: 0 }, { x: 0, y: 20 })).toBeGreaterThan(2 * bandSlide({ angleDeg: 0 }, { x: 0, y: 10 }))
   })
 
   it('lights the slopes from magnetic ink’s lamp over the eye, which stays put as the banknote is rotated', () => {

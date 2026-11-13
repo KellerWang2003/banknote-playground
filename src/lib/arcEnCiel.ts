@@ -42,22 +42,21 @@ export const ARC_EDGE = { min: 0.5, max: 3, step: 0.1, initial: 1 }
 /** The colour of the edge round the shape: the one picked for it, or the paper's own, bare paper, as it starts */
 export const edgeColorOf = (arc: Pick<ArcEnCiel, 'edgeColor'>) => arc.edgeColor ?? PAPER
 /**
- * Tilt across the ridges, either way, that slides the bands all the way: 80° from one end to the other (Keller, 13 November:
- * "lets do 45. so a total of 90 for both ends", then "i think we can do 40 degrees and get rid of the curve to test"; 20°
- * before)
+ * Tilt across the ridges, either way, that slides the bands all the way: 70° from one end to the other (Keller, 13 November:
+ * "keep the total to be about 70 degress, so 35 degress each side", after trying 45° and 40°; 20° before)
  */
-export const ARC_SLIDE_DEG = 40
+export const ARC_SLIDE_DEG = 35
 /** How far the bands slide from flat to either end, in bands: half a band each way, one band in all, the most two slopes give */
 export const ARC_SLIDE_BANDS = 0.5
 /**
- * How Arc-en-Ciel comes out as it turns from flat: the power its way to ARC_SLIDE_DEG is raised to (`arcTurned`). At 1, in
- * step with the turn, for now (Keller, 13 November: "i think we can do 40 degrees and get rid of the curve to test"): by
- * 10° a quarter of the way, by 20° half; Realistic's `share`, going by tan θ, a little behind (a fifth by 10°, half by
- * 23°). At 2, as it was that evening, the first few degrees barely changed it and the further it turned the more it showed
- * (Keller: "even as I turn a little bit ... from the flat, the pattern shows. And that's not how realistically it works";
- * "the first couple of like degrees wouldn't change it that much ... when you change it more, it's more apparent")
+ * How Arc-en-Ciel comes out as it turns from flat: the power its way to ARC_SLIDE_DEG is raised to (`arcTurned`), so the
+ * first few degrees change it less and the further it turns the more it shows (Keller, 13 November: "even as I turn a
+ * little bit ... from the flat, the pattern shows. And that's not how realistically it works"). A little curve (Keller,
+ * after trying none: "still keep the curve a little bit"): at 1.5, by 10° about a seventh of the way, by 17.5° a third,
+ * by 25° three fifths; Realistic's `share`, going by tan θ, a little behind (an eighth by 10°, half by 24°). At 1 it goes
+ * in step with the turn; at 2, as it first was, the first few degrees barely change it
  */
-export const ARC_EASE = 1
+export const ARC_EASE = 1.5
 /** Each band blends into the next over this share of it at its far end, as two inks' lines meet in a screen */
 export const BAND_BLEND = 0.3
 /** Bands narrower than this share of a pixel's width start to fade to their colours' average, as they do to the eye */
