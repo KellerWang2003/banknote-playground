@@ -296,6 +296,68 @@ describe('the light behind the banknotes', () => {
   })
 })
 
+describe('going over edge-on, as a swipe in Demo takes the banknotes', () => {
+  const state = () => useTilt.getState()
+  const level = { source: 'drag' as const, angle: 0, target: 0, angleX: 0, targetX: 0, nudge: 0, nudgeX: 0, nudged: 0, nudgedX: 0,
+    flipped: false, turn: 0, halfTurns: 0 }
+  beforeEach(() => setTilt(level))
+  afterEach(() => setTilt(level))
+  /** The side tilt each frame for `ms`, 20 ms a frame */
+  const sides = (ms: number) => Array.from({ length: ms / 20 }, () => { tick(20); return state().angleX })
+
+  it('takes them over onto their backs as the side tilt goes past edge-on, flat there once settled, never past edge-on either side', () => {
+    renderHook(() => useTiltLoop(planFor(30)))
+    tick(20)
+    // Wanted half a turn round, its right edge going away
+    setTilt({ targetX: 180 })
+    const seen = sides(1600)
+    // The front rising to edge-on, then the back coming round from edge-on the other way: the switch flipped with no turn
+    // to play, and the target half a turn back with it
+    const over = seen.findIndex((x) => x < 0)
+    expect(over).toBeGreaterThan(2)
+    expect(seen[over - 1]).toBeGreaterThan(75)
+    expect(seen[over]).toBeLessThan(-75)
+    expect(Math.max(...seen.map(Math.abs))).toBeLessThanOrEqual(90)
+    expect(state()).toMatchObject({ flipped: true, turn: 1, halfTurns: 1, angleX: 0, targetX: 0 })
+    // And on round the same way, back onto the front; the other way round, the left edge going away
+    setTilt({ targetX: 180 })
+    sides(1600)
+    expect(state()).toMatchObject({ flipped: false, turn: 0, halfTurns: 2, angleX: 0, targetX: 0 })
+    setTilt({ targetX: -180 })
+    expect(Math.max(...sides(1600).map(Math.abs))).toBeLessThanOrEqual(90)
+    expect(state()).toMatchObject({ flipped: true, turn: 1, halfTurns: 1, angleX: 0, targetX: 0 })
+  })
+
+  it('never turns them over for a tilt that only reaches edge-on, nor in Thread Studio, where they stop at edge-on', () => {
+    const { unmount } = renderHook(() => useTiltLoop(planFor(30)))
+    tick(20)
+    setTilt({ targetX: 90 })
+    sides(1600)
+    expect(state()).toMatchObject({ flipped: false, turn: 0, halfTurns: 0, angleX: 90 })
+    unmount()
+    setTilt(level)
+    renderHook(() => useTiltLoop(planFor(30), undefined, false))
+    tick(20)
+    setTilt({ targetX: 180 })
+    sides(1600)
+    expect(state()).toMatchObject({ flipped: false, turn: 0, halfTurns: 0, angleX: 90 })
+  })
+
+  it('takes them over in the hand on a phone’s own tilt too, the phone’s tilt left as it is', () => {
+    renderHook(() => useTiltLoop(planFor(30)))
+    setTilt({ source: 'device', target: 10, targetX: 5 })
+    tick(20)
+    setTilt({ nudgeX: -180 })
+    const turned: number[] = []
+    for (let i = 0; i < 80; i++) {
+      tick(20)
+      turned.push(state().nudgedX)
+    }
+    expect(Math.max(...turned.map(Math.abs))).toBeLessThanOrEqual(90)
+    expect(state()).toMatchObject({ flipped: true, turn: 1, halfTurns: -1, nudge: 0, nudgeX: 0, nudgedX: 0, angle: 10, angleX: 5 })
+  })
+})
+
 describe('a phone’s own tilt in Demo', () => {
   it('follows the phone exactly, a drag on top turning it further with the drag’s spring and springing back to the phone’s tilt', () => {
     renderHook(() => useTiltLoop(planFor(30)))

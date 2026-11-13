@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto'
 import { HELD_DEG } from '../src/lib/light'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '../src/App'
 import { DemoButton } from '../src/app/DemoButton'
@@ -10,11 +10,13 @@ import { DemoView } from '../src/app/DemoView'
 import { PhoneLink } from '../src/app/PhoneLink'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import { demoLink, forPhone, readDemoLink } from '../src/lib/demoLink'
+import { lensState } from '../src/lib/lens'
+import { playbackPlan } from '../src/lib/moves'
 import { createNote, createProject } from '../src/lib/notes'
 import { CARD_MM, guessPxPerMm, isChecked, realPxPerMm, screenKey, setRealPxPerMm, useRealSize, type Device } from '../src/lib/realSize'
 import { useProjects } from '../src/lib/store'
 import type { Project } from '../src/lib/types'
-import { setTilt, useTilt } from '../src/tilt/tilt'
+import { setTilt, useTilt, useTiltLoop } from '../src/tilt/tilt'
 import { useViewing } from '../src/tilt/viewing'
 
 const cloud = vi.hoisted(() => ({ rows: [] as unknown[], fail: undefined as Error | undefined, calls: 0 }))
@@ -73,8 +75,8 @@ beforeEach(() => {
   cloud.rows = []
   cloud.fail = undefined
   cloud.calls = 0
-  setTilt({ source: 'drag', angle: 0, target: 0, angleX: 0, targetX: 0, nudge: 0, nudgeX: 0, nudged: 0, nudgedX: 0, flipped: false, turn: 0, quarterTurns: 0,
-    backlit: false, peek: false })
+  setTilt({ source: 'drag', angle: 0, target: 0, angleX: 0, targetX: 0, nudge: 0, nudgeX: 0, nudged: 0, nudgedX: 0, flipped: false, turn: 0, halfTurns: 0,
+    quarterTurns: 0, backlit: false, peek: false })
 })
 afterEach(() => {
   cleanup()
@@ -322,6 +324,108 @@ describe('Demo on the laptop', () => {
     expect(useTilt.getState()).toMatchObject({ target: 0, targetX: 0 })
   })
 
+  it('turns it over with a swipe side to side, past edge-on or flicked, and springs back from a slow one short of it', () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    renderDemo()
+    const view = demo()
+    /** From (800, 400) by (dx, dy), in `steps` moves `ms` apart, let go `still` ms after the last */
+    const swipe = (dx: number, dy: number, steps: number, ms: number, still: number) => {
+      fireEvent.pointerDown(view, { button: 0, buttons: 1, clientX: 800, clientY: 400, pointerId: 1, pointerType: 'mouse' })
+      for (let i = 1; i <= steps; i++) {
+        now += ms
+        fireEvent.pointerMove(view, { buttons: 1, clientX: 800 + (dx * i) / steps, clientY: 400 + (dy * i) / steps, pointerId: 1, pointerType: 'mouse' })
+      }
+      const wanted = { ...useTilt.getState() }
+      now += still
+      fireEvent.pointerUp(view, { clientX: 800 + dx, clientY: 400 + dy, pointerId: 1, pointerType: 'mouse' })
+      return wanted
+    }
+    // Slowly 300 px right, 56° (160 px a 30° here, as on the canvas): short of edge-on, back to flat (Keller, 13 November)
+    expect(swipe(300, 0, 30, 50, 0).targetX).toBeCloseTo(56.25, 6)
+    expect(useTilt.getState()).toMatchObject({ target: 0, targetX: 0 })
+    // Slowly 640 px left and held there: 120°, on past edge-on as far as the finger takes it, and let go, flat on the back,
+    // half a turn round its left edge going away (the tilt loop takes it over, flipping the switch)
+    expect(swipe(-640, 0, 64, 50, 200).targetX).toBeCloseTo(-120, 6)
+    expect(useTilt.getState()).toMatchObject({ target: 0, targetX: -180 })
+    act(() => setTilt({ targetX: 0 }))
+    // Flicked 60 px right in a few frames, 11°: its speed carries it over all the same, its right edge going away
+    swipe(60, 0, 4, 16, 0)
+    expect(useTilt.getState().targetX).toBe(180)
+    act(() => setTilt({ targetX: 0 }))
+    swipe(-60, 0, 4, 16, 0)
+    expect(useTilt.getState().targetX).toBe(-180)
+    act(() => setTilt({ targetX: 0 }))
+    // Not once it has stopped, nor flicked up or down, nor mostly so: those tilt and spring back
+    swipe(60, 0, 4, 16, 80)
+    expect(useTilt.getState().targetX).toBe(0)
+    swipe(0, -120, 4, 16, 0)
+    expect(useTilt.getState()).toMatchObject({ target: 0, targetX: 0 })
+    swipe(40, -120, 4, 16, 0)
+    expect(useTilt.getState()).toMatchObject({ target: 0, targetX: 0 })
+  })
+
+  it('takes it over onto its back as the finger takes it past edge-on, going on from there, and settles flat on the back', () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const frames = new Map<number, FrameRequestCallback>()
+    let nextFrame = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+    const frame = (ms = 16) => act(() => {
+      now += ms
+      const due = [...frames.values()]
+      frames.clear()
+      due.forEach((callback) => callback(now))
+    })
+    // The tilt store's loop, as the canvas or the phone's page runs it
+    renderHook(() => useTiltLoop(playbackPlan({ cycleDeg: 30, transition: 0 }, lensState({ cycleDeg: 30, transition: 0 }))))
+    renderDemo()
+    const view = demo()
+    const back = () => document.querySelector('[data-demo-note] [data-back]') !== null
+    fireEvent.pointerDown(view, { button: 0, buttons: 1, clientX: 1000, clientY: 400, pointerId: 1, pointerType: 'mouse' })
+    // Slowly 640 px left, 8 px a frame: the front turning to edge-on, then the back coming round, never past edge-on
+    const seen: number[] = []
+    for (let i = 1; i <= 80; i++) {
+      fireEvent.pointerMove(view, { buttons: 1, clientX: 1000 - 8 * i, clientY: 400, pointerId: 1, pointerType: 'mouse' })
+      frame(40)
+      seen.push(useTilt.getState().angleX)
+    }
+    for (let i = 0; i < 60; i++) frame()
+    expect(Math.max(...seen.map(Math.abs))).toBeLessThanOrEqual(90)
+    // On the back, 60° short of flat there, its left edge having gone away and come round
+    expect(useTilt.getState()).toMatchObject({ flipped: true, turn: 1, halfTurns: -1 })
+    expect(useTilt.getState().angleX).toBeCloseTo(60, 1)
+    expect(back()).toBe(true)
+    // Back the other way to 60°, the finger's way: over onto the front again, 60° short of flat
+    for (let i = 1; i <= 40; i++) {
+      fireEvent.pointerMove(view, { buttons: 1, clientX: 360 + 8 * i, clientY: 400, pointerId: 1, pointerType: 'mouse' })
+      frame(40)
+    }
+    for (let i = 0; i < 60; i++) frame()
+    expect(useTilt.getState()).toMatchObject({ flipped: false, turn: 0, halfTurns: 0 })
+    expect(useTilt.getState().angleX).toBeCloseTo(-60, 1)
+    expect(back()).toBe(false)
+    // And on to 99°, just past edge-on again: the back, 81° short of flat
+    for (let i = 1; i <= 26; i++) {
+      fireEvent.pointerMove(view, { buttons: 1, clientX: 680 - 8 * i, clientY: 400, pointerId: 1, pointerType: 'mouse' })
+      frame(40)
+    }
+    for (let i = 0; i < 60; i++) frame()
+    expect(useTilt.getState()).toMatchObject({ flipped: true, halfTurns: -1 })
+    expect(useTilt.getState().angleX).toBeCloseTo(81, 1)
+    // Let go there: the side it shows, the back, flat
+    fireEvent.pointerUp(view, { clientX: 472, clientY: 400, pointerId: 1, pointerType: 'mouse' })
+    for (let i = 0; i < 120; i++) frame()
+    expect(useTilt.getState()).toMatchObject({ flipped: true, turn: 1, angleX: 0, targetX: 0 })
+    expect(back()).toBe(true)
+    // Flip still turns it back round to the front
+    fireEvent.click(within(document.querySelector('[data-demo-bar]') as HTMLElement).getByRole('button', { name: 'Flip' }))
+    for (let i = 0; i < 60; i++) frame()
+    expect(useTilt.getState()).toMatchObject({ flipped: false, turn: 0 })
+    expect(back()).toBe(false)
+  })
+
   it('keeps the banknote clear of Hide UI above as of the bar below, taking their room back once they hide', () => {
     renderDemo({ ...createProject('Tall'), notes: [createNote({ name: 'Tall', x: 0, y: 0, widthMm: 70, heightMm: 150, color: '#E5E5E5' })] })
     const box = document.querySelector('[data-demo-note]') as HTMLElement
@@ -534,6 +638,45 @@ describe('Demo on a phone', () => {
     expect(useTilt.getState().peek).toBe(true)
     fireEvent.pointerUp(view, { clientX: 600, clientY: 400, pointerId: 2, pointerType: 'touch' })
     expect(useTilt.getState()).toMatchObject({ peek: false, backlit: false })
+  })
+
+  it('turns it over in the hand with a swipe on the phone’s own tilt, side to side by its width as it shows', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    // A phone's screen: the banknote 358 px wide, so a drag across half of it turns it edge-on
+    Object.assign(WINDOW, { width: 390, height: 844 })
+    try {
+      renderDemo()
+      orient(0, 90, 0)
+      await motionOn()
+      const view = demo()
+      fireEvent.pointerDown(view, { clientX: 300, clientY: 400, pointerId: 1, pointerType: 'touch' })
+      for (let i = 1; i <= 18; i++) {
+        now += 50
+        fireEvent.pointerMove(view, { clientX: 300 - 10 * i, clientY: 400, pointerId: 1, pointerType: 'touch' })
+      }
+      // 180 px left, half its width: edge-on in the hand, its left edge away
+      expect(useTilt.getState().nudgeX).toBeCloseTo(-90.5, 0)
+      for (let i = 1; i <= 6; i++) {
+        now += 50
+        fireEvent.pointerMove(view, { clientX: 120 - 10 * i, clientY: 400, pointerId: 1, pointerType: 'touch' })
+      }
+      now += 200
+      fireEvent.pointerUp(view, { clientX: 60, clientY: 400, pointerId: 1, pointerType: 'touch' })
+      // Let go past edge-on: settling on the back, the phone's tilt left alone
+      expect(useTilt.getState()).toMatchObject({ source: 'device', nudge: 0, nudgeX: -180 })
+      // A quick flick right turns it over too
+      act(() => setTilt({ nudgeX: 0 }))
+      fireEvent.pointerDown(view, { clientX: 100, clientY: 400, pointerId: 2, pointerType: 'touch' })
+      for (let i = 1; i <= 4; i++) {
+        now += 16
+        fireEvent.pointerMove(view, { clientX: 100 + 15 * i, clientY: 400, pointerId: 2, pointerType: 'touch' })
+      }
+      fireEvent.pointerUp(view, { clientX: 160, clientY: 400, pointerId: 2, pointerType: 'touch' })
+      expect(useTilt.getState().nudgeX).toBe(180)
+    } finally {
+      Object.assign(WINDOW, { width: 1280, height: 800 })
+    }
   })
 
   it('turns the view a quarter for a phone held sideways with rotation locked', async () => {

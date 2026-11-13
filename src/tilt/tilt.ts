@@ -55,13 +55,22 @@ interface TiltState {
    * over LIGHT_RAMP_SECONDS, or what playback's moves say while playing (whichever is more)
    */
   light: number
-  /** The turn-over switch: every banknote shows its back, until turned back (F, Flip, or a Flip move in playback) */
+  /**
+   * The turn-over switch: every banknote shows its back, until turned back (F, Flip, a Flip move in playback, or in Demo a
+   * swipe that takes them over edge-on)
+   */
   flipped: boolean
   /**
    * How far the banknotes have turned over, 0 (front) to 1 (back), as everything renders it: the switch, turned over
    * FLIP_SECONDS (while playing, at playback's speed). From halfway they show their backs (`showsBack`)
    */
   turn: number
+  /**
+   * Times a drag in Demo has taken the banknotes over edge-on onto their other side, counted on either way (+1 as their
+   * right edge goes away, as `turnDeg` turns them): the tilt loop takes the side tilt and its target half a turn back each
+   * time, and a drag going on reads it to keep its own target in step (`overEdge`)
+   */
+  halfTurns: number
   /**
    * Quarter turns clockwise every banknote is rotated on screen (Rotate left and right, R and Shift+R; `src/lib/rotate.ts`),
    * counted on either way (−1, 5) so each turn plays the way it was asked; `quarterOf` reads it as 0 to 3. A way of looking,
@@ -100,6 +109,7 @@ export const useTilt = create<TiltState>()(() => ({
   light: 0,
   flipped: false,
   turn: 0,
+  halfTurns: 0,
   quarterTurns: 0,
   frameTilts: {},
 }))
@@ -185,6 +195,23 @@ export function togglePlayback() {
 /** `value` moved towards `target` by at most `step` */
 const approach = (value: number, target: number, step: number) => (value < target ? Math.min(target, value + step) : Math.max(target, value - step))
 
+/** Edge-on, degrees of side tilt: where a banknote turning over shows its other side */
+const EDGE_ON = 90
+/** Half a turn, degrees: from one side of a banknote to the same tilt of its other */
+export const HALF_TURN = 180
+
+/**
+ * Half a turn, signed, once a side tilt `angle` has gone on past edge-on towards a `target` beyond it (Demo's swipe, which
+ * alone sets one): the banknote is on its other side then, at `angle` less this. Else 0, so a tilt that only overshoots
+ * edge-on on its way to it never turns a banknote over
+ */
+export const overEdge = (angle: number, target: number) =>
+  Math.abs(angle) > EDGE_ON && Math.abs(target) > EDGE_ON && Math.sign(angle) === Math.sign(target) ? Math.sign(angle) * HALF_TURN : 0
+
+/** Taken over edge-on onto the other side by a drag: the switch flipped there, with no turn to play, and counted */
+const wentOver = (flipped: boolean, halfTurns: number, over: number) =>
+  ({ flipped: !flipped, turn: flipped ? 0 : 1, halfTurns: halfTurns + Math.sign(over) })
+
 /**
  * Manual tilt uses a critically damped spring; a phone's own tilt in Demo is followed exactly, and a drag on top of it
  * with the same spring. Playback follows the
@@ -193,7 +220,9 @@ const approach = (value: number, target: number, step: number) => (value < targe
  * The light fades towards the switch at a steady rate; while playing it is also at least what the moves say, and
  * on pausing it fades from there back to the switch. The banknotes turn over towards the turn-over switch the same way,
  * and each Flip move playback comes to flips that switch, as F does, unless `turnsOver` is off (in Thread Studio, where
- * F does nothing either, as the thread is only on the front).
+ * F does nothing either, as the thread is only on the front). A drag (Demo's swipe) may take the side tilt on past
+ * edge-on: there the banknotes go over onto their other side, the switch flipped with no turn to play, the side tilt and
+ * its target half a turn back, and the spring carrying on from there (`overEdge`, `halfTurns`).
  */
 export function useTiltLoop(plan: PlaybackPlan, limit = TILT_LIMIT, turnsOver = true) {
   const current = useRef({ plan, limit, turnsOver })
@@ -259,17 +288,23 @@ export function useTiltLoop(plan: PlaybackPlan, limit = TILT_LIMIT, turnsOver = 
           nudgedX = s.nudgeX
           velocityX = 0
         }
+        // Turned in the hand past edge-on: over onto the other side
+        const over = turnsOver ? overEdge(nudgedX, s.nudgeX) : 0
+        nudgedX -= over
         const angle = clamp(s.target + nudged, -limit, limit)
         const angleX = clamp(s.targetX + nudgedX, -limit, limit)
-        if (angle !== s.angle || angleX !== s.angleX || light !== s.light || nudged !== s.nudged || nudgedX !== s.nudgedX) {
+        if (over) useTilt.setState({ angle, angleX, light, nudged, nudgedX, nudgeX: s.nudgeX - over, ...wentOver(flipped, s.halfTurns, over) })
+        else if (angle !== s.angle || angleX !== s.angleX || light !== s.light || nudged !== s.nudged || nudgedX !== s.nudgedX) {
           useTilt.setState({ angle, angleX, light, nudged, nudgedX })
         }
       } else {
         const light = approach(s.light, lightTarget(s), fade)
         ramp = light
         const range = s.source === 'slider' ? Math.max(limit, Math.abs(s.target), Math.abs(s.targetX)) : limit
+        // A drag may want the side tilt on past edge-on, and over (Demo's swipe)
+        const rangeX = s.source === 'drag' && turnsOver ? range + HALF_TURN : range
         const target = clamp(s.target, -range, range)
-        const targetX = clamp(s.targetX, -range, range)
+        const targetX = clamp(s.targetX, -rangeX, rangeX)
         velocity += ((target - s.angle) * stiffness - velocity * damping) * dt
         velocityX += ((targetX - s.angleX) * stiffness - velocityX * damping) * dt
         let angle = s.angle + velocity * dt
@@ -282,7 +317,10 @@ export function useTiltLoop(plan: PlaybackPlan, limit = TILT_LIMIT, turnsOver = 
           angleX = targetX
           velocityX = 0
         }
-        if (angle !== s.angle || angleX !== s.angleX || light !== s.light) useTilt.setState({ angle, angleX, light })
+        const over = s.source === 'drag' && turnsOver ? overEdge(angleX, targetX) : 0
+        angleX -= over
+        if (over) useTilt.setState({ angle, angleX, light, targetX: targetX - over, ...wentOver(flipped, s.halfTurns, over) })
+        else if (angle !== s.angle || angleX !== s.angleX || light !== s.light) useTilt.setState({ angle, angleX, light })
       }
       lastSource = s.source
       raf = requestAnimationFrame(tick)

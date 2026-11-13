@@ -21,7 +21,7 @@ import { CARD_MM, CARD_RADIUS_MM, isChecked, realPxPerMm, setRealPxPerMm, useRea
 import { setRealistic, useRealistic } from '../lib/realistic'
 import { type Quarter, ROTATE_SECONDS, onItsSide, quarterOf, unturn } from '../lib/rotate'
 import type { Project } from '../lib/types'
-import { pressLight, releaseLight, rotateNotes, setTilt, turnOver, useTilt } from '../tilt/tilt'
+import { HALF_TURN, pressLight, releaseLight, rotateNotes, setTilt, turnOver, useTilt } from '../tilt/tilt'
 import { type Motion, useDeviceTilt, useWakeLock } from '../tilt/useDeviceTilt'
 import { setViewing, useViewing } from '../tilt/viewing'
 import { useElementSize } from '../editor/useElementSize'
@@ -45,8 +45,13 @@ const IDLE_MS = 1500
 /** How to bring the UI back shows this long, ms, once it hides, then fades out over HINT_FADE_MS */
 const HINT_MS = 2000
 const HINT_FADE_MS = 300
-/** About 160 px of drag tilts the banknote 30°, as on the canvas */
+/** About 160 px of drag tilts the banknote 30°, as on the canvas: up and down, and side to side at least as fast */
 const DRAG_DEG_PER_PX = 30 / 160
+/** A drag still this quick along the banknote's width as it lets go, px a second, and mostly sideways, turns it over */
+const FLICK_PX_PER_S = 500
+/** A drag's speed as it lets go is taken over this last stretch of it, ms, unless it had stopped this long before */
+const FLICK_MS = 100
+const FLICK_STILL_MS = 50
 
 type Size = 'fit' | 'real'
 const SIZES: { value: Size; label: string }[] = [{ value: 'fit', label: 'Fit' }, { value: 'real', label: 'Real size' }]
@@ -61,11 +66,36 @@ const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable=
 type Gesture =
   /**
    * One finger or the mouse: a drag tilts, from `start` and `startSide`; with the phone's own tilt on, it turns the
-   * banknote further in the hand (`hand`, the tilt store's `nudge`), springing back to the phone's tilt
+   * banknote further in the hand (`hand`, the tilt store's `nudge`), springing back to the phone's tilt. Side to side it
+   * may go on past edge-on and over (`side`, as far as the finger wants it, from the store's `halfTurns` as it began), and
+   * `trail` is where it has been lately along the banknote's own axes, for how fast it lets go
    */
-  | { kind: 'press'; id: number; touch: boolean; x: number; y: number; start: number; startSide: number; moved: boolean; held: boolean; hand: boolean }
+  | { kind: 'press'; id: number; touch: boolean; x: number; y: number; start: number; startSide: number; moved: boolean; held: boolean; hand: boolean
+      side: number; halfTurns: number; trail: { at: number; x: number; y: number }[] }
   /** Two fingers move the banknote about, at real size bigger than the screen */
   | { kind: 'pan'; x: number; y: number; from: { x: number; y: number } }
+
+/** How fast a drag goes as it lets go at `now`, px a second along the banknote's own axes: none if it had stopped */
+function speedOf(trail: Extract<Gesture, { kind: 'press' }>['trail'], now: number) {
+  const recent = trail.filter((p) => now - p.at <= FLICK_MS)
+  const first = recent[0]
+  const last = recent.at(-1)
+  const seconds = first && last ? (last.at - first.at) / 1000 : 0
+  if (!first || !last || now - last.at > FLICK_STILL_MS || seconds < 0.008) return { x: 0, y: 0 }
+  return { x: (last.x - first.x) / seconds, y: (last.y - first.y) / seconds }
+}
+
+/**
+ * The half turns from where a drag began that it settles on as it lets go, `side` its side tilt then: the nearest, the
+ * side the finger has it on; or flicked side to side, the next the flick's way, so it turns over (Keller, 13 November: one
+ * gesture, as a real banknote is turned over, a slow drag springing back, one past edge-on or a quick flick settling on
+ * the back)
+ */
+function settleTurns(side: number, speed = { x: 0, y: 0 }) {
+  const flick = Math.abs(speed.x) >= FLICK_PX_PER_S && Math.abs(speed.x) > Math.abs(speed.y)
+  if (!flick) return Math.round(side / HALF_TURN)
+  return speed.x > 0 ? Math.ceil(side / HALF_TURN) : Math.floor(side / HALF_TURN)
+}
 
 /**
  * Demo (Keller, 10 November: "a dedicated demo mode ... like figma's prototype mode"): one banknote of the project on
@@ -75,8 +105,9 @@ type Gesture =
  * in the hand, springing back, both at once (Keller, 12 November: "it shouldn't be two modes"). Fit fills the screen with
  * a 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI, a button of its own at the
  * top centre rather than one of the bar's, as it hides the bar (Keller, 11 and 12 November), leaves only the banknote,
- * saying for 2 s how to bring the UI back; ← and → step through the banknotes, F or Flip turns them over, L or pressing
- * and holding holds them to the light, H hides and brings back the UI, as does a double-click or double-tap. Recentre,
+ * saying for 2 s how to bring the UI back; ← and → step through the banknotes, F or Flip turns them over, as does a swipe
+ * side to side past edge-on or flicked, L or pressing and holding holds them to the light, H hides and brings back the
+ * UI, as does a double-click or double-tap. Recentre,
  * the lamp and Realistic wait in the bar's ⋯ menu, as they rarely change, so the bar is one line (Keller, 11 November:
  * "the default should just be with realistic mode on and lamp off. And this can live in a 3-dotted menu", then "it can
  * be just one line"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint text, but for
@@ -162,6 +193,10 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   const scale = size === 'real' ? realPxPerMm(checked) : Math.min(area.width / shownMm.width, area.height / shownMm.height)
   // Bigger than the room, it moves only as far as its edges
   const room = { x: Math.max(0, (shownMm.width * scale - area.width) / 2), y: Math.max(0, (shownMm.height * scale - area.height) / 2) }
+  // Side to side, a drag turns the banknote as a page turns: its edge dragged to its middle, it is edge-on, and on across
+  // it, right over; by its width as it shows, as far as the screen shows it, and never slower than up and down
+  const across = Math.min(note ? note.widthMm * scale : Infinity, onItsSide(turned) ? height : width)
+  const sideDegPerPx = across > 0 ? Math.max(DRAG_DEG_PER_PX, HALF_TURN / across) : DRAG_DEG_PER_PX
   const at = { x: clamp(pan.x, -room.x, room.x), y: clamp(pan.y, -room.y, room.y) }
   const middle = { x: view.width / 2 + at.x, y: MARGIN + hideRoom + area.height / 2 + at.y }
   const panTo = (x: number, y: number) => setPanned({ key: panKey, x: clamp(x, -room.x, room.x), y: clamp(y, -room.y, room.y) })
@@ -283,11 +318,19 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
     if (press.held) releaseLight(performance.now(), false)
     press.held = false
   }
-  /** A drag let go of: back to flat, or on the phone's own tilt, back to the phone's */
-  const letGo = (press: Extract<Gesture, { kind: 'press' }>) => {
+  /**
+   * A drag let go of: back to flat, or on the phone's own tilt, back to the phone's; or, past edge-on or flicked side to
+   * side, flat on the banknote's other side (`settleTurns`), the tilt loop taking it over. Lost to a second finger or the
+   * browser, it is not flicked
+   */
+  const letGo = (press: Extract<Gesture, { kind: 'press' }>, flicked = true) => {
     if (!press.moved) return
-    if (press.hand) setTilt({ nudge: 0, nudgeX: 0 })
-    else if (useTilt.getState().source !== 'device') setTilt({ target: 0, targetX: 0 })
+    const s = useTilt.getState()
+    const turns = settleTurns(press.side, flicked ? speedOf(press.trail, performance.now()) : undefined)
+    // Half turns the loop has already taken it over are in the store's side tilt
+    const side = HALF_TURN * (turns - (s.halfTurns - press.halfTurns)) || 0
+    if (press.hand) setTilt({ nudge: 0, nudgeX: side })
+    else if (s.source !== 'device') setTilt({ target: 0, targetX: side })
   }
   const middleOf = () => {
     const [a, b] = [...pointers.current.values()]
@@ -310,7 +353,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           const g = gesture.current
           if (g?.kind === 'press') {
             endHold(g)
-            letGo(g)
+            letGo(g, false)
           }
           gesture.current = { kind: 'pan', ...middleOf(), from: at }
           return
@@ -331,8 +374,9 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         // On the phone's own tilt, a drag turns the banknote further in the hand, from where a drag left it springing back
         const s = useTilt.getState()
         const hand = s.source === 'device'
+        const startSide = hand ? s.nudgeX : s.targetX
         const press: Gesture = { kind: 'press', id: e.pointerId, touch, x: e.clientX, y: e.clientY, start: hand ? s.nudge : s.target,
-          startSide: hand ? s.nudgeX : s.targetX, moved: false, held: false, hand }
+          startSide, moved: false, held: false, hand, side: startSide, halfTurns: s.halfTurns, trail: [] }
         gesture.current = press
         // Pressed and held still, a finger holds the banknote to the light until it lifts, as holding L does
         if (touch) holdTimer.current = setTimeout(() => {
@@ -362,10 +406,16 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           if (!g.held) clearTimeout(holdTimer.current)
         }
         // Tilts the way the pointer goes on the banknote as it shows, turned or not, springing back on release; on the phone's
-        // own tilt, in the hand. A drag begun before motion came leaves the phone's tilt alone
+        // own tilt, in the hand. Side to side it goes on past edge-on, over onto the other side (Keller, 13 November: "When
+        // the UI is off, we should use swipe"), within a half turn and edge-on again either way. A drag begun before motion
+        // came leaves the phone's tilt alone
         const along = unturn(dx, dy, turned)
+        const now = performance.now()
+        g.trail = [...g.trail.filter((p) => now - p.at <= FLICK_MS), { at: now, x: along.x, y: along.y }]
+        g.side = clamp(g.startSide + along.x * sideDegPerPx, -HALF_TURN - TILT_LIMIT, HALF_TURN + TILT_LIMIT)
         const y = clamp(g.start - along.y * DRAG_DEG_PER_PX, -TILT_LIMIT, TILT_LIMIT)
-        const x = clamp(g.startSide + along.x * DRAG_DEG_PER_PX, -TILT_LIMIT, TILT_LIMIT)
+        // As far as the finger wants it, less the half turns the loop has taken it over meanwhile
+        const x = g.side - HALF_TURN * (useTilt.getState().halfTurns - g.halfTurns)
         if (g.hand) setTilt({ nudge: y, nudgeX: x })
         else if (useTilt.getState().source !== 'device') setTilt({ source: 'drag', target: y, targetX: x })
       }}
@@ -388,7 +438,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         const g = gesture.current
         if (g?.kind === 'press' && g.id === e.pointerId) {
           endHold(g)
-          letGo(g)
+          letGo(g, false)
           gesture.current = null
         } else if (g?.kind === 'pan' && pointers.current.size === 0) gesture.current = null
       }}
