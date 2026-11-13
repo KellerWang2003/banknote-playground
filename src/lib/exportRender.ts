@@ -14,7 +14,7 @@ import { drawLitInk } from './inkRenderer'
 import { INK_BAR_LIGHT, barCentre, inkRoll, inkShift } from './magneticInk'
 import { type PlacedBox, type Size, rotationOf } from './placed'
 import { inkLight } from './realisticInk'
-import { drawPaper, drawPaperShade } from './paper'
+import { PAPER_THROUGH, drawPaper, drawPaperShade, featureShade } from './paper'
 import { copyStarts, imageBox } from './artwork'
 import { extraView, extrasOf } from './extras'
 import { type Feature, hasThread } from './layers'
@@ -235,6 +235,8 @@ export interface FaceOptions {
   frameNumbers?: boolean
   /** How clearly the watermark shows, 0 (faint) to 1; without it, as at this tilt in reflected light */
   reveal?: number
+  /** How far it is held to the light, 0 to 1: with Realistic, a little of that light comes through its paper (PAPER_THROUGH) */
+  backlight?: number
   /** Where along the thread the pattern's repeat starts, mm, as the canvas previews it */
   offsetMm?: number
   /** The same for each further thread, by its view's id (extras.ts) */
@@ -280,10 +282,11 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
   // light comes through them, and the thread is shaded alike in its windows. Without Realistic, the light and shade of
   // turning over everything, last
   const paperView = withTurn(tilt, options.perspective ? options.turn ?? 0 : 0)
-  const paperShade = () => drawPaperShade(ctx, note, scale, paperView, options.quarter)
+  // A little of the light from behind comes through the paper, and none through the opaque features
+  const through = PAPER_THROUGH * Math.min(Math.max(options.backlight ?? 0, 0), 1)
   if (options.realistic) {
     drawPaper(ctx, note, scale, paperView, options.quarter)
-    paperShade()
+    drawPaperShade(ctx, note, scale, paperView, options.quarter, through)
   }
   const shade = () => {
     if (!options.realistic) drawShade(ctx, width, height, tilt, options.perspective)
@@ -303,23 +306,29 @@ export function drawFace(ctx: Ctx, note: Note, assets: NoteAssets, scale: number
     ctx.restore()
     return
   }
-  // Realistic, lit as the canvas lights them, turned over (only as it shows turning, in perspective) and rotated as the banknote shows
+  // Realistic, lit as the canvas lights them, turned over (only as it shows turning, in perspective) and rotated as the banknote
+  // shows, and shaded as the paper round them is
   const turn = options.perspective ? options.turn : 0
+  const paper = { note, view: paperView, through }
   // Each turned about its middle as far as it is rotated on the banknote, as NoteView turns its box
   for (const { note: { arcEnCiel }, assets: { arc } } of each('arcEnCiel')) {
-    if (arcEnCiel && arc) turnedAs(ctx, arcEnCiel, mm, () => drawArc(ctx, arcEnCiel, arc, mm, tilt, options.realistic ? { turn, quarter: options.quarter } : undefined))
+    if (arcEnCiel && arc) {
+      turnedAs(ctx, arcEnCiel, mm, () => drawArc(ctx, arcEnCiel, arc, mm, tilt, options.realistic ? { turn, quarter: options.quarter, paper } : undefined))
+    }
   }
   for (const { note: { magneticInk }, assets: { ink } } of each('magneticInk')) {
     if (magneticInk && ink) {
       turnedAs(ctx, magneticInk, mm, () =>
-        drawInk(ctx, magneticInk, ink, mm, tilt, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain } : undefined))
+        drawInk(ctx, magneticInk, ink, mm, tilt, options.realistic ? { note, turn, quarter: options.quarter, grain: options.grain, paper: paperView } : undefined))
     }
   }
   // A banknote without a thread has none of these (Keller, 4 November: the thread is added like any other feature)
   const labels = each('thread').flatMap((part, i) => {
     if (!hasThread(part.note)) return []
     const offsetMm = (i === 0 ? options.offsetMm : options.offsets?.[part.note.id]) ?? 0
-    return [drawThread(ctx, part.note, part.assets, mm, tilt, offsetMm, options.sheen, options.realistic ? paperShade : undefined)]
+    // Realistic, shaded in its windows as the paper round it, though none of the light from behind comes through it
+    const shaded = options.realistic ? () => drawPaperShade(ctx, note, scale, paperView, options.quarter) : undefined
+    return [drawThread(ctx, part.note, part.assets, mm, tilt, offsetMm, options.sheen, shaded)]
   })
 
   shade()
@@ -495,7 +504,8 @@ function drawShade(ctx: Ctx, width: number, height: number, tilt: Tilt2, perspec
  * Magnetic ink as NoteView draws it, over the watermark and under the thread: its Flat colour, the Tilted one over it as
  * far as the note has turned away, and the bright bar where it has rolled, all through the ink's mask. Realistic (`lit`,
  * on its banknote), it is lit as metal by the canvas's renderer instead, turned over and rotated as the banknote shows
- * (`lit.turn`, `lit.quarter`), where the browser can.
+ * (`lit.turn`, `lit.quarter`), where the browser can, and with `lit.paper` shaded as Realistic's paper round it is at that
+ * tilt, as it is opaque.
  */
 export function drawInk(
   ctx: Ctx,
@@ -503,13 +513,15 @@ export function drawInk(
   mask: Pick<InkMask, 'canvas'>,
   mm: (value: number) => number,
   tilt: Tilt2,
-  lit?: { note: Size; turn?: number; quarter?: Quarter; grain?: number },
+  lit?: { note: Size; turn?: number; quarter?: Quarter; grain?: number; paper?: Tilt2 },
 ) {
   const width = Math.max(1, Math.round(mm(ink.widthMm)))
   const height = Math.max(1, Math.round(mm(ink.heightMm)))
   if (lit) {
     const view = { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }
-    const light = inkLight(ink, lit.note, view, perspectiveFor(lit.note, 1), lit.quarter)
+    const eye = perspectiveFor(lit.note, 1)
+    const paper = lit.paper && featureShade(ink, lit.note, lit.paper, eye, lit.quarter)
+    const light = inkLight(ink, lit.note, view, eye, lit.quarter, paper)
     const box = { x: mm(ink.xMm), y: mm(ink.yMm), width: mm(ink.widthMm), height: mm(ink.heightMm) }
     if (drawLitInk(ctx, box, mask.canvas, light, { width, height }, lit.grain ?? 1)) return
   }
@@ -544,7 +556,8 @@ export function drawInk(
 /**
  * Arc-en-Ciel as NoteView draws it, over the watermark and under magnetic ink: its bands slid as far as the tilt takes
  * them, through its mask, on the canvas's renderer, or at rest where the browser has no WebGL. Realistic (`lit`), its
- * ridges are lit as the canvas lights them, turned over and rotated as the banknote shows (`lit.turn`, `lit.quarter`).
+ * ridges are lit as the canvas lights them, turned over and rotated as the banknote shows (`lit.turn`, `lit.quarter`), and
+ * with `lit.paper` shaded as Realistic's paper round it is at its tilt, its white edge letting through what the paper does.
  */
 export function drawArc(
   ctx: Ctx,
@@ -552,9 +565,10 @@ export function drawArc(
   assets: NonNullable<NoteAssets['arc']>,
   mm: (value: number) => number,
   tilt: Tilt2,
-  lit?: { turn?: number; quarter?: Quarter },
+  lit?: { turn?: number; quarter?: Quarter; paper?: { note: Size; view: Tilt2; through?: number } },
 ) {
-  const light = lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter) : undefined
+  const paper = lit?.paper && featureShade(arc, lit.paper.note, lit.paper.view, perspectiveFor(lit.paper.note, 1), lit.quarter, lit.paper.through)
+  const light = lit ? arcLight(arc, { x: tilt.x + turnDeg(lit.turn ?? 0), y: tilt.y }, lit.quarter, paper) : undefined
   const look = bandLook(arc, assets.shape, tilt, light)
   if (!look) return
   // The white edge reaches past the box all round
@@ -708,7 +722,7 @@ export function drawExportFrame(
   faces: Map<string, OffscreenCanvas>,
   scale: number,
   angle: Tilt2 | number,
-  options: Omit<FaceOptions, 'reveal' | 'offsetMm' | 'back' | 'turn' | 'grain'> & { background?: string; backlit?: boolean; offsets?: Record<string, number> },
+  options: Omit<FaceOptions, 'reveal' | 'backlight' | 'offsetMm' | 'back' | 'turn' | 'grain'> & { background?: string; backlit?: boolean; offsets?: Record<string, number> },
   light = 0,
   turn = 0,
 ) {
@@ -728,7 +742,9 @@ export function drawExportFrame(
     if (!face || !noteAssets) continue
     const faceCtx = face.getContext('2d')!
     faceCtx.clearRect(0, 0, face.width, face.height)
-    drawFace(faceCtx, cell.note, noteAssets, scale, angle, { ...options, back, reveal, offsetMm: options.offsets?.[cell.note.id], offsets: options.offsets, turn, grain })
+    drawFace(faceCtx, cell.note, noteAssets, scale, angle, {
+      ...options, back, reveal, backlight: Math.max(light, options.backlit ? 1 : 0), offsetMm: options.offsets?.[cell.note.id], offsets: options.offsets, turn, grain,
+    })
     const view = options.perspective ? withTurn(angle, turn) : 0
     const perspective = perspectiveFor(cell.note, scale)
     if (!options.quarter) {

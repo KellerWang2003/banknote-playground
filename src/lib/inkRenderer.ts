@@ -4,9 +4,10 @@ import {
 } from './arcEnCiel'
 import type { BandField, BandLook } from './bandMap'
 import {
-  AWAY_LIGHT, FILM_FULL, FILM_N2, GLINT_LOBE, GLINT_POWER, GLINT_TILT, GLINT_WHITE, GRAIN_LIGHT, GRAIN_TILT, HIGHLIGHT_WHITE, LAMP_GLOW,
-  LAMP_POWER, ROOM_LIGHT, SHIFT_DIP, type InkLight,
+  AWAY_LIGHT, AWAY_SOFT, FILM_FULL, FILM_N2, GLINT_LOBE, GLINT_POWER, GLINT_TILT, GLINT_WHITE, GRAIN_LIGHT, GRAIN_TILT, HIGHLIGHT_WHITE,
+  LAMP_GLOW, LAMP_HEIGHT_DEG, LAMP_POWER, ROOM_LIGHT, SHIFT_DIP, type InkLight,
 } from './realisticInk'
+import type { FeatureShade } from './paper'
 
 /**
  * The GPU renderer for realistic magnetic ink and Arc-en-Ciel: one WebGL context for every banknote's, on the canvas and
@@ -18,6 +19,23 @@ import {
  */
 
 const glsl = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n))
+
+// Realistic's paper's light where an opaque layer is drawn, so that it is shaded as the paper round it is, never lighter
+// (paper.ts's `featureLight`, from a FeatureShade): at `p`, mm along its box's own sides from its top-left corner, the
+// room's light and the lamp's, falling off with the cosine and the square of the distance, as a share of flat at the
+// banknote's middle, distances measured in the eye's for precision. Unshaded (no share), 1
+const PAPER_LIGHT = `uniform mat3 uPaperRot;
+uniform vec2 uPaperOrigin;
+uniform vec3 uPaperLamp;
+uniform float uPaperEye;
+uniform float uPaperShare;
+float paperLight(vec2 p) {
+  vec3 q = uPaperRot * vec3(uPaperOrigin + p, 0.0);
+  vec3 d = (uPaperLamp - q) / uPaperEye;
+  float r = length(d);
+  return 1.0 - uPaperShare + uPaperShare * max(0.0, dot(d, uPaperRot[2])) / (r * r * r) / ${glsl(Math.cos((LAMP_HEIGHT_DEG * Math.PI) / 180) ** 3)};
+}`
+const PAPER_UNIFORMS = ['uPaperRot', 'uPaperOrigin', 'uPaperLamp', 'uPaperEye', 'uPaperShare'] as const
 
 const VERTEX = `attribute vec2 aPos;
 varying vec2 vUv;
@@ -50,6 +68,7 @@ uniform vec3 uDown;
 uniform vec3 uFlat;
 uniform vec2 uTilted;
 uniform float uHue;
+${PAPER_LIGHT}
 
 // A random number from 0 to 1 for each grain cell
 float hash(vec2 p) {
@@ -103,11 +122,16 @@ void main() {
   vec3 colour = max(oklabToLinear(vec3(mix(uFlat.x, uTilted.x, u), chroma * cos(hue), chroma * sin(hue))), 0.0);
   float grain = 1.0 + ${glsl(2 * GRAIN_LIGHT)} * (hash(cell + 59.0) - 0.5);
   vec3 light = colour * ((key + room) * grain + 0.04) + mix(colour, vec3(1.0), ${glsl(GLINT_WHITE)}) * glint;
-  if (facing <= 0.0) light *= ${glsl(AWAY_LIGHT)};
-  gl_FragColor = vec4(encode(tone(light)) * m, m);
+  // Turned away from the eye it is seen only by its edges, dimming gradually either side of edge-on
+  light *= mix(${glsl(AWAY_LIGHT)}, 1.0, smoothstep(${glsl(-AWAY_SOFT)}, ${glsl(AWAY_SOFT)}, facing));
+  // Opaque, it is shaded as the paper round it is
+  gl_FragColor = vec4(encode(tone(light)) * min(paperLight(vUv * uSize), 1.0) * m, m);
 }`
 
-const UNIFORMS = ['uMask', 'uRes', 'uCell', 'uRot', 'uOrigin', 'uSize', 'uEye', 'uAxis', 'uEdge', 'uRest', 'uLobe', 'uLamp', 'uDown', 'uFlat', 'uTilted', 'uHue'] as const
+const UNIFORMS = [
+  'uMask', 'uRes', 'uCell', 'uRot', 'uOrigin', 'uSize', 'uEye', 'uAxis', 'uEdge', 'uRest', 'uLobe', 'uLamp', 'uDown', 'uFlat', 'uTilted', 'uHue',
+  ...PAPER_UNIFORMS,
+] as const
 
 /** Spots the bands program takes: Point's starts, or Line's points with a control past each end */
 const MAX_SPOTS = Math.max(ARC_POINTS, ARC_LINE_POINTS + 2)
@@ -160,6 +184,8 @@ uniform float uShare;
 uniform vec3 uLamp;
 uniform vec3 uHalf;
 uniform vec4 uMeans;
+${PAPER_LIGHT}
+uniform float uPaperThrough;
 
 // A map holds 16 bits a texel, its high byte in luminance and its low one in alpha, read whole and blended here, as the
 // GPU's own blending would mix the bytes apart
@@ -407,16 +433,30 @@ void main() {
   vec2 paperMean = vec2(c * uMeans.x + (1.0 - c) * uMeans.z, c * uMeans.y + (1.0 - c) * uMeans.w);
   ink = mix(ink, inkMean, fine);
   paper = mix(paper, paperMean, fine);
-  // The ink where the shape takes it, and round it the white edge, each no brighter than white (premultiplied, as drawn)
-  gl_FragColor = vec4(encode(min(ink, 1.0)) * m + encode(min(uEdgeColour * paper.x + paper.y, 1.0)) * bare, m + bare);
+  // The ink where the shape takes it, and round it the white edge, each no brighter than white (premultiplied, as drawn),
+  // shaded as the paper round it is: the print opaque, lit from the front only, the white edge bare paper, letting light
+  // from behind through as the paper does
+  float front = paperLight(p);
+  gl_FragColor = vec4(encode(min(ink, 1.0)) * min(front, 1.0) * m
+    + encode(min(uEdgeColour * paper.x + paper.y, 1.0)) * min(front + uPaperThrough, 1.0) * bare, m + bare);
 }`
 
 const BAND_UNIFORMS = [
   'uMask', 'uMap', 'uMapSize', 'uMapMax', 'uFrom', 'uBox', 'uSpots', 'uSpotCount', 'uBand', 'uSlide', 'uColours', 'uColourCount', 'uAverage', 'uPixel',
   'uLit', 'uEmboss', 'uEmbossSize', 'uEmbossMax', 'uEmbossPad', 'uOutset', 'uEdgeColour', 'uRidge', 'uAcross', 'uShare', 'uLamp', 'uHalf', 'uMeans',
+  ...PAPER_UNIFORMS, 'uPaperThrough',
 ] as const
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext
+
+/** PAPER_LIGHT's uniforms: as `paper` shades the layer, or unshaded */
+function setPaperLight(gl: GL, at: (name: (typeof PAPER_UNIFORMS)[number]) => WebGLUniformLocation | null, paper: FeatureShade | undefined) {
+  gl.uniformMatrix3fv(at('uPaperRot'), false, paper?.rot ?? [1, 0, 0, 0, 1, 0, 0, 0, 1])
+  gl.uniform2f(at('uPaperOrigin'), ...(paper?.origin ?? [0, 0]))
+  gl.uniform3f(at('uPaperLamp'), ...(paper?.lamp ?? [0, 0, 1]))
+  gl.uniform1f(at('uPaperEye'), paper?.eye ?? 1)
+  gl.uniform1f(at('uPaperShare'), paper?.share ?? 0)
+}
 /** A mask the ink is drawn through: its alpha is how much ink each pixel takes */
 export type MaskSource = HTMLCanvasElement | OffscreenCanvas | ImageBitmap
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -667,6 +707,7 @@ export function drawLitInk(
   gl.uniform3f(u('uFlat'), ...light.flat)
   gl.uniform2f(u('uTilted'), ...light.tilted)
   gl.uniform1f(u('uHue'), light.hue)
+  setPaperLight(gl, u, light.paper)
   // Every pixel of it is drawn, clear ones too
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   target.drawImage(canvas, 0, canvas.height - height, width, height, dest.x, dest.y, dest.width, dest.height)
@@ -797,6 +838,9 @@ export function drawBands(
   gl.uniform3f(u('uLamp'), ...(lit?.lamp ?? [0, 0, 1]))
   gl.uniform3f(u('uHalf'), ...(lit?.half ?? [0, 0, 1]))
   gl.uniform4f(u('uMeans'), ...(lit?.means ?? [1, 0, 1, 0]))
+  // Realistic's paper: shaded as the paper round it is
+  setPaperLight(gl, u, lit?.paper)
+  gl.uniform1f(u('uPaperThrough'), lit?.paper?.through ?? 0)
   // Every pixel of it is drawn, clear ones too
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
   target.drawImage(canvas, 0, canvas.height - height, width, height, dest.x, dest.y, dest.width, dest.height)

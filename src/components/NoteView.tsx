@@ -17,7 +17,9 @@ import { bandLook, embossOutset, fromShape, needsShape, paintArcEnCiel, useBandS
 import { arcLight } from '../lib/arcEnCiel'
 import { INK_BAR_LIGHT, barShift, inkRoll, inkShift } from '../lib/magneticInk'
 import { inkLight, inkPixels } from '../lib/realisticInk'
-import { LIGHT_PX, grainStyle, lightBox, lightMove, paintPaperLight, paintPaperShade, shadeSize, usePaperGrain } from '../lib/paper'
+import {
+  LIGHT_PX, PAPER_THROUGH, featureShade, grainStyle, lightBox, lightMove, paintPaperLight, paintPaperShade, shadeSize, usePaperGrain,
+} from '../lib/paper'
 import { type PlacedBox, boxTurn } from '../lib/placed'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { type Layer, extraIdOf, extraView, extrasOf, partLayer } from '../lib/extras'
@@ -404,10 +406,14 @@ export function NoteView({
   const inkLit = realistic && magneticInk !== undefined && litInkAvailable()
   const inkPx = inkLit && magneticInk ? inkPixels(magneticInk.widthMm * scale, magneticInk.heightMm * scale, devicePx(1)) : undefined
   const inkCanvas = useRef<HTMLCanvasElement>(null)
-  const paintInk = (tilt: Tilt2, quarter: Quarter) => {
+  // Shaded as Realistic's paper round it is, at the tilt the lamp lights the paper at (`paperView`), as it is opaque: drawn
+  // alone as a further feature too, over its banknote's paper
+  const paintInk = (tilt: Tilt2, quarter: Quarter, paperView: Tilt2) => {
     const canvas = inkCanvas.current
     if (canvas && magneticInk && inkMask?.canvas && inkPx) {
-      paintLitInk(canvas, inkMask.canvas, inkLight(magneticInk, note, tilt, perspectiveFor(note, 1), quarter), inkPx.cell)
+      const eye = perspectiveFor(note, 1)
+      const paper = featureShade(magneticInk, note, paperView, eye, quarter)
+      paintLitInk(canvas, inkMask.canvas, inkLight(magneticInk, note, tilt, eye, quarter, paper), inkPx.cell)
     }
   }
   // Arc-en-Ciel: its shape's mask as magnetic ink's is read, and for bands from the shape (Edge, Holes) or its white edge
@@ -422,10 +428,14 @@ export function NoteView({
     ? inkPixels((arcEnCiel.widthMm + 2 * arcOutset) * scale, (arcEnCiel.heightMm + 2 * arcOutset) * scale, devicePx(1))
     : undefined
   const arcCanvas = useRef<HTMLCanvasElement>(null)
-  const paintArc = (tilt: Tilt2, view: Tilt2, quarter: Quarter) => {
+  // Realistic, shaded as the paper round it is too, as magnetic ink is, its white edge letting through what the paper does
+  // (`through`)
+  const paintArc = (tilt: Tilt2, view: Tilt2, quarter: Quarter, paperView: Tilt2, through = 0) => {
     const canvas = arcCanvas.current
-    const look = canvas && arcEnCiel && bandLook(arcEnCiel, arcShape, tilt, arcLit ? arcLight(arcEnCiel, view, quarter) : undefined)
-    if (canvas && look && arcMask?.canvas) paintArcEnCiel(canvas, arcMask.canvas, look)
+    if (!canvas || !arcEnCiel || !arcMask?.canvas) return
+    const paper = arcLit ? featureShade(arcEnCiel, note, paperView, perspectiveFor(note, 1), quarter, through) : undefined
+    const look = bandLook(arcEnCiel, arcShape, tilt, paper && arcLight(arcEnCiel, view, quarter, paper))
+    if (look) paintArcEnCiel(canvas, arcMask.canvas, look)
   }
   // Realistic's paper (paper.ts): its grain, painted once; the lamp's glare off it, one canvas moved to where the paper
   // mirrors the lamp as the note turns on screen (turning over included) and stretched as seen aslant; and the lamp's
@@ -439,18 +449,24 @@ export function NoteView({
   // the watermarks lie over the paper's shading, as light comes through them
   const threadShade = useRef<HTMLCanvasElement>(null)
   const shadeCells = shadeSize(note)
-  const movePaperLight = (view: Tilt2, quarter: Quarter) => {
+  // The paper lets a little light from behind through (`through`); the thread, opaque, none
+  const movePaperLight = (view: Tilt2, quarter: Quarter, through = 0) => {
     if (paperLight.current) Object.assign(paperLight.current.style, lightMove(note, scale, view, quarter))
-    if (paperShade.current) paintPaperShade(paperShade.current, note, view, quarter)
+    if (paperShade.current) paintPaperShade(paperShade.current, note, view, quarter, through)
     if (threadShade.current) paintPaperShade(threadShade.current, note, view, quarter)
   }
   useLayoutEffect(() => {
     if (paperShown && paperLight.current) paintPaperLight(paperLight.current)
   }, [paperShown])
-  // In Demo on a phone, by the room's light coming through it as the phone lies in the room (light.ts), or held to the
-  // lamp; elsewhere by the light or the tilt
+  // How much light comes from behind the banknote: held to the lamp, or in Demo on a phone the room's light as the phone
+  // lies in the room (light.ts)
+  const backlightOf = (state: LiveState) => {
+    const held = Math.min(Math.max(state.light, 0), 1)
+    return state.source === 'device' && state.room ? Math.max(held, roomThrough(state.room.up, { x: state.nudgedX ?? 0, y: state.nudged ?? 0 })) : held
+  }
+  // In Demo on a phone, by that light coming through it alone; elsewhere by the light or the tilt
   const revealOf = (state: LiveState) => reveal ?? (state.source === 'device' && state.room
-    ? Math.max(Math.min(Math.max(state.light, 0), 1), roomThrough(state.room.up, { x: state.nudgedX ?? 0, y: state.nudged ?? 0 }))
+    ? backlightOf(state)
     : watermarkReveal(state.light, { x: state.angleX, y: state.angle }))
 
   // Live: write the continuous parts straight onto the elements, after every render and on every tilt change
@@ -479,22 +495,25 @@ export function NoteView({
       // that changes, not with the light or the timeline
       const view = { x: angleX + (perspective ? turnDeg(state.turn) : 0), y: angle }
       const quarter = quarterOf(state.quarterTurns ?? 0)
-      if (inkLit) paintInk(view, quarter)
-      // The paper's light, as the banknote lies in the light: in Demo on a phone, the room's, which Recentre doesn't move
+      // The paper's light, as the banknote lies in the light: in Demo on a phone, the room's, which Recentre doesn't move;
+      // the light from behind coming through the paper a little, and none through the opaque features
       const lit = lightTiltOf(state)
-      movePaperLight({ x: lit.x + (perspective ? turnDeg(state.turn) : 0), y: lit.y }, quarter)
+      const paperView = { x: lit.x + (perspective ? turnDeg(state.turn) : 0), y: lit.y }
+      const through = PAPER_THROUGH * backlightOf(state)
+      if (inkLit) paintInk(view, quarter, paperView)
+      movePaperLight(paperView, quarter, through)
       // Arc-en-Ciel's bands slide with the banknote's own tilt, whichever way it is rotated on screen; Realistic, its ridges
       // turn from the lamp as the ink does
-      paintArc({ x: angleX, y: angle }, view, quarter)
+      paintArc({ x: angleX, y: angle }, view, quarter, paperView, through)
     }
     apply.current(useTilt.getState())
   })
   // A still note's realistic ink and Arc-en-Ciel, as at its own tilt
   useLayoutEffect(() => {
     if (live) return
-    if (inkLit) paintInk({ x: angleX, y: angle }, 0)
+    if (inkLit) paintInk({ x: angleX, y: angle }, 0, { x: angleX, y: angle })
     movePaperLight({ x: angleX, y: angle }, 0)
-    paintArc({ x: angleX, y: angle }, { x: angleX, y: angle }, 0)
+    paintArc({ x: angleX, y: angle }, { x: angleX, y: angle }, 0, { x: angleX, y: angle })
   })
   useLayoutEffect(() => {
     if (!live) return
@@ -587,9 +606,10 @@ export function NoteView({
 
       {/* Realistic's paper (paper.ts), over the design and under every feature, which has its own light: its light cotton
           grain, fixed to it, the lamp's glare where the paper mirrors the lamp, and the lamp's shading over the paper, its
-          design, grain and glare: darker the further from the lamp and the more turned from it. Under the watermarks, which
-          light coming through the paper brightens past its shading, and Arc-en-Ciel and magnetic ink, which the lamp lights
-          itself; the thread is shaded in its own windows. Flat on a phone it shows too, lit as the phone lies in the room */}
+          design, grain and glare: darker the further from the lamp and the more turned from it, and a little lighter as far as
+          light from behind comes through the paper. Under the watermarks, which light coming through the paper brightens past
+          its shading, and Arc-en-Ciel and magnetic ink, which the lamp lights itself, opaque, each shaded as the paper round it
+          on the GPU; the thread is shaded in its own windows. Flat on a phone it shows too, lit as the phone lies in the room */}
       {grain && <div aria-hidden="true" data-paper-grain="" className="pointer-events-none absolute inset-0" style={grainStyle(grain, scale)} />}
       {paperShown && (
         <canvas ref={paperLight} aria-hidden="true" data-paper-light="" width={LIGHT_PX} height={LIGHT_PX} className="pointer-events-none absolute"

@@ -5,6 +5,7 @@ import { exportImages, fileTags } from '../src/lib/exportMedia'
 import type { InkMask } from '../src/lib/inkMask'
 import type { Relief } from '../src/lib/relief'
 import { DEFAULT_INK } from '../src/lib/magneticInk'
+import { featureShade } from '../src/lib/paper'
 import { inkLight } from '../src/lib/realisticInk'
 import { bandSlide, newArcEnCiel } from '../src/lib/arcEnCiel'
 import type { BandLook } from '../src/lib/bandMap'
@@ -138,9 +139,11 @@ describe('drawing a still image', () => {
     drawStill(ctx, note, assets, 40, tilt, { sheen: false, realistic: true })
     expect(framesDrawn(calls)).toEqual([shown(tilt)])
     expect(shown(tilt)).not.toBe(shown({ x: 0, y: 0 }))
-    // Realistic: the ink lit at that angle, the banknote never turned over, with the grain a video as big would have
+    // Realistic: the ink lit at that angle, the banknote never turned over, with the grain a video as big would have, and
+    // shaded as the paper round it is lit at that angle
     expect(gpu.drawn).toHaveLength(1)
-    expect(gpu.drawn[0][3]).toEqual(inkLight(magneticInk, note, tilt, perspectiveFor(note, 1)))
+    const eye = perspectiveFor(note, 1)
+    expect(gpu.drawn[0][3]).toEqual(inkLight(magneticInk, note, tilt, eye, 0, featureShade(magneticInk, note, tilt, eye, 0)))
     // 150 mm at 40 px a mm is 6000 px across: a cell 3 px
     expect(gpu.drawn[0][5]).toBe(3)
 

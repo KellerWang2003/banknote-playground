@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NoteView } from '../src/components/NoteView'
 import { turnDeg } from '../src/lib/back'
 import { perspectiveFor } from '../src/lib/frames'
+import { featureShade } from '../src/lib/paper'
 import { inkLight } from '../src/lib/realisticInk'
 import { createNote } from '../src/lib/notes'
 import type { MagneticInk, Note } from '../src/lib/types'
@@ -36,7 +37,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  setTilt({ source: 'hold', angle: 0, angleX: 0, target: 0, targetX: 0, light: 0, flipped: false, turn: 0, quarterTurns: 0 })
+  setTilt({ source: 'hold', angle: 0, angleX: 0, target: 0, targetX: 0, light: 0, flipped: false, turn: 0, quarterTurns: 0, room: undefined, nudged: 0, nudgedX: 0 })
 })
 
 const withInk = (change: Partial<MagneticInk> = {}): Note & { magneticInk: MagneticInk } => ({
@@ -44,6 +45,9 @@ const withInk = (change: Partial<MagneticInk> = {}): Note & { magneticInk: Magne
   magneticInk: { imageId: 'ink', xMm: 10, yMm: 10, widthMm: 30, heightMm: 20, color: '#c60057', tiltedColor: '#2e8b57', barAxis: 'y', barWidth: 0.3, ...change },
 })
 const lastPaint = () => gpu.painted.at(-1)!
+// Lit at `tilt`, and opaque, shaded as Realistic's paper round it at `paper` (outside Demo on a phone, the same tilt)
+const litAt = (note: Note & { magneticInk: MagneticInk }, tilt: { x: number; y: number }, quarter: 0 | 1 | 2 | 3 = 0, paper = tilt) =>
+  inkLight(note.magneticInk, note, tilt, perspectiveFor(note, 1), quarter, featureShade(note.magneticInk, note, paper, perspectiveFor(note, 1), quarter))
 
 describe("a NoteView's realistic magnetic ink", () => {
   it('lights it into a canvas of its own in its box, as many pixels as it shows with, in place of the flat look', () => {
@@ -57,7 +61,7 @@ describe("a NoteView's realistic magnetic ink", () => {
     const canvas = box.querySelector('canvas')!
     expect([canvas.width, canvas.height]).toEqual([60, 40])
     expect(container.querySelector('[data-tilt="ink-bar"], [data-tilt="ink-shift"]')).toBeNull()
-    expect(lastPaint()).toEqual({ canvas, mask: masks.get('ink'), light: inkLight(note.magneticInk, note, { x: 0, y: 0 }, perspectiveFor(note, 1)), cell: 1 })
+    expect(lastPaint()).toEqual({ canvas, mask: masks.get('ink'), light: litAt(note, { x: 0, y: 0 }), cell: 1 })
   })
 
   it('lights it again as the banknote tilts, turns over and is rotated, without re-rendering', () => {
@@ -69,7 +73,7 @@ describe("a NoteView's realistic magnetic ink", () => {
     }
     render(<Counted />)
     const before = renders
-    const lit = (tilt: { x: number; y: number }, quarter = 0) => inkLight(note.magneticInk, note, tilt, perspectiveFor(note, 1), quarter)
+    const lit = (tilt: { x: number; y: number }, quarter: 0 | 1 = 0) => litAt(note, tilt, quarter)
     act(() => setTilt({ angle: 12, angleX: -5 }))
     expect(lastPaint().light).toEqual(lit({ x: -5, y: 12 }))
     // Turning over turns it from the lamp too, as it turns the banknote on screen
@@ -85,10 +89,34 @@ describe("a NoteView's realistic magnetic ink", () => {
     const note = withInk()
     const { rerender } = render(<NoteView note={note} scale={1} live realistic />)
     act(() => setTilt({ angle: 6, turn: 0.2 }))
-    expect(lastPaint().light).toEqual(inkLight(note.magneticInk, note, { x: 0, y: 6 }, perspectiveFor(note, 1)))
+    expect(lastPaint().light).toEqual(litAt(note, { x: 0, y: 6 }))
     rerender(<NoteView note={note} scale={3} angle={-9} angleX={4} realistic />)
-    expect(lastPaint().light).toEqual(inkLight(note.magneticInk, note, { x: 4, y: -9 }, perspectiveFor(note, 1)))
+    expect(lastPaint().light).toEqual(litAt(note, { x: 4, y: -9 }))
     expect([lastPaint().canvas.width, lastPaint().canvas.height]).toEqual([90, 60])
+  })
+
+  it('shades it in Demo on a phone as the paper round it is, by the room’s light, which Recentre leaves; its own light by the banknote’s tilt', () => {
+    const note = withInk()
+    render(<NoteView note={note} scale={1} live perspective flat realistic />)
+    act(() => setTilt({ source: 'device', target: -30, targetX: 5, angle: -30, angleX: 5, room: { x: 2, y: 20, up: [0.02, -0.42, 0.9] } }))
+    expect(lastPaint().light).toEqual(litAt(note, { x: 5, y: -30 }, 0, { x: 2, y: 20 }))
+    // Recentred, its flakes and bar start again from flat; the paper round it, and so it, stays lit as the phone lies
+    act(() => setTilt({ target: 0, targetX: 0, angle: 0, angleX: 0 }))
+    expect(lastPaint().light).toEqual(litAt(note, { x: 0, y: 0 }, 0, { x: 2, y: 20 }))
+    // Held to the light, none of it comes through the ink, which is opaque
+    act(() => setTilt({ light: 1 }))
+    expect(lastPaint().light).toEqual(litAt(note, { x: 0, y: 0 }, 0, { x: 2, y: 20 }))
+  })
+
+  it('shades a further magnetic ink, drawn alone over its banknote, as the paper round it too', () => {
+    const base = withInk()
+    const second = { ...base.magneticInk, imageId: 'second-ink', xMm: 90, name: 'Magnetic ink 2' }
+    const note = { ...base, extras: [{ id: 'second', feature: 'magneticInk' as const, layer: second }] }
+    render(<NoteView note={note} scale={1} live perspective realistic />)
+    act(() => setTilt({ angle: 8 }))
+    const painted = gpu.painted.filter((paint) => paint.mask === masks.get('second-ink')).at(-1)!
+    const eye = perspectiveFor(note, 1)
+    expect(painted.light).toEqual(inkLight(second, note, { x: 0, y: 8 }, eye, 0, featureShade(second, note, { x: 0, y: 8 }, eye, 0)))
   })
 
   it('keeps the flat look where the browser has no WebGL, and with Realistic off', () => {

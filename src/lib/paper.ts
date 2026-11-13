@@ -1,8 +1,8 @@
 import { useEffect, useSyncExternalStore, type CSSProperties } from 'react'
 import { perspectiveFor } from './frames'
 import type { Tilt2 } from './lens'
-import type { Size } from './placed'
-import { LAMP_HEIGHT_DEG, tiltMatrix } from './realisticInk'
+import { type PlacedBox, type Size, intoBox, rotationOf } from './placed'
+import { LAMP_HEIGHT_DEG, tiltMatrix, withBoxRotation } from './realisticInk'
 import { type Quarter, unturn } from './rotate'
 
 /**
@@ -23,13 +23,14 @@ import { type Quarter, unturn } from './rotate'
  *   screen can't show light paper any whiter, so this is what lets the glare show there;
  * - and, fixed to the paper, a light cotton grain, its fibres and a faint cloudiness.
  * The grain, the glare and the shading lie over the design, in place of the canvas's own light and shade of turning, and
- * under every security feature: the watermarks, as light coming through the paper brightens it past its shading (in Demo
- * on a phone, the room's light: light.ts), Arc-en-Ciel and magnetic ink, which the lamp lights itself, and the thread,
- * which has no light of its own, so it is shaded alike where it shows. On the canvas (NoteView: the grain painted once, the
- * glare one canvas per banknote that only moves, the shading a small canvas painted as the tilt changes, again in the
- * thread's windows) and in exports (`drawPaper`, `drawPaperShade`) alike. In Demo on a phone all of it is lit as the
- * phone lies in the room, not as it was held when Demo began (`lightTiltOf`). The numbers are those of the look Keller
- * picked, and are not settings.
+ * under every security feature. Only thinner paper lets light from behind through (Keller, 13 November): the watermarks,
+ * which brighten it past its shading (in Demo on a phone, the room's light: light.ts), and the paper itself a little
+ * (PAPER_THROUGH). Arc-en-Ciel, magnetic ink and the thread are opaque, lit from the front only: each is shaded as the
+ * paper round it, never lighter, and nothing comes through them (`featureShade`, on the GPU; the thread, a shading in its
+ * windows). On the canvas (NoteView: the grain painted once, the glare one canvas per banknote that only moves, the
+ * shading a small canvas painted as the tilt changes, again in the thread's windows) and in exports (`drawPaper`,
+ * `drawPaperShade`) alike. In Demo on a phone all of it is lit as the phone lies in the room, not as it was held when Demo
+ * began (`lightTiltOf`). The numbers are those of the look Keller picked, and are not settings.
  */
 
 const RAD = Math.PI / 180
@@ -141,6 +142,15 @@ export function paintPaperLight(canvas: HTMLCanvasElement) {
 export const LAMP_SHARE = 0.36
 
 /**
+ * How much of the light behind the banknote comes through its paper, held to the light or, in Demo on a phone, with the
+ * room's light behind it: the paper is at most this much lighter, never lighter than flat at its middle (Keller, 13
+ * November: only the watermark, and later any thinner paper, shines through, "whereas maybe the rest of the banknote can
+ * be just like ... a little bit transparent"). Magnetic ink, Arc-en-Ciel and the thread aren't paper, and none comes
+ * through them ("they are not papery. They should be opaque")
+ */
+export const PAPER_THROUGH = 0.1
+
+/**
  * The lamp's light on the paper of a banknote turned through `tilt` (turning over included), seen from `eye` mm out from
  * its middle, rotated `quarter` quarter turns on screen, the lamp staying where it is as for the glare: at a point mm from
  * the banknote's middle along its own sides (x right, y down), the room's light and the lamp's, which falls off with the
@@ -173,9 +183,10 @@ export function shadeSize(note: Size) {
 
 /**
  * Paints a banknote's shading at `tilt` and `quarter` (as `paperLighting`) into `canvas`, shadeSize's cells: black as
- * much as the paper there is darker than flat at its middle, clear where it is as light or lighter
+ * much as the paper there is darker than flat at its middle, clear where it is as light or lighter. `through` is the light
+ * from behind coming through it (PAPER_THROUGH as far as it is held to the light), lightening it: none for the thread
  */
-export function paintPaperShade(canvas: HTMLCanvasElement, note: Size, tilt: Tilt2, quarter: Quarter = 0) {
+export function paintPaperShade(canvas: HTMLCanvasElement, note: Size, tilt: Tilt2, quarter: Quarter = 0, through = 0) {
   const g = canvas.getContext('2d')
   if (!g) return
   const { width, height } = canvas
@@ -185,10 +196,62 @@ export function paintPaperShade(canvas: HTMLCanvasElement, note: Size, tilt: Til
     const y = ((j + 0.5) / height - 0.5) * note.heightMm
     for (let i = 0; i < width; i++) {
       const x = ((i + 0.5) / width - 0.5) * note.widthMm
-      image.data[(j * width + i) * 4 + 3] = Math.round(255 * Math.min(1, Math.max(0, 1 - lit(x, y))))
+      image.data[(j * width + i) * 4 + 3] = Math.round(255 * Math.min(1, Math.max(0, 1 - lit(x, y) - through)))
     }
   }
   g.putImageData(image, 0, 0)
+}
+
+/**
+ * How a feature drawn over the paper is shaded as the paper round it is (`paperLighting`), for the GPU to work out at each
+ * of its pixels (inkRenderer.ts): magnetic ink and Arc-en-Ciel are opaque, lit from the front only, so they are never
+ * lighter than their paper, nor lit through from behind (Keller, 13 November: "they are not papery. They should be opaque")
+ */
+export interface FeatureShade {
+  /** The banknote's turn as the lamp lights it (`tiltMatrix`), after the box's own rotation on it (`withBoxRotation`) */
+  rot: number[]
+  /** The box's top-left corner along its own sides, about the banknote's middle, mm */
+  origin: [number, number]
+  /** Where the lamp hangs, mm from the banknote's middle before it turns, as `paperLighting` has it, and the eye's distance */
+  lamp: [number, number, number]
+  eye: number
+  /** How much of the paper's light is the lamp's (LAMP_SHARE) */
+  share: number
+  /** The light from behind coming through any bare paper it draws (Arc-en-Ciel's white edge), as through the paper round it */
+  through: number
+}
+
+/**
+ * The shading of a feature in `box` on `note` turned through `tilt` (turning over included) as the lamp lights it, seen from
+ * `eye` mm and rotated `quarter` on screen, with `through` coming through its bare paper (`paintPaperShade`)
+ */
+export function featureShade(
+  box: Pick<PlacedBox, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'rotationDeg'>,
+  note: Size,
+  tilt: Tilt2,
+  eye: number,
+  quarter: Quarter = 0,
+  through = 0,
+): FeatureShade {
+  // Rotated, its top-left corner along its own sides, about the banknote's middle, as magnetic ink's (`inkLight`)
+  const middle = intoBox(box, box.xMm + box.widthMm / 2 - note.widthMm / 2, box.yMm + box.heightMm / 2 - note.heightMm / 2)
+  const origin: [number, number] = rotationOf(box)
+    ? [middle.x - box.widthMm / 2, middle.y - box.heightMm / 2]
+    : [box.xMm - note.widthMm / 2, box.yMm - note.heightMm / 2]
+  const above = unturn(0, -Math.tan(LAMP_HEIGHT_DEG * RAD) * eye, quarter)
+  // + 0 turns a −0 into 0
+  return { rot: withBoxRotation(tiltMatrix(tilt), box), origin, lamp: [above.x + 0, above.y + 0, eye], eye, share: LAMP_SHARE, through }
+}
+
+/**
+ * The lamp's light at `p`, mm along a feature's box's own sides from its top-left corner, as `paperLighting` lights the
+ * paper there: what the GPU works out from a FeatureShade, at the eye's distance for its precision
+ */
+export function featureLight({ rot: m, origin, lamp, eye, share }: FeatureShade, [px, py]: [number, number]) {
+  const x = origin[0] + px, y = origin[1] + py
+  const d = [(lamp[0] - x * m[0] - y * m[3]) / eye, (lamp[1] - x * m[1] - y * m[4]) / eye, (lamp[2] - x * m[2] - y * m[5]) / eye]
+  const facing = Math.max(0, dot(d, [m[6], m[7], m[8]]))
+  return 1 - share + (share * facing) / Math.hypot(d[0], d[1], d[2]) ** 3 / Math.cos(LAMP_HEIGHT_DEG * RAD) ** 3
 }
 
 /** Where the light's canvas lies on a banknote at `scale` px per mm, before it moves: square round the banknote's middle */
@@ -356,11 +419,11 @@ type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
  * The lamp's shading on an export's canvas, as NoteView shows it, over all of the banknote, `ctx` at its top left in px,
  * at `scale` px per mm, for the banknote turned through `tilt` on screen (turning over included) and rotated `quarter`
  */
-export function drawPaperShade(ctx: Ctx, note: Size, scale: number, tilt: Tilt2, quarter: Quarter = 0) {
+export function drawPaperShade(ctx: Ctx, note: Size, scale: number, tilt: Tilt2, quarter: Quarter = 0, through = 0) {
   const { width, height } = shadeSize(note)
   const sheet = scratch(width, height)
   if (!sheet) return
-  paintPaperShade(sheet.canvas, note, tilt, quarter)
+  paintPaperShade(sheet.canvas, note, tilt, quarter, through)
   ctx.save()
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  LAMP_SHARE, LIGHT_REACH, PAPER_GLARE, drawPaperShade, lampMirror, lightBox, lightMove, lightStretch, paintPaperShade,
-  paperLightAt, paperLighting, shadeSize,
+  LAMP_SHARE, LIGHT_REACH, PAPER_GLARE, PAPER_THROUGH, drawPaperShade, featureLight, featureShade, lampMirror, lightBox, lightMove, lightStretch,
+  paintPaperShade, paperLightAt, paperLighting, shadeSize,
 } from '../src/lib/paper'
+import { outOfBox } from '../src/lib/placed'
 import { LAMP_HEIGHT_DEG } from '../src/lib/realisticInk'
 
 const RAD = Math.PI / 180
@@ -144,6 +145,25 @@ describe('the lamp’s shading', () => {
     expect(alpha(10, 10)).toBe(Math.round(255 * LAMP_SHARE))
   })
 
+  it('lets a little of the light from behind through, lightening it as far as it is held to the light, never past flat', () => {
+    const note = { widthMm: 150, heightMm: 75 }
+    const { width, height } = shadeSize(note)
+    let painted: ImageData | undefined
+    const g = { createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }), putImageData: (image: ImageData) => (painted = image) }
+    const canvas = { width, height, getContext: () => g } as unknown as HTMLCanvasElement
+    const alpha = (i: number, j: number) => painted!.data[(j * width + i) * 4 + 3]
+    // Only a little: turned from the lamp, held to the light, still darker than flat
+    expect(PAPER_THROUGH).toBeGreaterThan(0)
+    expect(PAPER_THROUGH).toBeLessThan(LAMP_SHARE / 2)
+    paintPaperShade(canvas, note, { x: 0, y: -80 }, 0, PAPER_THROUGH)
+    expect(alpha(10, 10)).toBe(Math.round(255 * (LAMP_SHARE - PAPER_THROUGH)))
+    paintPaperShade(canvas, note, { x: 0, y: -80 }, 0, PAPER_THROUGH / 2)
+    expect(alpha(10, 10)).toBe(Math.round(255 * (LAMP_SHARE - PAPER_THROUGH / 2)))
+    // Where it is lighter than flat, still clear
+    paintPaperShade(canvas, note, { x: 0, y: 0 }, 0, PAPER_THROUGH)
+    expect(alpha(48, 0)).toBe(0)
+  })
+
   afterEach(() => vi.unstubAllGlobals())
 
   it('is stretched over all of an export’s banknote, smoothly', () => {
@@ -155,5 +175,46 @@ describe('the lamp’s shading', () => {
     expect([sheet.width, sheet.height]).toEqual([96, 48])
     expect(drawn).toEqual([[sheet, 0, 0, 600, 300]])
     expect(ctx.imageSmoothingQuality).toBe('high')
+  })
+})
+
+describe('an opaque feature’s shading', () => {
+  const note = { widthMm: 150, heightMm: 75 }
+  // A point mm along a box's own sides from its top-left corner, mm from the banknote's middle, as the box lies on it
+  const onNote = (box: { xMm: number; yMm: number; widthMm: number; heightMm: number; rotationDeg: number }, [px, py]: [number, number]) => {
+    const step = outOfBox(box, px - box.widthMm / 2, py - box.heightMm / 2)
+    return [box.xMm + box.widthMm / 2 + step.x - note.widthMm / 2, box.yMm + box.heightMm / 2 + step.y - note.heightMm / 2] as const
+  }
+  const tilts = [{ x: 0, y: 0 }, { x: 0, y: -40 }, { x: 25, y: 15 }, { x: -60, y: -70 }, { x: 0, y: 30 }]
+  const spots: [number, number][] = [[0, 0], [20, 30], [10, 5], [-1, 31]]
+
+  it('is the paper’s own light under it, as `paperLighting` has it, at any tilt and rotated on screen', () => {
+    const box = { xMm: 100, yMm: 10, widthMm: 20, heightMm: 30, rotationDeg: 0 }
+    for (const tilt of tilts) {
+      for (const quarter of [0, 1, 2, 3] as const) {
+        const paper = paperLighting(tilt, EYE, quarter)
+        const shade = featureShade(box, note, tilt, EYE, quarter)
+        for (const spot of spots) expect(featureLight(shade, spot)).toBeCloseTo(paper(...onNote(box, spot)), 9)
+      }
+    }
+  })
+
+  it('follows its box as it is rotated on the banknote', () => {
+    for (const rotationDeg of [30, -90, 145]) {
+      const box = { xMm: 40, yMm: 20, widthMm: 30, heightMm: 10, rotationDeg }
+      for (const tilt of tilts) {
+        const paper = paperLighting(tilt, EYE, 1)
+        const shade = featureShade(box, note, tilt, EYE, 1)
+        for (const spot of spots) expect(featureLight(shade, spot)).toBeCloseTo(paper(...onNote(box, spot)), 9)
+      }
+    }
+  })
+
+  it('carries the lamp’s share and the light from behind coming through its bare paper', () => {
+    const box = { xMm: 100, yMm: 10, widthMm: 20, heightMm: 30, rotationDeg: 0 }
+    expect(featureShade(box, note, { x: 0, y: 0 }, EYE)).toMatchObject({ share: LAMP_SHARE, through: 0, eye: EYE })
+    expect(featureShade(box, note, { x: 0, y: 0 }, EYE, 0, PAPER_THROUGH).through).toBe(PAPER_THROUGH)
+    // Turned from the lamp, the room's light alone, all over it
+    expect(featureLight(featureShade(box, note, { x: 0, y: -80 }, EYE), [10, 10])).toBeCloseTo(1 - LAMP_SHARE)
   })
 })

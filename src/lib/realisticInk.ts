@@ -1,6 +1,7 @@
 import { clamp } from './frames'
 import type { Tilt2 } from './lens'
 import { INK_ROLL_DEG } from './magneticInk'
+import type { FeatureShade } from './paper'
 import { type PlacedBox, type Size, intoBox, outOfBox, rotationOf } from './placed'
 import { type Quarter, unturn } from './rotate'
 import type { MagneticInk } from './types'
@@ -17,7 +18,8 @@ import type { MagneticInk } from './types'
  * sets the flakes to face that viewer (`flakeRest`), so wherever the ink sits on the banknote its bar rests the same way:
  * flat, towards the top, where the flakes face halfway between the lamp and the eye, and in the middle, as bright, with the
  * banknote's top tipped back by half LAMP_HEIGHT_DEG. An upright bar shows only near that tip, the lamp being above it
- * rather than in its curve. Holding the banknote to the light leaves the ink as it was. The numbers are tuned by eye on
+ * rather than in its curve. Holding the banknote to the light leaves the ink as it was, as it is opaque, and with
+ * Realistic's paper it is shaded as the paper round it is, never lighter (paper.ts). The numbers are tuned by eye on
  * Keller's 15 strip, as the flat look's are, and are not settings; Keller found the first ones too flashy, reflective and
  * sparkly (9 November), so the lamp is dimmer and whitens less, and the glints are fewer and dimmer, over a finer grain,
  * the bar and its glow rolling as before. This file sets up each draw
@@ -59,6 +61,12 @@ export const GLINT_POWER = 1.6
 export const GLINT_WHITE = 0.25
 /** Flakes turned away from the viewer are seen only dimly, by their edges */
 export const AWAY_LIGHT = 0.15
+/**
+ * How gradually flakes dim as they turn edge-on to the viewer and on away: either side of edge-on, in the cosine of the
+ * angle they are seen at, about 9° (Keller, 13 November: past a certain tilt the ink's far end went dark along a ragged
+ * line, each flake of its grain going dark on its own; until then they went dark at once at edge-on)
+ */
+export const AWAY_SOFT = 0.15
 /** Chroma below which a colour counts as grey, with no hue of its own */
 const GREY_CHROMA = 0.02
 
@@ -182,6 +190,8 @@ export interface InkLight {
   flat: [number, number, number]
   tilted: [number, number]
   hue: number
+  /** With Realistic's paper, how the paper under it is shaded: as an opaque ink, it is shaded alike (`featureShade`) */
+  paper?: FeatureShade
 }
 
 type LitInk = Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'rotationDeg' | 'color' | 'tiltedColor' | 'barAxis' | 'barWidth'>
@@ -191,9 +201,10 @@ type LitInk = Pick<MagneticInk, 'xMm' | 'yMm' | 'widthMm' | 'heightMm' | 'rotati
  * canvas's perspective sees it, with the banknotes rotated `quarter` quarter turns on screen. The lamp and the room stay
  * where they are as the banknote is rotated, as they would round one turned in the hand. Ink rotated on its banknote is
  * worked out along its own sides, the banknote's turn taking them onto it first (`withBoxRotation`), so its flakes and
- * bar turn with it: its box is then where it lies along those sides, about the banknote's middle.
+ * bar turn with it: its box is then where it lies along those sides, about the banknote's middle. With `paper`, it is
+ * shaded as the paper round it is.
  */
-export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quarter: Quarter = 0): InkLight {
+export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quarter: Quarter = 0, paper?: FeatureShade): InkLight {
   const flat = oklch(ink.color)
   const tilted = oklch(ink.tiltedColor)
   // A grey has no hue of its own: it takes the other colour's, so the shift between them doesn't swing round the wheel
@@ -223,6 +234,7 @@ export function inkLight(ink: LitInk, note: Size, tilt: Tilt2, eye: number, quar
     flat,
     tilted: [tilted[0], tilted[1]],
     hue: hueTravel(flat[2], tilted[2]),
+    ...(paper ? { paper } : {}),
   }
 }
 

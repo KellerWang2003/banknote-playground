@@ -11,7 +11,9 @@ import { PlacingBox } from '../src/editor/PlacingBox'
 import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, linearRgb, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
 import { turnDeg } from '../src/lib/back'
 import { bandLook, type BandShape } from '../src/lib/bandMap'
+import { perspectiveFor } from '../src/lib/frames'
 import { createNote } from '../src/lib/notes'
+import { PAPER_THROUGH, featureShade } from '../src/lib/paper'
 import { PLACE_STEP } from '../src/lib/placed'
 import type { ArcEnCiel, Note } from '../src/lib/types'
 import { setTilt } from '../src/tilt/tilt'
@@ -121,6 +123,9 @@ describe("a NoteView's Arc-en-Ciel", () => {
     gpu.bands = true
     held.shape = embossed
     const note = withArc({ flow: 'point', edgeMm: 1 })
+    // Opaque, it is shaded as Realistic's paper round it is at the same tilt, outside Demo on a phone
+    const lit = (tilt: { x: number; y: number }, quarter: 0 | 1 = 0, through = 0) =>
+      arcLight(note.arcEnCiel, tilt, quarter, featureShade(note.arcEnCiel, note, tilt, perspectiveFor(note, 1), quarter, through))
     let renders = 0
     function Counted() {
       renders++
@@ -128,7 +133,7 @@ describe("a NoteView's Arc-en-Ciel", () => {
     }
     const { container } = render(<Counted />)
     // Its shape's maps are read for its white edge, though Point needs none
-    expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }, arcLight(note.arcEnCiel, { x: 0, y: 0 })))
+    expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 0 }, lit({ x: 0, y: 0 })))
     expect(lastPaint().look).toMatchObject({ emboss: embossed.emboss, outset: 1 })
     // Its canvas reaches 1 mm past its box all round for the white edge, as many pixels as that shows with, and takes no
     // press of its own: its box does
@@ -138,13 +143,17 @@ describe("a NoteView's Arc-en-Ciel", () => {
     expect(canvas.classList.contains('pointer-events-none')).toBe(true)
     const before = renders
     act(() => setTilt({ angle: 10 }))
-    expect(lastPaint().look).toMatchObject({ slide: 0, lit: arcLight(note.arcEnCiel, { x: 0, y: 10 }) })
+    expect(lastPaint().look).toMatchObject({ slide: 0, lit: lit({ x: 0, y: 10 }) })
     // The lamp stays put as the banknote is rotated on screen, and turning it over turns the ridges from it too
     act(() => setTilt({ quarterTurns: 1 }))
-    expect(lastPaint().look).toMatchObject({ lit: arcLight(note.arcEnCiel, { x: 0, y: 10 }, 1) })
+    expect(lastPaint().look).toMatchObject({ lit: lit({ x: 0, y: 10 }, 1) })
     act(() => setTilt({ turn: 0.2 }))
-    expect(lastPaint().look).toMatchObject({ lit: arcLight(note.arcEnCiel, { x: turnDeg(0.2), y: 10 }, 1) })
+    expect(lastPaint().look).toMatchObject({ lit: lit({ x: turnDeg(0.2), y: 10 }, 1) })
     expect(renders).toBe(before)
+    // Held to the light, its white edge, bare paper, lets a little of it through as the paper round it does; the print none
+    act(() => setTilt({ turn: 0, light: 0.5 }))
+    expect((lastPaint().look as { lit: { paper: { through: number } } }).lit.paper.through).toBeCloseTo(PAPER_THROUGH * 0.5)
+    expect(lastPaint().look).toEqual(bandLook(note.arcEnCiel, embossed, { x: 0, y: 10 }, lit({ x: 0, y: 10 }, 1, PAPER_THROUGH * 0.5)))
   })
 
   it('with its white edge on, reaches past its box as far as the edge is wide, Realistic or not', () => {

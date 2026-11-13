@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NoteView } from '../src/components/NoteView'
 import { turnDeg } from '../src/lib/back'
 import { createNote } from '../src/lib/notes'
 import { newWatermark } from '../src/lib/watermark'
-import { lightBox, lightMove } from '../src/lib/paper'
+import { roomThrough } from '../src/lib/light'
+import { PAPER_THROUGH, lightBox, lightMove } from '../src/lib/paper'
 import { setTilt } from '../src/tilt/tilt'
+
+// jsdom has no 2D canvas: the shading notes how much light from behind it was to let through, on which canvas
+const shades = vi.hoisted(() => [] as { canvas: HTMLCanvasElement; through: number | undefined }[])
+vi.mock('../src/lib/paper', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/paper')>()),
+  paintPaperShade: (canvas: HTMLCanvasElement, _note: unknown, _tilt: unknown, _quarter: unknown, through?: number) => { shades.push({ canvas, through }) },
+}))
 
 afterEach(() => {
   cleanup()
@@ -79,6 +87,25 @@ describe('Realistic’s paper on a NoteView', () => {
     // Off the phone's tilt, lit as it is tilted
     act(() => setTilt({ source: 'drag', room: undefined, nudged: 0, nudgedX: 0, angle: 7 }))
     expect(lightOf(container)!.style.transform).toBe(lightMove(note, 2, { x: 0, y: 7 }, 0).transform)
+  })
+
+  it('lets a little light from behind through the paper, held to the light or in Demo on a phone the room’s, and none through the thread', () => {
+    const { container } = render(<NoteView note={note} scale={2} live perspective realistic />)
+    const shade = container.querySelector<HTMLCanvasElement>('[data-paper-shade]')!
+    const inThread = container.querySelector<HTMLCanvasElement>('[data-thread-shade]')!
+    const through = (canvas: HTMLCanvasElement) => shades.findLast((painted) => painted.canvas === canvas)!.through ?? 0
+    expect(through(shade)).toBe(0)
+    act(() => setTilt({ light: 0.5 }))
+    expect(through(shade)).toBeCloseTo(PAPER_THROUGH * 0.5)
+    expect(through(inThread)).toBe(0)
+    act(() => setTilt({ light: 1 }))
+    expect(through(shade)).toBeCloseTo(PAPER_THROUGH)
+    // In Demo on a phone, by the room's light behind it as the phone lies: tipped 115° up from lying flat, past upright
+    const up = [0, -Math.sin((115 * Math.PI) / 180), Math.cos((115 * Math.PI) / 180)] as const
+    act(() => setTilt({ source: 'device', light: 0, room: { x: 0, y: -70, up } }))
+    expect(roomThrough(up)).toBeGreaterThan(0.5)
+    expect(through(shade)).toBeCloseTo(PAPER_THROUGH * roomThrough(up))
+    expect(through(inThread)).toBe(0)
   })
 
   it('lights a still note as at its own tilt', () => {

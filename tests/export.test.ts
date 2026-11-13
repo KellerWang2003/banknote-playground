@@ -13,6 +13,7 @@ import { arcLight, bandSlide, newArcEnCiel } from '../src/lib/arcEnCiel'
 import type { BandLook } from '../src/lib/bandMap'
 import { FLIP_SECONDS, PAPER, turnDeg } from '../src/lib/back'
 import { createNote } from '../src/lib/notes'
+import { PAPER_THROUGH, featureShade } from '../src/lib/paper'
 import { SWEEP_SECONDS } from '../src/lib/playback'
 import { copyStarts, imageBox } from '../src/lib/artwork'
 import type { Note, PlaybackMove } from '../src/lib/types'
@@ -252,7 +253,9 @@ describe('magnetic ink in an export', () => {
     const assets = { frames: new Map(), ink: { canvas: 'mask' } as unknown as InkMask }
     drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, realistic: true, turn: 0.3, quarter: 3, grain: 2 })
     drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, turn: 0.3, quarter: 3 })
-    const lit = (x: number) => inkLight(note.magneticInk, note, { x, y: 10 }, perspectiveFor(note, 1), 3)
+    // Opaque, it is shaded as Realistic's paper round it is, at the same tilt
+    const eye = perspectiveFor(note, 1)
+    const lit = (x: number) => inkLight(note.magneticInk, note, { x, y: 10 }, eye, 3, featureShade(note.magneticInk, note, { x, y: 10 }, eye, 3))
     expect(gpu.drawn.map((args) => [args[3], args[5]])).toEqual([[lit(turnDeg(0.3)), 2], [lit(0), 1]])
     // With Realistic off it is drawn flat, on a scratch canvas of its own
     vi.stubGlobal('OffscreenCanvas', class {
@@ -274,7 +277,8 @@ describe('magnetic ink in an export', () => {
     })
     drawExportFrame(ctx, layout, new Map([[note.id, { front: assets }]]), faces, 12, { x: 0, y: 4 }, { sheen: false, perspective: true, realistic: true, quarter: 1 }, 0, 0.1)
     vi.unstubAllGlobals()
-    expect(gpu.drawn.map((args) => args[3])).toEqual([inkLight(note.magneticInk, note, { x: turnDeg(0.1), y: 4 }, perspectiveFor(note, 1), 1)])
+    const view = { x: turnDeg(0.1), y: 4 }
+    expect(gpu.drawn.map((args) => args[3])).toEqual([inkLight(note.magneticInk, note, view, eye, 1, featureShade(note.magneticInk, note, view, eye, 1))])
     expect(gpu.drawn[0][5]).toBe(Math.max(1, Math.round(layout.height / 1080)))
   })
 })
@@ -299,9 +303,14 @@ describe('Arc-en-Ciel in an export', () => {
     const looks = gpu.bands.map((args) => args[3] as BandLook)
     expect(looks[0]).toMatchObject({ slide: bandSlide(arc, { x: 0, y: 10 }) })
     expect(looks[0]).not.toHaveProperty('lit')
-    expect(looks[1]).toMatchObject({ slide: 0, lit: arcLight(arc, { x: turnDeg(0.3), y: 10 }, 3) })
+    // Opaque, shaded as Realistic's paper round it is at the same tilt, its white edge, bare paper, letting through what
+    // light from behind the paper does
+    const lit = (view: { x: number; y: number }, through = 0) => arcLight(arc, view, 3, featureShade(arc, note, view, perspectiveFor(note, 1), 3, through))
+    expect(looks[1]).toEqual({ ...looks[1], slide: 0, lit: lit({ x: turnDeg(0.3), y: 10 }) })
     // Without perspective, turning over leaves it lit as it was, as realistic ink is
-    expect(looks[2]).toMatchObject({ lit: arcLight(arc, { x: 0, y: 10 }, 3) })
+    expect(looks[2]).toEqual({ ...looks[2], lit: lit({ x: 0, y: 10 }) })
+    drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, quarter: 3, backlight: 0.5 })
+    expect(gpu.bands.at(-1)![3]).toEqual({ ...looks[2], lit: lit({ x: 0, y: 10 }, PAPER_THROUGH * 0.5) })
   })
 
   it('reads the maps for its white edge, or when its bands start from the shape, and otherwise not', async () => {
@@ -342,10 +351,9 @@ describe('Realistic’s lamp in an export', () => {
       // On the banknote's own canvas (a proxy, so compared by itself), over all of it: once over the paper, again in the
       // thread's windows
       expect(paperShade.calls).toHaveLength(2)
-      for (const call of paperShade.calls) {
-        expect(call[0]).toBe(ctx)
-        expect(call.slice(1)).toEqual([note, 2, { x: turnDeg(0.3), y: 10 }, 3])
-      }
+      for (const call of paperShade.calls) expect(call[0]).toBe(ctx)
+      // None of the light from behind comes through it here, nor ever through the thread, which is opaque
+      expect(paperShade.calls.map((call) => call.slice(1))).toEqual([[note, 2, { x: turnDeg(0.3), y: 10 }, 3, 0], [note, 2, { x: turnDeg(0.3), y: 10 }, 3]])
       const keys = calls.map(([key]) => key)
       const watermark = calls.findIndex(([key, image]) => key === 'drawImage' && image === light)
       expect(keys.indexOf('paperShade')).toBeLessThan(watermark)
@@ -359,15 +367,46 @@ describe('Realistic’s lamp in an export', () => {
       // The back too, and without perspective turning over leaves the lamp's light as it was, as it does the ink's
       drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, back: true, turn: 0.3, quarter: 3 })
       expect(paperShade.calls).toHaveLength(3)
-      expect(paperShade.calls[2].slice(1)).toEqual([note, 2, { x: 0, y: 10 }, 3])
+      expect(paperShade.calls[2].slice(1)).toEqual([note, 2, { x: 0, y: 10 }, 3, 0])
       // With Realistic off, the light and shade of turning over everything, as before
       calls.length = 0
       drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: true, turn: 0.3, quarter: 3 })
       expect(paperShade.calls).toHaveLength(3)
       expect(calls.filter(([key]) => key === 'createLinearGradient')).toHaveLength(1)
+      // Held to the light, a little of it comes through the paper, as far as it is held to it, and none through the thread
+      paperShade.calls = []
+      drawFace(ctx, note, assets, 2, { x: 0, y: 10 }, { sheen: false, perspective: false, realistic: true, quarter: 3, backlight: 0.5 })
+      expect(paperShade.calls.map((call) => call.slice(4))).toEqual([[3, PAPER_THROUGH * 0.5], [3]])
     } finally {
       paperShade.order = undefined
     }
+  })
+
+  it('lets a little of the light from behind through the paper of a frame held to the light, or of a backlit one', () => {
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}),
+      set: (target, key, value) => {
+        target[key as string] = value
+        return true
+      },
+    }) as unknown as CanvasRenderingContext2D
+    const note = { ...makeNote(150, 70), noThread: true }
+    const layout = exportLayout([note], 12, [0], true, 1)
+    const faces = new Map([[note.id, { width: 1800, height: 840, getContext: () => ctx } as unknown as OffscreenCanvas]])
+    const assets = new Map([[note.id, { front: { frames: new Map() } }]])
+    vi.stubGlobal('OffscreenCanvas', class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return ctx }
+    })
+    paperShade.calls = []
+    try {
+      drawExportFrame(ctx, layout, assets, faces, 12, { x: 0, y: 4 }, { sheen: false, realistic: true }, 0.3)
+      drawExportFrame(ctx, layout, assets, faces, 12, { x: 0, y: 4 }, { sheen: false, realistic: true, backlit: true })
+      drawExportFrame(ctx, layout, assets, faces, 12, { x: 0, y: 4 }, { sheen: false, realistic: true })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(paperShade.calls.map((call) => call[5])).toEqual([PAPER_THROUGH * 0.3, PAPER_THROUGH, 0])
   })
 })
 

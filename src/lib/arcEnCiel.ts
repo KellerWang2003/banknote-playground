@@ -2,6 +2,7 @@ import { PAPER } from './back'
 import { clamp } from './frames'
 import { keptName } from './layerName'
 import type { Tilt2 } from './lens'
+import type { FeatureShade } from './paper'
 import { type Size, fitBox, newBox, rotationOf, withBoxAspect } from './placed'
 import { LAMP_HEIGHT_DEG, tiltMatrix, withBoxRotation } from './realisticInk'
 import { type Quarter, unturn } from './rotate'
@@ -282,6 +283,11 @@ export interface ArcLight {
   half: Vec3
   /** Each slope's average light, `shade` × (1 − `sheen`), and its average sheen: the other slope's, then the one facing `across` */
   means: [number, number, number, number]
+  /**
+   * With Realistic's paper, how the paper under it is shaded: as an opaque print, it is shaded alike, and its white edge,
+   * bare paper, lets light from behind through as the paper round it does (`featureShade`)
+   */
+  paper?: FeatureShade
 }
 
 /** Which way a spot `p` of the way across a ridge faces, and the light it catches from the lamp, before it is measured against paper */
@@ -318,9 +324,10 @@ const MEAN_SAMPLES = 64
  * How to draw Arc-en-Ciel's ridges with its banknote turned through `tilt` (turning over included) and rotated `quarter`
  * quarter turns on screen: how much of each ridge each slope shows, seen from straight in front, and where the lamp is, as
  * they lie on the banknote, or on Arc-en-Ciel's own box once that is rotated on the banknote (its ridges turn with it).
- * The lamp stays where it is as the banknote is rotated, as magnetic ink's does (`inkLight`).
+ * The lamp stays where it is as the banknote is rotated, as magnetic ink's does (`inkLight`). With `paper`, shaded as the
+ * paper round it is.
  */
-export function arcLight(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt: Tilt2, quarter: Quarter = 0): ArcLight {
+export function arcLight(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt: Tilt2, quarter: Quarter = 0, paper?: FeatureShade): ArcLight {
   // The banknote's turn, after the box's own rotation on it
   const m = withBoxRotation(tiltMatrix(tilt), arc)
   // From the room onto the banknote, then the box: rotated back first, then turned back
@@ -347,7 +354,7 @@ export function arcLight(arc: Pick<ArcEnCiel, 'angleDeg' | 'rotationDeg'>, tilt:
     return [shade / MEAN_SAMPLES, sheen / MEAN_SAMPLES]
   }
   // + 0 turns a −0 into 0
-  return { ...light, share: share + 0, means: [...mean(0), ...mean(0.5)] as ArcLight['means'] }
+  return { ...light, share: share + 0, means: [...mean(0), ...mean(0.5)] as ArcLight['means'], ...(paper ? { paper } : {}) }
 }
 
 /** A point in mm from the top-left corner of the layer's box */
