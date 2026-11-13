@@ -1,4 +1,4 @@
-import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Orbit, Plus, Rotate3d, Ruler, Smartphone, Sparkles, X } from 'lucide-react'
+import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, Smartphone, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -498,10 +498,11 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
 }
 
 /**
- * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first Recentre while it tilts,
+ * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first Recentre while it tilts
+ * (since 13 November it makes how the phone is held then the neutral, moving the dial: "just one value"),
  * or in words once motion was refused (a page can't ask again until Safari is quit and reopened), and no switch for its
- * tilt, always on (Keller, 12 November); with it how the tilt is taken (Keller, 13 November): head-aware, and the neutral,
- * how far from lying flat the phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees");
+ * tilt, always on (Keller, 12 November); with it the neutral's dial (Keller, 13 November), how far from lying flat the
+ * phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees");
  * then the lamp, held to the light until switched off again, and Realistic, the
  * tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp off ("the default should just
  * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with Real size picked, its check
@@ -516,7 +517,6 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
 }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
-  const headAware = useViewing((s) => s.headAware)
   return (
     <DropdownMenu>
       <Tooltip>
@@ -534,10 +534,6 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
                   <LocateFixed />
                   Recentre
                 </DropdownMenuItem>
-                <DropdownMenuCheckboxItem checked={headAware} onCheckedChange={(on) => setViewing({ headAware: on })}>
-                  <Orbit />
-                  Head-aware tilt
-                </DropdownMenuCheckboxItem>
                 <NeutralDial />
               </>
             ) : (
@@ -572,18 +568,23 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
   )
 }
 
+/** The keys a slider takes for itself */
+const DIAL_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'])
+
 /**
  * The neutral's dial: how far from lying flat, 0° to 90°, the phone is looked at square on as Demo opens, upright unless
- * moved. Moving it puts the eye there at once, so the banknote shows what it does
+ * moved, by it or by Recentre, which sets it to how the phone is held then. Moving it puts the eye there at once, so the
+ * banknote shows what it does
  */
 function NeutralDial() {
   const neutralDeg = useViewing((s) => s.neutralDeg)
   return (
-    // Its arrows move the dial, not the menu's highlight
-    <div data-neutral-dial="" className="flex items-center gap-1.5 py-1 pr-2 pl-1.5 text-sm" onKeyDown={(e) => e.stopPropagation()}>
+    // Its keys move the dial, not the menu's highlight; Esc and Tab still reach the menu, the dial having the focus as ⋯ opens
+    <div data-neutral-dial="" className="flex items-center gap-1.5 py-1 pr-2 pl-1.5 text-sm"
+      onKeyDown={(e) => { if (DIAL_KEYS.has(e.key)) e.stopPropagation() }}>
       <Smartphone className="size-4 shrink-0" />
       <span className="mr-1.5">Neutral</span>
-      <Slider className="w-24 pointer-coarse:w-28" value={[neutralDeg]} min={0} max={90} step={5} thumbLabel={() => 'Neutral'}
+      <Slider className="w-24 pointer-coarse:w-28" value={[neutralDeg]} min={0} max={90} step={1} largeStep={10} thumbLabel={() => 'Neutral'}
         onValueChange={(value) => setViewing({ neutralDeg: Array.isArray(value) ? value[0] : value })} />
       <span className="w-8 shrink-0 text-right text-muted-foreground tabular-nums">{neutralDeg}°</span>
     </div>

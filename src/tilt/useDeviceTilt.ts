@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { TILT_LIMIT, clamp } from '../lib/frames'
-import { nearestTurn, oneEuro, orientationMatrix, roomTilt, screenAngleNow, tiltFromEye, uprightQuarter } from '../lib/deviceTilt'
+import { nearestTurn, oneEuro, orientationMatrix, roomTilt, screenAngleNow, tiltFromEye, uprightQuarter, type Matrix, type Vector } from '../lib/deviceTilt'
 import { type Quarter, quarterOf } from '../lib/rotate'
-import { EYE_M, SQUARE_ON, eyeTracker, neutralEye } from '../lib/viewer'
+import { EYE_M, heldDeg, neutralEye, toEarth, toPhone } from '../lib/viewer'
 import { setTilt, useTilt } from './tilt'
-import { useViewing } from './viewing'
+import { setViewing, useViewing } from './viewing'
 
 /**
  * Where the phone's motion stands: still finding out, waiting on a tap to ask for it (iPhone), on, refused, or not there
@@ -58,10 +58,11 @@ export function askForMotion(): Promise<Asked> {
  * axes (`turns`, its quarter turns on the view, and the view's own for a phone with rotation locked). The eye starts at
  * the neutral, the phone held upright square on unless its dial in ⋯ says otherwise (Keller, 13 November: "the default
  * position is set to be wherever the site loads ... Let's keep it fixed"), as motion starts and on coming back to the
- * page, and then stays put in the room as the phone turns, or, head-aware (⋯, on by default), goes round with the phone
- * as it goes round the head, so only a turn in the hand tilts it, as the accelerometer tells. Also says which way up the
+ * page, and then stays put in the room as the phone turns, as the gyroscope says (Keller, 13 November: finding where the
+ * eye really is "should just be the camera, and gyro should be how it behaves right now"). Also says which way up the
  * phone is held (`upright`), for such a phone's view to turn to, read as motion starts and then once it has been held
- * another way up a moment. Recentre makes how it is held now square on, gliding there. The light is the room's, never
+ * another way up a moment. Recentre makes how far from lying flat it is held now the neutral (on a stand, say), its dial
+ * moving there, so held so it is square on, gliding there. The light is the room's, never
  * recentred (Keller, 12 November: "recenter only recenters the like the security features, not how light works"): with
  * every reading goes how the phone lies in the room (`roomTilt`, steadied the same way), the store's `room`, which the
  * lamp and the watermark follow. Always on (Keller, 12 November: "I don't think we even need a tilt toggle ... both should
@@ -71,21 +72,23 @@ export function askForMotion(): Promise<Asked> {
 export function useDeviceTilt(turns: number) {
   const [motion, setMotion] = useState<Motion>(() => (typeof DeviceOrientationEvent === 'undefined' ? 'none' : 'waiting'))
   const [upright, setUpright] = useState<Quarter>(0)
-  const headAware = useViewing((s) => s.headAware)
   const neutralDeg = useViewing((s) => s.neutralDeg)
-  const latest = useRef({ turns, upright, headAware, neutralDeg })
-  useEffect(() => { latest.current = { turns, upright, headAware, neutralDeg } })
+  const latest = useRef({ turns, upright, neutralDeg })
+  useEffect(() => { latest.current = { turns, upright, neutralDeg } })
   const reading = useRef<{
+    /** The viewer's eye, in the earth's axes, EYE_M from the screen: it stays put in the room as the phone turns */
+    eye?: Vector
+    /** How the phone was turned at the last reading, for Recentre */
+    now?: Matrix
+    /** The neutral the eye was last put at, degrees */
+    neutral?: number
     /** The tilt last set, for Recentre to glide from */
     shown: { x: number; y: number }
     /** How the phone lay in the room at the last reading, steadied (`roomTilt`), which Recentre leaves be */
     room?: { x: number; y: number; up: readonly [number, number, number] }
     glide?: { from: { x: number; y: number }; at: number }
-    /**
-     * Where the eye goes at the next reading: to the neutral (motion has just come back, or the neutral moved) or square
-     * on (Recentre), the tilt gliding there or not
-     */
-    again?: { to: 'neutral' | 'square'; glide: boolean }
+    /** The eye to the neutral at the next reading (it has just come back, or the neutral moved), the tilt gliding there or not */
+    again?: { glide: boolean }
     /** Another way up the phone has been held, since when */
     turning?: { to: Quarter; since: number }
     /** A reading has come */
@@ -93,8 +96,6 @@ export function useDeviceTilt(turns: number) {
     /** iPhone allowed motion */
     allowed: boolean
   }>({ shown: { x: 0, y: 0 }, heard: false, allowed: false })
-  /** The viewer's eye, followed (viewer.ts) */
-  const [eyes] = useState(eyeTracker)
   const filters = useRef({
     x: oneEuro(), y: oneEuro(), roomX: oneEuro(), roomY: oneEuro(),
     up: [oneEuro(UP_CUTOFF, UP_BETA), oneEuro(UP_CUTOFF, UP_BETA), oneEuro(UP_CUTOFF, UP_BETA)],
@@ -144,18 +145,19 @@ export function useDeviceTilt(turns: number) {
           setUpright(way)
         }
       } else r.turning = undefined
-      // The eye: at the neutral as motion starts or comes back, or as the neutral moves; square on with Recentre, gliding
-      // there; and otherwise on from where it was as the phone turns, head-aware or the gyroscope's alone
-      const { headAware, neutralDeg } = latest.current
-      const tracker = eyes
-      if (!tracker.eye || r.again) {
-        if (tracker.eye && r.again?.glide) r.glide = { from: r.shown, at }
-        tracker.set(r.again?.to === 'square' ? SQUARE_ON : neutralEye(now, screenAngle, latest.current.upright, neutralDeg), now, at)
+      // The eye: at the neutral as motion starts or comes back, or as the neutral moves (with Recentre, gliding there); and
+      // otherwise where it was in the room as the phone turns
+      const { neutralDeg } = latest.current
+      if (!r.eye || r.again) {
+        if (r.eye && r.again?.glide) r.glide = { from: r.shown, at }
+        r.eye = toEarth(now, neutralEye(now, screenAngle, latest.current.upright, neutralDeg))
+        r.neutral = neutralDeg
         r.again = undefined
         filters.current.x.reset()
         filters.current.y.reset()
-      } else tracker.orient(now, at, headAware)
-      const eye = tracker.eye ?? SQUARE_ON
+      }
+      r.now = now
+      const eye = toPhone(now, r.eye)
       const raw = tiltFromEye([eye[0] / EYE_M, eye[1] / EYE_M, eye[2] / EYE_M], screenAngle, quarterOf(latest.current.turns + latest.current.upright), TILT_LIMIT)
       let x = filters.current.x.next(raw.x, at)
       let y = filters.current.y.next(raw.y, at)
@@ -184,22 +186,15 @@ export function useDeviceTilt(turns: number) {
         setTilt({ source: 'device', target: y, targetX: x, room })
       }
     }
-    // The accelerometer, which says what the phone turns round
-    const onMotion = (event: DeviceMotionEvent) => {
-      eyes.motion(event.acceleration, event.accelerationIncludingGravity, performance.now())
-    }
     // Back on the page: the eye at the neutral again, gliding there
     const onVisible = () => {
-      if (document.visibilityState === 'visible') r.again = { to: 'neutral', glide: true }
+      if (document.visibilityState === 'visible') r.again = { glide: true }
     }
     window.addEventListener('deviceorientation', onOrientation)
-    window.addEventListener('devicemotion', onMotion)
     document.addEventListener('visibilitychange', onVisible)
     relisten.current = () => {
       window.removeEventListener('deviceorientation', onOrientation)
-      window.removeEventListener('devicemotion', onMotion)
       window.addEventListener('deviceorientation', onOrientation)
-      window.addEventListener('devicemotion', onMotion)
     }
     // No reading meanwhile: none comes (a laptop, or a browser that gives none), or on iPhone, still unasked, it waits on a
     // tap (unless Safari has said already, below)
@@ -210,9 +205,10 @@ export function useDeviceTilt(turns: number) {
       clearTimeout(wait.current)
       relisten.current = () => {}
       window.removeEventListener('deviceorientation', onOrientation)
-      window.removeEventListener('devicemotion', onMotion)
       document.removeEventListener('visibilitychange', onVisible)
-      eyes.reset()
+      r.eye = undefined
+      r.now = undefined
+      r.neutral = undefined
       r.again = undefined
       r.glide = undefined
       r.shown = { x: 0, y: 0 }
@@ -224,7 +220,7 @@ export function useDeviceTilt(turns: number) {
         setTilt({ source: 'drag', target: 0, targetX: 0, nudge: 0, nudgeX: 0, nudged: 0, nudgedX: 0, room: undefined })
       }
     }
-  }, [eyes])
+  }, [])
 
   // iPhone gives motion only once asked. Asked already (the tap on a project that opened Demo, or earlier while Safari has
   // been open), Safari says what it was answered without asking again; never asked, a tap asks (`allow`)
@@ -244,12 +240,22 @@ export function useDeviceTilt(turns: number) {
 
   // The neutral moved (its dial in ⋯): the eye goes there at once
   useEffect(() => {
-    if (eyes.eye) reading.current.again = { to: 'neutral', glide: false }
-  }, [eyes, neutralDeg])
+    const r = reading.current
+    if (r.eye && r.neutral !== neutralDeg) r.again = { glide: r.again?.glide ?? false }
+  }, [neutralDeg])
 
-  /** Makes how the phone is held now square on, gliding there */
+  /**
+   * Makes how far from lying flat the phone is held now the neutral, its dial in ⋯ moving there (Keller, 13 November: the
+   * neutral is "just one value that we change in multiple ways ... if I put it on a stand ... I can just hit that"): held
+   * so it is square on, gliding there
+   */
   const recentre = () => {
-    if (eyes.eye) reading.current.again = { to: 'square', glide: true }
+    const r = reading.current
+    if (!r.eye || !r.now) return
+    const deg = heldDeg(r.now)
+    latest.current.neutralDeg = deg
+    r.again = { glide: true }
+    setViewing({ neutralDeg: deg })
   }
 
   return { motion, upright: motion === 'on' ? upright : (0 as Quarter), allow, recentre }

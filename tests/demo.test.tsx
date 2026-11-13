@@ -68,7 +68,7 @@ beforeEach(() => {
   }
   localStorage.clear()
   useRealSize.setState({ checked: {} })
-  useViewing.setState({ headAware: true, neutralDeg: 90 })
+  useViewing.setState({ neutralDeg: 90 })
   location.hash = ''
   cloud.rows = []
   cloud.fail = undefined
@@ -366,9 +366,9 @@ const motionOn = () => waitFor(() => expect(useTilt.getState().source).toBe('dev
 const orient = (alpha: number, beta: number, gamma: number) =>
   act(() => { window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha, beta, gamma })) })
 
-function renderDemo(project = sample(), noteId = project.notes[0].id) {
+function renderDemo(project = sample(), noteId = project.notes[0].id, onClose?: () => void) {
   const onPick = vi.fn()
-  render(<TooltipProvider><DemoView project={project} noteId={noteId} onPick={onPick} /></TooltipProvider>)
+  render(<TooltipProvider><DemoView project={project} noteId={noteId} onPick={onPick} onClose={onClose} /></TooltipProvider>)
   return { project, onPick }
 }
 
@@ -396,7 +396,7 @@ describe('Demo on a phone', () => {
     expect(banknote.querySelectorAll('[data-tilt^="shade"]')).toHaveLength(0)
 
     // No switch for it in ⋯, as it is always on (Keller, 12 November), and Recentre there makes how it is held now square
-    // on, gliding there
+    // on, gliding there: upright, the neutral stays upright
     const menu = await openMenu()
     expect(within(menu).queryByRole('menuitemcheckbox', { name: 'Tilt' })).toBeNull()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Recentre' }))
@@ -413,74 +413,63 @@ describe('Demo on a phone', () => {
   it('opens square on held upright, not wherever it happened to be held, and its neutral dial in ⋯ moves that', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
-    renderDemo()
+    const onClose = vi.fn()
+    renderDemo(undefined, undefined, onClose)
     // Held tipped back 60° as it opens: 30° short of upright, its top 30° away (Keller, 13 November: "the default position
     // is set to be wherever the site loads ... Let's keep it fixed")
     orient(0, 60, 0)
     await motionOn()
     expect(useTilt.getState().target).toBeCloseTo(30, 9)
-    // Head-aware is on, and the dial at 90°; set to 60°, held there is square on, at once
+    // The dial at 90°; set to 60°, held there is square on, at once
     const menu = await openMenu()
-    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Head-aware tilt' }).getAttribute('aria-checked')).toBe('true')
     // Found by its label: its thumb stays hidden until it is laid out, which jsdom never does
     const dial = within(menu).getByLabelText('Neutral')
     expect(dial.getAttribute('aria-valuenow')).toBe('90')
-    for (let i = 0; i < 6; i++) fireEvent.keyDown(dial, { key: 'ArrowLeft' })
+    // A degree a step, ten at a time with Page Down
+    fireEvent.keyDown(dial, { key: 'ArrowLeft' })
+    expect(useViewing.getState().neutralDeg).toBe(89)
+    fireEvent.keyDown(dial, { key: 'ArrowRight' })
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(dial, { key: 'PageDown' })
     expect(useViewing.getState().neutralDeg).toBe(60)
     expect(within(menu).getByText('60°')).toBeDefined()
     now += 100
     orient(0, 60, 0)
     expect(useTilt.getState().target).toBeCloseTo(0, 6)
     // Remembered in this browser
-    expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ headAware: true, neutralDeg: 60 })
+    expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ neutralDeg: 60 })
+    // Its keys are its own, but Esc on it still closes ⋯, and only that
+    fireEvent.keyDown(dial, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
   })
 
-  /**
-   * The phone moved down from upright over 0.6 s, its top tipping 40° back as it goes, then held still: round a point
-   * `lever` m in front of its screen (0.35, the eye, as it goes round the head; 0, turned in the hand), with the
-   * accelerometer's readings such a turn makes, α × r + ω × (ω × r), and gravity's
-   */
-  async function tipBack(lever: number, first = true) {
-    let now = 1000
+  it('makes how far from lying flat it is held the neutral with Recentre, on a stand say, the dial moving there', async () => {
+    let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
-    const RAD = Math.PI / 180
-    const seconds = 0.6
-    if (first) {
-      orient(0, 90, 0)
-      await motionOn()
+    renderDemo()
+    // Opened upright, then stood on a stand tipped back 70°: 20° off square on, its top further away
+    orient(0, 90, 0)
+    await motionOn()
+    for (let i = 0; i < 20; i++) {
+      now += 100
+      orient(0, 70, 0)
     }
-    for (let i = 1; i <= 120; i++) {
-      now = 1000 + (i * 1000) / 60
-      const t = i / 60
-      const k = Math.min(t / seconds, 1)
-      const beta = 90 - 40 * k * k * (3 - 2 * k)
-      const w = t < seconds ? ((-40 * 6 * k * (1 - k)) / seconds) * RAD : 0
-      const dw = t < seconds ? ((-40 * 6 * (1 - 2 * k)) / (seconds * seconds)) * RAD : 0
-      const a = { x: 0, y: dw * lever, z: w * w * lever }
-      const up = [0, Math.sin(beta * RAD), Math.cos(beta * RAD)]
-      const g = 9.80665
-      act(() => {
-        window.dispatchEvent(new DeviceMotionEvent('devicemotion', {
-          acceleration: a, accelerationIncludingGravity: { x: a.x + g * up[0], y: a.y + g * up[1], z: a.z + g * up[2] },
-        }))
-        window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta, gamma: 0 }))
-      })
+    expect(useTilt.getState().target).toBeCloseTo(20, 1)
+    // Recentre (Keller, 13 November: "if I put it on a stand, right, I can just hit that, and the stand wherever it is ...
+    // is the flat"): 70° is the neutral, one value with the dial's, and the banknote glides back square on
+    fireEvent.click(within(await openMenu()).getByRole('menuitem', { name: 'Recentre' }))
+    expect(useViewing.getState().neutralDeg).toBe(70)
+    now += 100
+    orient(0, 70, 0)
+    expect(useTilt.getState().target).toBeGreaterThan(10)
+    for (let i = 0; i < 5; i++) {
+      now += 100
+      orient(0, 70, 0)
     }
-    return useTilt.getState().target
-  }
-
-  it('keeps the banknote square on as the phone goes round the head, head-aware, Arc-en-Ciel hidden as on a real one', async () => {
-    renderDemo()
-    expect(Math.abs(await tipBack(0.35))).toBeLessThan(4)
-  })
-
-  it('tilts the banknote as the phone turns in the hand, head-aware or not, and as it goes round the head without', async () => {
-    renderDemo()
-    expect(await tipBack(0)).toBeCloseTo(40, 0)
-    cleanup()
-    act(() => useViewing.setState({ headAware: false }))
-    renderDemo()
-    expect(await tipBack(0.35)).toBeCloseTo(40, 0)
+    expect(useTilt.getState().target).toBeCloseTo(0, 1)
+    if (!screen.queryByRole('menu')) await openMenu()
+    expect(within(screen.getByRole('menu')).getByLabelText('Neutral').getAttribute('aria-valuenow')).toBe('70')
+    expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ neutralDeg: 70 })
   })
 
   it('lights the banknote as the phone lies in the room, which Recentre leaves: flat on a table, held, camera up', async () => {

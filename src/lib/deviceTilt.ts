@@ -5,11 +5,11 @@
  *
  * The browser gives the phone's orientation (`deviceorientation`: alpha, beta, gamma) as a turn from the earth's axes.
  * The viewer's eye is a direction seen from the phone, followed as it turns (src/lib/viewer.ts: from the phone held
- * upright, square on, it stays put in the room, or goes round with the phone as it goes round the head); an eye that
- * stays put, straight out of the screen as the phone was held at rest, is where `eyeFrom` says. That direction, turned to
- * the screen's own axes as the page shows them (landscape too) and to the banknote's own (rotated on screen, or the view
- * turned for a phone with rotation locked), gives the tilt the canvas would show the same view at (`tiltFromEye`): ↕ and
- * ↔ as NoteView turns a banknote, rotateX(↕) then rotateY(↔).
+ * upright, square on, it stays put in the room as the gyroscope says); an eye that stays put, straight out of the
+ * screen as the phone was held at rest, is where `eyeFrom` says. That direction, turned to the screen's own axes as the
+ * page shows them (landscape too) and to the banknote's own (rotated on screen, or the view turned for a phone with
+ * rotation locked), gives the tilt the canvas would show the same view at (`tiltFromEye`): ↕ and ↔ as NoteView turns a
+ * banknote, rotateX(↕) then rotateY(↔).
  */
 import { TILT_LIMIT, clamp } from './frames'
 import { HELD_DEG, roomUp } from './light'
