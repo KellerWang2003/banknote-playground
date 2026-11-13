@@ -32,7 +32,7 @@ let sighted: ((seen: Vector, at: number, share: number) => void) | undefined
  * The viewer's eye seen from outside Demo, in the phone's own axes as it was turned at `at` (ms, as performance.now()):
  * Demo's eye moves `share` of the way there in the room (`eyeToward`), the phone's turns since allowed for. What the front
  * camera sends (`useFrontCamera`; Keller, 13 November: with the camera on, "everything changes", the camera deciding
- * where the eye is), its switch in ⋯ on the dev server only for now ("that can live in the playground for now")
+ * where the eye is), its switch in ⋯, off until switched on
  */
 export const sightEye = (seen: Vector, at: number, share = SIGHT_SHARE) => sighted?.(seen, at, share)
 
@@ -74,7 +74,7 @@ export function askForMotion(): Promise<Asked> {
  * position is set to be wherever the site loads ... Let's keep it fixed"), as motion starts and on coming back to the
  * page, and then stays put in the room as the phone turns, as the gyroscope says (Keller, 13 November: finding where the
  * eye really is "should just be the camera, and gyro should be how it behaves right now"), and with the front camera on
- * (⋯, the dev server for now) where it sees the eye moves it there (`sightEye`). Also says which way up the
+ * (⋯) where it sees the eye moves it there (`sightEye`). Also says which way up the
  * phone is held (`upright`), for such a phone's view to turn to, read as motion starts and then once it has been held
  * another way up a moment. Recentre makes how far from lying flat it is held now the neutral (on a stand, say), its dial
  * moving there, so held so it is square on, gliding there. The light is the room's, never

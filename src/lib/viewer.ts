@@ -3,7 +3,7 @@
  * eye there sees the phone (`tiltFromEye`, deviceTilt.ts), so this decides what Arc-en-Ciel and the rest show. The eye
  * stays put in the room as the phone turns, as the gyroscope says (`useDeviceTilt` keeps it in the earth's axes:
  * `toEarth`, `toPhone`); where the eye really is, were the head to move with the phone, only a camera could see, and the
- * front camera, switched on, moves it there (`eyeToward`; frontCamera.ts, tried from Demo's ⋯ on the dev server for now).
+ * front camera, switched on from Demo's ⋯, moves it there (`eyeToward`; frontCamera.ts).
  *
  * Where the eye starts, as Demo opens and on coming back to it, is the neutral (Keller: "the point where like everything
  * is at its default should be if the banknote is like holding at 90 degrees ... completely vertical in space", with a

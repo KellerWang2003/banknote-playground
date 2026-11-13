@@ -17,7 +17,7 @@ export type Camera = 'off' | 'starting' | 'on' | 'failed'
 const area = (face: Face) => (face.boundingBox ? face.boundingBox.width * face.boundingBox.height : 0)
 
 /**
- * The front camera, while `on` (Demo's ⋯, on the dev server for now; Keller, 13 November: "with camera access, we should
+ * The front camera, while `on` (Demo's ⋯, never on by itself; Keller, 13 November: "with camera access, we should
  * solve these", then "something that we can try out in whatever format that it needs"): it looks for the viewer's face
  * in every picture (MediaPipe's face detector), and where its two eyes show says where the eye is (`cameraEye`). On a
  * phone whose motion is on (`phone`) that eye is blended into the one its motion follows (`sightEye`), the turns since

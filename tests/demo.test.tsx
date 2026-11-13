@@ -610,7 +610,7 @@ describe('Demo on a phone', () => {
     expect(useTilt.getState().target).toBeCloseTo(10, 0)
   })
 
-  it('tries the front camera from ⋯ on the dev server only, saying so when it can’t start', async () => {
+  it('tries the front camera from ⋯, never on by itself, saying so when it can’t start', async () => {
     const getUserMedia = vi.fn(() => Promise.reject(new Error('Permission denied')))
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -633,12 +633,14 @@ describe('Demo on a phone', () => {
     } finally {
       Reflect.deleteProperty(navigator, 'mediaDevices')
     }
-    // Not on the live site: no Camera in ⋯ there
+    // On the live site too (Keller, 13 November: "push it so i test it outside"), off as Demo opens there as well
     cleanup()
     vi.stubEnv('DEV', false)
     try {
       renderDemo()
-      expect(within(await openMenu()).queryByRole('menuitemcheckbox', { name: /Camera/ })).toBeNull()
+      const item = within(await openMenu()).getByRole('menuitemcheckbox', { name: 'Camera' })
+      expect(item.getAttribute('aria-checked')).toBe('false')
+      expect(document.querySelector('[data-front-camera]')).toBeNull()
     } finally {
       vi.unstubAllEnvs()
     }

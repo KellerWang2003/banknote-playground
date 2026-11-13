@@ -3,7 +3,7 @@ import { EYE_M } from './viewer'
 
 /**
  * Where the viewer's eye is, as the front camera sees the face (Keller, 13 November: "with camera access, we should solve
- * these"; tried from Demo's ⋯ on the dev server for now, `useFrontCamera`). The phone's turn and motion only say what it
+ * these"; switched on from Demo's ⋯, `useFrontCamera`). The phone's turn and motion only say what it
  * turns round (viewer.ts); the camera sees the eye itself. The face's two eyes in its picture say where the eye is: the
  * point between them which way, and how far apart they look how far.
  */

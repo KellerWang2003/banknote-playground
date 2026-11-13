@@ -114,9 +114,10 @@ function settleTurns(side: number, speed = { x: 0, y: 0 }) {
  * be just one line"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint text, but for
  * the one line on hiding the UI and the button iPhone needs to ask for motion. Its controls are the canvas's own, in the
  * app's dark colours, so they sit quietly on black (the whole page turns dark while it shows, so the picker's list, the
- * menu and tooltips do too). On the dev server only for now, ⋯ also has Camera: the front camera, which sees where the
- * eye is (`useFrontCamera`), its picture small at the top left while it looks, always switched on by hand (Keller, 13
- * November: "people might not want cameras").
+ * menu and tooltips do too). ⋯ also has Camera: the front camera, which sees where the eye is (`useFrontCamera`), its
+ * picture small at the top left while it looks, always switched on by hand (Keller, 13 November: "people might not want
+ * cameras"); on the dev server only at first, on the live site too since Keller wanted to try it out of doors ("push it
+ * so i test it outside").
  */
 export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   project: Project
@@ -175,8 +176,8 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // A phone's own tilt is the banknote's, always (Keller, 12 November: "I don't think we even need a tilt toggle ... both
   // should be enabled"); drawn flat meanwhile, as the phone is what turns, and a drag turns it further in the hand
   const { motion, upright, allow, recentre } = useDeviceTilt(quarterTurns)
-  // The front camera, tried from ⋯ on the dev server (Keller, 13 November: "that can live in the playground for now", then
-  // "it doesn't have to be a separate page"); on a laptop, the screen standing still, the banknote is drawn flat too
+  // The front camera, tried from ⋯ (Keller, 13 November: "it doesn't have to be a separate page"), off until switched on;
+  // on a laptop, the screen standing still, the banknote is drawn flat too
   const [camera, setCamera] = useState(false)
   const { camera: cameraState, videoRef: cameraRef, rightRef: rightEyeRef, leftRef: leftEyeRef } = useFrontCamera(camera, motion === 'on', quarterTurns)
   const flat = motion === 'on' || camera
@@ -549,7 +550,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
                 <Segmented value={size} options={SIZES} onChange={pickSize} />
               </div>
               <LookMenu finalFocus={backToDemo} motion={motion} onRecentre={recentre}
-                camera={import.meta.env.DEV ? { on: camera, state: cameraState, onChange: setCamera } : undefined}
+                camera={{ on: camera, state: cameraState, onChange: setCamera }}
                 onCheckSize={size === 'real' ? () => setChecking(true) : undefined} />
               {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
               {onClose && (
@@ -573,8 +574,8 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
  * (since 13 November it makes how the phone is held then the neutral, moving the dial: "just one value"),
  * or in words once motion was refused (a page can't ask again until Safari is quit and reopened), and no switch for its
  * tilt, always on (Keller, 12 November); with it the neutral's dial (Keller, 13 November), how far from lying flat the
- * phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees"), and on the dev server the
- * front camera, on a laptop too ("Camera unavailable" while it couldn't start);
+ * phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees"); the front camera, on a laptop
+ * too ("Camera unavailable" while it couldn't start);
  * then the lamp, held to the light until switched off again, and Realistic, the
  * tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp off ("the default should just
  * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with Real size picked, its check
@@ -584,19 +585,13 @@ function LookMenu({ finalFocus, motion, onRecentre, camera, onCheckSize }: {
   finalFocus: () => boolean
   motion: Motion
   onRecentre: () => void
-  /** The front camera's switch, on the dev server only for now */
-  camera?: { on: boolean; state: Camera; onChange: (on: boolean) => void }
+  /** The front camera's switch */
+  camera: { on: boolean; state: Camera; onChange: (on: boolean) => void }
   /** Real size's check, while Real size is picked */
   onCheckSize?: () => void
 }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
-  const cameraItem = camera && (
-    <DropdownMenuCheckboxItem checked={camera.on} onCheckedChange={camera.onChange}>
-      <ScanFace />
-      {camera.state === 'failed' ? 'Camera unavailable' : 'Camera'}
-    </DropdownMenuCheckboxItem>
-  )
   return (
     <DropdownMenu>
       <Tooltip>
@@ -606,26 +601,25 @@ function LookMenu({ finalFocus, motion, onRecentre, camera, onCheckSize }: {
         <TooltipContent>More</TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="end" className="w-auto" finalFocus={finalFocus}>
-        {(motion === 'on' || motion === 'denied' || cameraItem) && (
+        {motion === 'on' ? (
           <>
-            {motion === 'on' ? (
-              <>
-                <DropdownMenuItem onClick={onRecentre}>
-                  <LocateFixed />
-                  Recentre
-                </DropdownMenuItem>
-                <NeutralDial />
-              </>
-            ) : motion === 'denied' && (
-              <DropdownMenuItem disabled>
-                <Rotate3d />
-                Motion not allowed
-              </DropdownMenuItem>
-            )}
-            {cameraItem}
-            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onRecentre}>
+              <LocateFixed />
+              Recentre
+            </DropdownMenuItem>
+            <NeutralDial />
           </>
+        ) : motion === 'denied' && (
+          <DropdownMenuItem disabled>
+            <Rotate3d />
+            Motion not allowed
+          </DropdownMenuItem>
         )}
+        <DropdownMenuCheckboxItem checked={camera.on} onCheckedChange={camera.onChange}>
+          <ScanFace />
+          {camera.state === 'failed' ? 'Camera unavailable' : 'Camera'}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
         <DropdownMenuCheckboxItem checked={backlit} onCheckedChange={(on) => setTilt({ backlit: on })}>
           <Lamp />
           Hold up to the light
