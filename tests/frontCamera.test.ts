@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orientationMatrix, tiltFromEye, type Vector } from '../src/lib/deviceTilt'
-import { LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye } from '../src/lib/frontCamera'
+import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye } from '../src/lib/frontCamera'
 import { EYE_M, toPhone } from '../src/lib/viewer'
 
 const RAD = Math.PI / 180
@@ -19,7 +19,7 @@ describe('the eye as the front camera sees it', () => {
   it('looks from in front of the camera, which is above the screen’s middle, at the distance the eyes’ spacing says', () => {
     const [right, left] = eyes(0.5, 0.5)
     const eye = cameraEye(right, left, W, H, 0)!
-    const f = Math.hypot(W, H) / 2 / Math.tan(37.5 * RAD)
+    const f = Math.hypot(W, H) / 2 / Math.tan((CAMERA_FOV_DEG.phone / 2) * RAD)
     const away = (f * 0.063) / (0.2 * W)
     expect(tiltOf(eye).x).toBeCloseTo(0, 9)
     // Above the middle: the phone's top nearer, as tipped towards the eye
@@ -54,7 +54,7 @@ describe('the eye as the front camera sees it', () => {
     const toward = unit([Math.sin(25 * RAD), 0, Math.cos(25 * RAD)])
     const eyeAt = toward.map((v) => v * 0.4) as unknown as Vector
     const fromCamera: Vector = [eyeAt[0], eyeAt[1] - PHONE_CAMERA_M, eyeAt[2]]
-    const f = Math.hypot(W, H) / 2 / Math.tan(37.5 * RAD)
+    const f = Math.hypot(W, H) / 2 / Math.tan((CAMERA_FOV_DEG.phone / 2) * RAD)
     const u = W / 2 - (fromCamera[0] / fromCamera[2]) * f
     const v = H / 2 - (fromCamera[1] / fromCamera[2]) * f
     const apart = (f * 0.063) / fromCamera[2] / W
@@ -68,10 +68,20 @@ describe('a laptop’s camera', () => {
   it('sits further above the screen’s middle, so a face in the middle of its picture is looked from lower down', () => {
     const W = 640, H = 480
     const right = { x: 0.45, y: 0.5 }, left = { x: 0.55, y: 0.5 }
-    const f = Math.hypot(W, H) / 2 / Math.tan(37.5 * RAD)
+    const f = Math.hypot(W, H) / 2 / Math.tan((CAMERA_FOV_DEG.laptop / 2) * RAD)
     const away = (f * 0.063) / (0.1 * W)
-    const eye = cameraEye(right, left, W, H, 0, LAPTOP_CAMERA_M)!
+    const eye = cameraEye(right, left, W, H, 0, LAPTOP_CAMERA_M, CAMERA_FOV_DEG.laptop)!
     expect(tiltOf(eye).y).toBeCloseTo(-Math.atan2(LAPTOP_CAMERA_M, away) * DEG, 6)
-    expect(tiltOf(eye).y).toBeLessThan(tiltOf(cameraEye(right, left, W, H, 0)!).y)
+    expect(tiltOf(eye).y).toBeLessThan(tiltOf(cameraEye(right, left, W, H, 0, PHONE_CAMERA_M, CAMERA_FOV_DEG.laptop)!).y)
+  })
+
+  it('sees narrower than a phone’s: a face as far across its picture is less far off square', () => {
+    // Keller, 13 November: with a phone's taken as narrow as a laptop's, a turn looked smaller to the camera than it was,
+    // and the tilt went "back to normal"
+    const right = { x: 0.15, y: 0.5 }, left = { x: 0.25, y: 0.5 }
+    const phone = tiltOf(cameraEye(right, left, 480, 640, 0, 0)!).x
+    const laptop = tiltOf(cameraEye(right, left, 480, 640, 0, 0, CAMERA_FOV_DEG.laptop)!).x
+    expect(phone).toBeLessThan(laptop)
+    expect(Math.tan(-phone * RAD) / Math.tan(-laptop * RAD)).toBeCloseTo(Math.tan(43 * RAD) / Math.tan(37.5 * RAD), 6)
   })
 })

@@ -34,6 +34,8 @@ import { POPUPS, popupOpen } from '../lib/popups'
 const MARGIN = 16
 /** The bar's distance from the bottom, and the banknote's from the bar while it shows, px */
 const BAR_INSET = 12
+/** How tall the front camera's picture shows at the top left, px, as the screen shows it */
+const PICTURE_PX = 96
 /** Pressed this long without moving, ms, a touch holds the banknote to the light until it lifts */
 const HOLD_MS = 350
 /** Two taps this close, in ms and px, bring the hidden UI back */
@@ -179,7 +181,8 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // The front camera, tried from ⋯ (Keller, 13 November: "it doesn't have to be a separate page"), off until switched on;
   // on a laptop, the screen standing still, the banknote is drawn flat too
   const [camera, setCamera] = useState(false)
-  const { camera: cameraState, videoRef: cameraRef, rightRef: rightEyeRef, leftRef: leftEyeRef } = useFrontCamera(camera, motion === 'on', quarterTurns)
+  const { camera: cameraState, aspect: cameraAspect, videoRef: cameraRef, rightRef: rightEyeRef, leftRef: leftEyeRef } =
+    useFrontCamera(camera, motion === 'on', quarterTurns, upright)
   const flat = motion === 'on' || camera
   useWakeLock(true)
 
@@ -189,12 +192,17 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // quarter the way round that is upright in the hand; a drag and the tilt go by the banknote's own axes
   const turned = quarterOf(quarterTurns + upright)
   const sideways = onItsSide(upright)
+  const viewDeg = upright === 3 ? -90 : upright * 90
+  // The front camera's picture, at the top left while it is on: as the screen shows it, so on its side in a view turned for
+  // a phone held sideways, and leaving room above the banknote as Hide UI does
+  const picture = { width: PICTURE_PX * cameraAspect, height: PICTURE_PX }
+  const pictureBox = sideways ? { width: picture.height, height: picture.width } : picture
   const width = screen?.width ?? 0
   const height = screen?.height ?? 0
   const view = { width: sideways ? height : width, height: sideways ? width : height }
   // Room for the banknote: the view, less the margin all round, and the bar below and Hide UI above while they show
   const barRoom = ui ? Math.max(0, (barSize?.height ?? 44) + 2 * BAR_INSET - MARGIN) : 0
-  const hideRoom = ui ? Math.max(0, (hideSize?.height ?? 40) + 2 * BAR_INSET - MARGIN) : 0
+  const hideRoom = ui ? Math.max(0, Math.max(hideSize?.height ?? 40, camera ? pictureBox.height : 0) + 2 * BAR_INSET - MARGIN) : 0
   const area = { width: Math.max(1, view.width - 2 * MARGIN), height: Math.max(1, view.height - 2 * MARGIN - barRoom - hideRoom) }
   const onSide = onItsSide(quarterOf(quarterTurns))
   const shownMm = note ? { width: onSide ? note.heightMm : note.widthMm, height: onSide ? note.widthMm : note.heightMm } : { width: 1, height: 1 }
@@ -461,7 +469,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
       <div data-demo-view="" className="absolute transition-transform ease-in-out motion-reduce:transition-none"
         style={{
           width: view.width, height: view.height, left: (width - view.width) / 2, top: (height - view.height) / 2,
-          transform: upright ? `rotate(${upright === 3 ? -90 : upright * 90}deg)` : undefined, transitionDuration: `${ROTATE_SECONDS}s`,
+          transform: upright ? `rotate(${viewDeg}deg)` : undefined, transitionDuration: `${ROTATE_SECONDS}s`,
         }}>
         {note && screen && (
           <div data-demo-note={note.id} className="absolute"
@@ -491,12 +499,15 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         )}
 
         {/* The front camera's picture while it looks, mirrored as a mirror shows a face, with the two eyes it found; faded
-            rather than hidden with the UI, as a picture that isn't shown may stop coming */}
+            rather than hidden with the UI, as a picture that isn't shown may stop coming. Its box is the picture's own shape
+            (Keller, 13 November: "the camara preview is not showing up properly"), so the dots sit on the eyes, and it stays
+            as the screen is while a view for a phone held sideways turns, as the picture does */}
         {camera && (
-          <div data-front-camera="" className={cn('pointer-events-none absolute overflow-hidden rounded-md border border-white/15 transition-opacity',
-            (!ui || cameraState !== 'on') && 'opacity-0')} style={{ top: BAR_INSET, left: BAR_INSET }}>
-            <div className="relative -scale-x-100">
-              <video ref={cameraRef} className="block h-24 w-auto" muted playsInline />
+          <div data-front-camera="" className={cn('pointer-events-none absolute overflow-hidden rounded-md bg-black ring-1 ring-white/15 transition-opacity',
+            (!ui || cameraState !== 'on') && 'opacity-0')} style={{ top: BAR_INSET, left: BAR_INSET, width: pictureBox.width, height: pictureBox.height }}>
+            <div className="absolute top-1/2 left-1/2 transition-transform ease-in-out motion-reduce:transition-none"
+              style={{ width: picture.width, height: picture.height, transform: `translate(-50%, -50%) rotate(${-viewDeg}deg) scaleX(-1)`, transitionDuration: `${ROTATE_SECONDS}s` }}>
+              <video ref={cameraRef} className="absolute inset-0 size-full object-fill" muted playsInline />
               <span ref={rightEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
               <span ref={leftEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
             </div>

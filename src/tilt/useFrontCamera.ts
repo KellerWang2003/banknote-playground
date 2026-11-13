@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { TILT_LIMIT, clamp } from '../lib/frames'
 import { oneEuro, screenAngleNow, tiltFromEye } from '../lib/deviceTilt'
 import { type Face, faceDetector } from '../lib/faceDetector'
-import { LAPTOP_CAMERA_M, PHONE_CAMERA_M, type Seen, cameraEye } from '../lib/frontCamera'
-import { quarterOf } from '../lib/rotate'
+import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, type Seen, cameraEye } from '../lib/frontCamera'
+import { type Quarter, quarterOf } from '../lib/rotate'
 import { EYE_M } from '../lib/viewer'
 import { setTilt, useTilt } from './tilt'
 import { sightEye } from './useDeviceTilt'
 
-/** How late a camera's picture comes, ms, where the browser doesn't say: a phone's, near enough */
-const CAMERA_LAG_MS = 60
+/** How long a camera's picture takes to reach the page, ms, where the browser doesn't say when it was taken: a phone's, near enough */
+const CAMERA_LAG_MS = 50
 
 /** Where the camera stands: off, coming on (asking for the camera, fetching the detector), on, or it couldn't */
 export type Camera = 'off' | 'starting' | 'on' | 'failed'
@@ -23,16 +23,20 @@ const area = (face: Face) => (face.boundingBox ? face.boundingBox.width * face.b
  * phone whose motion is on (`phone`) that eye is blended into the one its motion follows (`sightEye`), the turns since
  * the picture was taken allowed for, so a turn round the head and one in the hand come apart by sight; on a laptop, which
  * has no motion, the tilt comes from it alone, steadied, the banknote drawn flat on the screen as on a phone (DemoView).
- * Its picture plays in `videoRef`'s <video>, which the caller shows, and the two eyes found in it go to `rightRef` and
- * `leftRef`'s two dots over it, placed as shares of it each picture without a render.
+ * Its picture plays in `videoRef`'s <video>, which the caller shows, as wide as `aspect` says for its height, and the
+ * two eyes found in it go to `rightRef` and `leftRef`'s two dots over it, placed as shares of it each picture without a
+ * render. A phone held sideways with rotation locked (`upright`, which way up it is in the hand) still gives its picture
+ * as the screen is, the face in it on its side: it is looked for turned as the view is, upright.
  */
-export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
+export function useFrontCamera(on: boolean, phone: boolean, turns: number, upright: Quarter = 0) {
   const [camera, setCamera] = useState<Camera>('off')
+  /** The picture's width over its height, a laptop's until it comes */
+  const [aspect, setAspect] = useState(4 / 3)
   const videoRef = useRef<HTMLVideoElement>(null)
   const rightRef = useRef<HTMLElement>(null)
   const leftRef = useRef<HTMLElement>(null)
-  const latest = useRef({ phone, turns })
-  useEffect(() => { latest.current = { phone, turns } })
+  const latest = useRef({ phone, turns, upright })
+  useEffect(() => { latest.current = { phone, turns, upright } })
 
   useEffect(() => {
     const el = videoRef.current
@@ -51,6 +55,12 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
       }
     }
     setCamera('starting')
+    // The picture's shape, as it comes and whenever it changes (a phone turned, its picture turning with the page)
+    const measure = () => {
+      if (el.videoWidth && el.videoHeight) setAspect(el.videoWidth / el.videoHeight)
+    }
+    el.addEventListener('loadedmetadata', measure)
+    el.addEventListener('resize', measure)
     // Asked for at once, with the detector fetched meanwhile
     const asked = navigator.mediaDevices?.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } })
       ?? Promise.reject(new Error('no camera here'))
@@ -61,6 +71,7 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
       el.srcObject = got
       await el.play()
       if (!live) return
+      measure()
       setCamera('on')
       let stamp = 0
       const look = (now: number, picture?: VideoFrameCallbackMetadata) => {
@@ -69,9 +80,10 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
         if (!el.videoWidth || !el.videoHeight) return
         // The detector wants its moments always later
         stamp = Math.max(performance.now(), stamp + 1)
+        const { phone, turns, upright } = latest.current
         let faces: Face[]
         try {
-          faces = detector.detectForVideo(el, stamp).detections
+          faces = detector.detectForVideo(el, stamp, { rotationDegrees: upright === 3 ? -90 : upright * 90 }).detections
         } catch {
           return
         }
@@ -80,13 +92,16 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
         place(dots.right, r)
         place(dots.left, l)
         if (!r || !l) return
-        const { phone, turns } = latest.current
         const screenAngle = screenAngleNow()
-        const eye = cameraEye(r, l, el.videoWidth, el.videoHeight, screenAngle, phone ? PHONE_CAMERA_M : LAPTOP_CAMERA_M)
+        const eye = phone
+          ? cameraEye(r, l, el.videoWidth, el.videoHeight, screenAngle, PHONE_CAMERA_M, CAMERA_FOV_DEG.phone)
+          : cameraEye(r, l, el.videoWidth, el.videoHeight, screenAngle, LAPTOP_CAMERA_M, CAMERA_FOV_DEG.laptop)
         if (!eye) return
-        // When the picture was taken, where the browser says, else a moment ago
+        // When the picture was taken, where the browser says, else a moment before it reached the page
         const taken = picture?.captureTime
-        const at = taken !== undefined && now - taken >= 0 && now - taken < 1000 ? taken : performance.now() - CAMERA_LAG_MS
+        const came = picture?.presentationTime
+        const at = taken !== undefined && now - taken >= 0 && now - taken < 1000 ? taken
+          : (came !== undefined && now - came >= 0 && now - came < 500 ? came : now) - CAMERA_LAG_MS
         if (phone) {
           sightEye(eye, at)
           return
@@ -107,6 +122,8 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
     })
     return () => {
       live = false
+      el.removeEventListener('loadedmetadata', measure)
+      el.removeEventListener('resize', measure)
       if (frame !== undefined) cancelAnimationFrame(frame)
       // Stopped even if it comes after this, as `stream` is set before `live` is looked at
       asked.then((got) => got.getTracks().forEach((track) => track.stop()), () => {})
@@ -121,5 +138,5 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number) {
     }
   }, [on])
 
-  return { camera, videoRef, rightRef, leftRef }
+  return { camera, aspect, videoRef, rightRef, leftRef }
 }

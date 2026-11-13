@@ -12,8 +12,11 @@ export interface Face {
   keypoints: Seen[]
 }
 export interface FaceDetector {
-  /** The faces in the video's picture now, at `at` ms, always later than the last */
-  detectForVideo(video: HTMLVideoElement, at: number): { detections: Face[] }
+  /**
+   * The faces in the video's picture now, at `at` ms, always later than the last: looked for in the picture turned
+   * `rotationDegrees` clockwise (a quarter turn or more), and placed in it as it is, unturned
+   */
+  detectForVideo(video: HTMLVideoElement, at: number, options?: { rotationDegrees?: number }): { detections: Face[] }
 }
 interface Vision {
   FilesetResolver: { forVisionTasks(path: string): Promise<unknown> }

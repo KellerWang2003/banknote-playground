@@ -23,18 +23,37 @@ const UP_CUTOFF = 1.2
 const UP_BETA = 0.05 * (180 / Math.PI)
 /** How long orientation readings are kept, ms, for an eye seen a moment ago (`sightEye`) */
 const SIGHT_MS = 500
-/** How far an eye seen from outside moves Demo's each time, of the way there: a camera's picture comes late and shakes */
-const SIGHT_SHARE = 0.35
+/**
+ * How long an eye seen from outside takes to bring Demo's most of the way there (all but 1/e), ms, the phone held still.
+ * The phone's own motion leads, as it knows a turn at once and exactly, and the camera follows on behind, putting right
+ * what the motion can't know (the head moving, the gyroscope drifting), as its picture comes late and shakes (Keller, 13
+ * November: with each picture taking the eye most of the way there, "when i am tilting, it is napping back to normal")
+ */
+const SIGHT_EASE_MS = 500
+/**
+ * How fast the phone turns the eye across its screen, degrees a second, at which a picture counts for half as much: the
+ * faster, the less, as a picture taken mid-turn is the most out of step with the motion
+ */
+const SIGHT_TURN_DEG_S = 60
+/** Over how long that is measured, ms */
+const TURN_SPAN_MS = 100
+/** The longest wait for a picture that counts, ms: after a pause, the next moves the eye no further than after this long */
+const SIGHT_GAP_MS = 100
+
+/** The angle between two directions, degrees */
+const angleApart = (a: Vector, b: Vector) =>
+  Math.acos(clamp((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b) || 1), -1, 1)) * (180 / Math.PI)
 
 /** Where an eye seen from outside Demo goes: to the hook showing Demo's tilt, while it does */
-let sighted: ((seen: Vector, at: number, share: number) => void) | undefined
+let sighted: ((seen: Vector, at: number) => void) | undefined
 /**
  * The viewer's eye seen from outside Demo, in the phone's own axes as it was turned at `at` (ms, as performance.now()):
- * Demo's eye moves `share` of the way there in the room (`eyeToward`), the phone's turns since allowed for. What the front
- * camera sends (`useFrontCamera`; Keller, 13 November: with the camera on, "everything changes", the camera deciding
- * where the eye is), its switch in ⋯, off until switched on
+ * Demo's eye moves towards it in the room (`eyeToward`), the phone's turns since allowed for, gently, SIGHT_EASE_MS taking
+ * it most of the way there, and less while the phone turns fast. What the front camera sends (`useFrontCamera`; Keller,
+ * 13 November: with the camera on, "everything changes", the camera deciding where the eye is), its switch in ⋯, off
+ * until switched on
  */
-export const sightEye = (seen: Vector, at: number, share = SIGHT_SHARE) => sighted?.(seen, at, share)
+export const sightEye = (seen: Vector, at: number) => sighted?.(seen, at)
 
 type Answer = 'granted' | 'denied'
 /** What iPhone answered, or `tap` when it couldn't ask, as Safari asks only from a tap: asked again at the next */
@@ -97,6 +116,8 @@ export function useDeviceTilt(turns: number) {
     now?: Matrix
     /** Recent readings, when and how the phone was turned, for an eye seen a moment ago (`sightEye`) */
     past: { at: number; turn: Matrix }[]
+    /** When the last eye seen from outside was seen, ms */
+    seenAt?: number
     /** The neutral the eye was last put at, degrees */
     neutral?: number
     /** The tilt last set, for Recentre to glide from */
@@ -209,12 +230,19 @@ export function useDeviceTilt(turns: number) {
     const onVisible = () => {
       if (document.visibilityState === 'visible') r.again = { glide: true }
     }
-    // An eye seen from outside: into the room as the phone was turned then (the reading nearest), where the eye is kept
-    sighted = (seen, at, share) => {
+    // An eye seen from outside: into the room as the phone was turned then (the reading nearest), where the eye is kept,
+    // moving it there as far as the time since the last says, the less the faster the phone was turning
+    sighted = (seen, at) => {
       const last = r.past.at(-1)
       if (!r.eye || !last) return
-      const then = r.past.reduce((near, p) => (Math.abs(p.at - at) < Math.abs(near.at - at) ? p : near), last).turn
-      r.eye = eyeToward(r.eye, toEarth(then, seen), share)
+      const near = (time: number) => r.past.reduce((nearest, p) => (Math.abs(p.at - time) < Math.abs(nearest.at - time) ? p : nearest), last)
+      const then = near(at)
+      const before = near(at - TURN_SPAN_MS)
+      const speed = then.at > before.at ? (angleApart(toPhone(then.turn, r.eye), toPhone(before.turn, r.eye)) * 1000) / (then.at - before.at) : 0
+      const gap = r.seenAt === undefined ? 0 : clamp(at - r.seenAt, 0, SIGHT_GAP_MS)
+      r.seenAt = Math.max(at, r.seenAt ?? at)
+      const share = (1 - Math.exp(-gap / SIGHT_EASE_MS)) / (1 + (speed / SIGHT_TURN_DEG_S) ** 2)
+      r.eye = eyeToward(r.eye, toEarth(then.turn, seen), share)
     }
     window.addEventListener('deviceorientation', onOrientation)
     document.addEventListener('visibilitychange', onVisible)
@@ -236,6 +264,7 @@ export function useDeviceTilt(turns: number) {
       r.eye = undefined
       r.now = undefined
       r.past = []
+      r.seenAt = undefined
       r.neutral = undefined
       r.again = undefined
       r.glide = undefined

@@ -593,19 +593,39 @@ describe('Demo on a phone', () => {
       orient(0, 50, 0)
     }
     expect(useTilt.getState().target).toBeCloseTo(40, 1)
-    // The camera seeing the face square on all the while, as the head went round with the phone: a few of its pictures,
-    // 30 a second, each a moment old, and the banknote is back square on (Keller, 13 November: with the camera on,
-    // "everything changes", the camera deciding where the eye is)
-    for (let i = 0; i < 12; i++) {
+    // The camera seeing the face square on all the while, as the head went round with the phone: its pictures, 30 a
+    // second, each a moment old, bring the banknote back square on (Keller, 13 November: with the camera on, "everything
+    // changes", the camera deciding where the eye is), gently, as they come late and shake: not most of the way in a
+    // fifth of a second (Keller: taking each picture most of the way there, "when i am tilting, it is napping back to
+    // normal"), all but a little in two
+    const picture = (beta: number) => {
       now += 1000 / 30
       act(() => sightEye([0, 0, EYE_M], now - 60))
-      orient(0, 50, 0)
+      orient(0, beta, 0)
     }
+    for (let i = 0; i < 6; i++) picture(50)
+    expect(useTilt.getState().target).toBeGreaterThan(20)
+    for (let i = 0; i < 54; i++) picture(50)
+    expect(Math.abs(useTilt.getState().target)).toBeLessThan(2)
+    // Tipped back 20° more in a tenth of a second, as a hand turns it, the camera still seeing the face square on: its
+    // pictures taken mid-turn count for little, so the turn shows as the motion has it
+    for (let i = 1; i <= 10; i++) {
+      now += 10
+      orient(0, 50 - 2 * i, 0)
+      if (i % 3 === 0) act(() => sightEye([0, 0, EYE_M], now - 60))
+    }
+    for (let i = 0; i < 5; i++) {
+      now += 20
+      orient(0, 30, 0)
+    }
+    expect(useTilt.getState().target).toBeGreaterThan(17)
+    // Held still, it comes round to where the camera sees the eye
+    for (let i = 0; i < 60; i++) picture(30)
     expect(Math.abs(useTilt.getState().target)).toBeLessThan(2)
     // And kept there in the room as the phone turns on: tipped back 10° more, 10°
     for (let i = 0; i < 20; i++) {
       now += 100
-      orient(0, 40, 0)
+      orient(0, 20, 0)
     }
     expect(useTilt.getState().target).toBeCloseTo(10, 0)
   })

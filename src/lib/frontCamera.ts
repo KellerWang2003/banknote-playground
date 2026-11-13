@@ -10,8 +10,13 @@ import { EYE_M } from './viewer'
 
 const RAD = Math.PI / 180
 
-/** The front camera's field of view across its picture's diagonal, degrees: a phone's selfie camera, near enough */
-export const CAMERA_FOV_DEG = 75
+/**
+ * The front camera's field of view across its picture's diagonal, degrees, near enough: a phone's selfie camera, which
+ * gives a page its whole width (on iPhones since the 11 a lens like 23 mm on 35 mm film, 86° across a 4:3 picture), and a
+ * laptop's. Taken as narrower than it is, the camera sees a turn as smaller than the motion knows it was, and pulls the
+ * tilt back towards square on (Keller, 13 November, with a phone's at 75°: "when i am tilting, it is napping back to normal")
+ */
+export const CAMERA_FOV_DEG = { phone: 86, laptop: 75 }
 /** How far the front camera sits above the screen's middle along the phone's own up, metres: a phone's, near enough */
 export const PHONE_CAMERA_M = 0.065
 /** The same for a laptop's camera, over its screen */
@@ -29,9 +34,9 @@ export interface Seen {
  * The eye as the front camera sees it, in the phone's own axes from the screen's middle, EYE_M away as viewer.ts keeps it:
  * from where the viewer's two eyes (`right` and `left`) show in its picture (`width` × `height` px), as the camera sees,
  * not mirrored, and upright as the page shows (`screenAngle`, which turns it to the phone's own axes). The camera sits
- * `above` the screen's middle. Undefined when the two eyes are one
+ * `above` the screen's middle and sees `fovDeg` across its picture's diagonal. Undefined when the two eyes are one
  */
-export function cameraEye(right: Seen, left: Seen, width: number, height: number, screenAngle: number, above = PHONE_CAMERA_M, fovDeg = CAMERA_FOV_DEG): Vector | undefined {
+export function cameraEye(right: Seen, left: Seen, width: number, height: number, screenAngle: number, above = PHONE_CAMERA_M, fovDeg = CAMERA_FOV_DEG.phone): Vector | undefined {
   const f = Math.hypot(width, height) / 2 / Math.tan((fovDeg * RAD) / 2)
   const apart = Math.hypot((right.x - left.x) * width, (right.y - left.y) * height)
   if (!(apart > 1)) return undefined
