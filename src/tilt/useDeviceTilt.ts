@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { TILT_LIMIT, clamp } from '../lib/frames'
 import { nearestTurn, oneEuro, orientationMatrix, roomTilt, screenAngleNow, tiltFromEye, uprightQuarter, type Matrix, type Vector } from '../lib/deviceTilt'
 import { type Quarter, quarterOf } from '../lib/rotate'
-import { EYE_M, heldDeg, neutralEye, toEarth, toPhone } from '../lib/viewer'
+import { EYE_M, eyeToward, heldDeg, neutralEye, toEarth, toPhone } from '../lib/viewer'
 import { setTilt, useTilt } from './tilt'
 import { setViewing, useViewing } from './viewing'
 
@@ -21,6 +21,20 @@ const TURN_VIEW_MS = 1000
 /** The room's up, a unit vector, steadied as the tilt is: its parts move a radian's worth for every one of the tilt's */
 const UP_CUTOFF = 1.2
 const UP_BETA = 0.05 * (180 / Math.PI)
+/** How long orientation readings are kept, ms, for an eye seen a moment ago (`sightEye`) */
+const SIGHT_MS = 500
+/** How far an eye seen from outside moves Demo's each time, of the way there: a camera's picture comes late and shakes */
+const SIGHT_SHARE = 0.35
+
+/** Where an eye seen from outside Demo goes: to the hook showing Demo's tilt, while it does */
+let sighted: ((seen: Vector, at: number, share: number) => void) | undefined
+/**
+ * The viewer's eye seen from outside Demo, in the phone's own axes as it was turned at `at` (ms, as performance.now()):
+ * Demo's eye moves `share` of the way there in the room (`eyeToward`), the phone's turns since allowed for. What the front
+ * camera sends (`useFrontCamera`; Keller, 13 November: with the camera on, "everything changes", the camera deciding
+ * where the eye is), its switch in ⋯ on the dev server only for now ("that can live in the playground for now")
+ */
+export const sightEye = (seen: Vector, at: number, share = SIGHT_SHARE) => sighted?.(seen, at, share)
 
 type Answer = 'granted' | 'denied'
 /** What iPhone answered, or `tap` when it couldn't ask, as Safari asks only from a tap: asked again at the next */
@@ -59,7 +73,8 @@ export function askForMotion(): Promise<Asked> {
  * the neutral, the phone held upright square on unless its dial in ⋯ says otherwise (Keller, 13 November: "the default
  * position is set to be wherever the site loads ... Let's keep it fixed"), as motion starts and on coming back to the
  * page, and then stays put in the room as the phone turns, as the gyroscope says (Keller, 13 November: finding where the
- * eye really is "should just be the camera, and gyro should be how it behaves right now"). Also says which way up the
+ * eye really is "should just be the camera, and gyro should be how it behaves right now"), and with the front camera on
+ * (⋯, the dev server for now) where it sees the eye moves it there (`sightEye`). Also says which way up the
  * phone is held (`upright`), for such a phone's view to turn to, read as motion starts and then once it has been held
  * another way up a moment. Recentre makes how far from lying flat it is held now the neutral (on a stand, say), its dial
  * moving there, so held so it is square on, gliding there. The light is the room's, never
@@ -80,6 +95,8 @@ export function useDeviceTilt(turns: number) {
     eye?: Vector
     /** How the phone was turned at the last reading, for Recentre */
     now?: Matrix
+    /** Recent readings, when and how the phone was turned, for an eye seen a moment ago (`sightEye`) */
+    past: { at: number; turn: Matrix }[]
     /** The neutral the eye was last put at, degrees */
     neutral?: number
     /** The tilt last set, for Recentre to glide from */
@@ -95,7 +112,7 @@ export function useDeviceTilt(turns: number) {
     heard: boolean
     /** iPhone allowed motion */
     allowed: boolean
-  }>({ shown: { x: 0, y: 0 }, heard: false, allowed: false })
+  }>({ past: [], shown: { x: 0, y: 0 }, heard: false, allowed: false })
   const filters = useRef({
     x: oneEuro(), y: oneEuro(), roomX: oneEuro(), roomY: oneEuro(),
     up: [oneEuro(UP_CUTOFF, UP_BETA), oneEuro(UP_CUTOFF, UP_BETA), oneEuro(UP_CUTOFF, UP_BETA)],
@@ -157,6 +174,8 @@ export function useDeviceTilt(turns: number) {
         filters.current.y.reset()
       }
       r.now = now
+      r.past.push({ at, turn: now })
+      while (r.past.length > 1 && r.past[0].at < at - SIGHT_MS) r.past.shift()
       const eye = toPhone(now, r.eye)
       const raw = tiltFromEye([eye[0] / EYE_M, eye[1] / EYE_M, eye[2] / EYE_M], screenAngle, quarterOf(latest.current.turns + latest.current.upright), TILT_LIMIT)
       let x = filters.current.x.next(raw.x, at)
@@ -190,6 +209,13 @@ export function useDeviceTilt(turns: number) {
     const onVisible = () => {
       if (document.visibilityState === 'visible') r.again = { glide: true }
     }
+    // An eye seen from outside: into the room as the phone was turned then (the reading nearest), where the eye is kept
+    sighted = (seen, at, share) => {
+      const last = r.past.at(-1)
+      if (!r.eye || !last) return
+      const then = r.past.reduce((near, p) => (Math.abs(p.at - at) < Math.abs(near.at - at) ? p : near), last).turn
+      r.eye = eyeToward(r.eye, toEarth(then, seen), share)
+    }
     window.addEventListener('deviceorientation', onOrientation)
     document.addEventListener('visibilitychange', onVisible)
     relisten.current = () => {
@@ -204,10 +230,12 @@ export function useDeviceTilt(turns: number) {
     return () => {
       clearTimeout(wait.current)
       relisten.current = () => {}
+      sighted = undefined
       window.removeEventListener('deviceorientation', onOrientation)
       document.removeEventListener('visibilitychange', onVisible)
       r.eye = undefined
       r.now = undefined
+      r.past = []
       r.neutral = undefined
       r.again = undefined
       r.glide = undefined

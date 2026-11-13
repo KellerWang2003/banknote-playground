@@ -16,7 +16,9 @@ import { createNote, createProject } from '../src/lib/notes'
 import { CARD_MM, guessPxPerMm, isChecked, realPxPerMm, screenKey, setRealPxPerMm, useRealSize, type Device } from '../src/lib/realSize'
 import { useProjects } from '../src/lib/store'
 import type { Project } from '../src/lib/types'
+import { EYE_M } from '../src/lib/viewer'
 import { setTilt, useTilt, useTiltLoop } from '../src/tilt/tilt'
+import { sightEye } from '../src/tilt/useDeviceTilt'
 import { useViewing } from '../src/tilt/viewing'
 
 const cloud = vi.hoisted(() => ({ rows: [] as unknown[], fail: undefined as Error | undefined, calls: 0 }))
@@ -40,6 +42,9 @@ vi.mock('../src/cloud/repository', async (importOriginal) => {
     save: async (record: import('../src/cloud/sync').CachedProject) => ({ project: record.project, revision: record.revision, deleted: record.deleted }),
   }) }
 })
+
+// The front camera's face detector comes from a CDN: here it never comes
+vi.mock('../src/lib/faceDetector', () => ({ faceDetector: () => new Promise(() => {}) }))
 
 // The sample project's artwork is drawn on a canvas, which jsdom lacks: it opens one plain banknote instead
 vi.mock('../src/lib/demo', async () => {
@@ -574,6 +579,69 @@ describe('Demo on a phone', () => {
     if (!screen.queryByRole('menu')) await openMenu()
     expect(within(screen.getByRole('menu')).getByLabelText('Neutral').getAttribute('aria-valuenow')).toBe('70')
     expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ neutralDeg: 70 })
+  })
+
+  it('takes the eye where the front camera sees it, over the gyroscope’s, as when the head goes round with the phone', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    renderDemo()
+    orient(0, 90, 0)
+    await motionOn()
+    // Tipped back 40°, as the gyroscope has it: the top 40° further away, the eye kept where it was in the room
+    for (let i = 0; i < 20; i++) {
+      now += 100
+      orient(0, 50, 0)
+    }
+    expect(useTilt.getState().target).toBeCloseTo(40, 1)
+    // The camera seeing the face square on all the while, as the head went round with the phone: a few of its pictures,
+    // 30 a second, each a moment old, and the banknote is back square on (Keller, 13 November: with the camera on,
+    // "everything changes", the camera deciding where the eye is)
+    for (let i = 0; i < 12; i++) {
+      now += 1000 / 30
+      act(() => sightEye([0, 0, EYE_M], now - 60))
+      orient(0, 50, 0)
+    }
+    expect(Math.abs(useTilt.getState().target)).toBeLessThan(2)
+    // And kept there in the room as the phone turns on: tipped back 10° more, 10°
+    for (let i = 0; i < 20; i++) {
+      now += 100
+      orient(0, 40, 0)
+    }
+    expect(useTilt.getState().target).toBeCloseTo(10, 0)
+  })
+
+  it('tries the front camera from ⋯ on the dev server only, saying so when it can’t start', async () => {
+    const getUserMedia = vi.fn(() => Promise.reject(new Error('Permission denied')))
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      renderDemo()
+      const user = userEvent.setup()
+      // Never on by itself (Keller, 13 November: "people might not want cameras")
+      expect(getUserMedia).not.toHaveBeenCalled()
+      expect(document.querySelector('[data-front-camera]')).toBeNull()
+      await user.click(within(await openMenu()).getByRole('menuitemcheckbox', { name: 'Camera' }))
+      expect(getUserMedia).toHaveBeenCalledWith(expect.objectContaining({ video: expect.objectContaining({ facingMode: 'user' }) }))
+      // Its picture's place at the top left, empty, and in ⋯ that it couldn't start
+      expect(document.querySelector('[data-front-camera]')).not.toBeNull()
+      if (!screen.queryByRole('menu')) await openMenu()
+      const item = await screen.findByRole('menuitemcheckbox', { name: 'Camera unavailable' })
+      expect(item.getAttribute('aria-checked')).toBe('true')
+      // Off again: its picture's place gone
+      await user.click(item)
+      await waitFor(() => expect(document.querySelector('[data-front-camera]')).toBeNull())
+    } finally {
+      Reflect.deleteProperty(navigator, 'mediaDevices')
+    }
+    // Not on the live site: no Camera in ⋯ there
+    cleanup()
+    vi.stubEnv('DEV', false)
+    try {
+      renderDemo()
+      expect(within(await openMenu()).queryByRole('menuitemcheckbox', { name: /Camera/ })).toBeNull()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('lights the banknote as the phone lies in the room, which Recentre leaves: flat on a table, held, camera up', async () => {

@@ -2,7 +2,8 @@
  * Where the viewer's eye is, seen from the phone, in Demo on a phone (Keller, 13 November). The banknote is shown as an
  * eye there sees the phone (`tiltFromEye`, deviceTilt.ts), so this decides what Arc-en-Ciel and the rest show. The eye
  * stays put in the room as the phone turns, as the gyroscope says (`useDeviceTilt` keeps it in the earth's axes:
- * `toEarth`, `toPhone`); where the eye really is, were the head to move with the phone, only a camera could see.
+ * `toEarth`, `toPhone`); where the eye really is, were the head to move with the phone, only a camera could see, and the
+ * front camera, switched on, moves it there (`eyeToward`; frontCamera.ts, tried from Demo's ⋯ on the dev server for now).
  *
  * Where the eye starts, as Demo opens and on coming back to it, is the neutral (Keller: "the point where like everything
  * is at its default should be if the banknote is like holding at 90 degrees ... completely vertical in space", with a
@@ -34,6 +35,10 @@ const atEye = (v: Vector): Vector | undefined => {
 
 /** Looking straight at the screen: the eye square on */
 export const SQUARE_ON: Vector = [0, 0, EYE_M]
+
+/** The eye `share` of the way to `seen` from where it was taken to be, EYE_M away still */
+export const eyeToward = (eye: Vector, seen: Vector, share: number): Vector =>
+  atEye([eye[0] + (seen[0] - eye[0]) * share, eye[1] + (seen[1] - eye[1]) * share, eye[2] + (seen[2] - eye[2]) * share]) ?? eye
 
 /**
  * The eye at the neutral (`deg` from lying flat, upright by default), in the phone's own axes as it is held `now`: where

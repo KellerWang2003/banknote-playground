@@ -1,4 +1,4 @@
-import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, Smartphone, Sparkles, X } from 'lucide-react'
+import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, ScanFace, Smartphone, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,6 +23,7 @@ import { type Quarter, ROTATE_SECONDS, onItsSide, quarterOf, unturn } from '../l
 import type { Project } from '../lib/types'
 import { HALF_TURN, pressLight, releaseLight, rotateNotes, setTilt, turnOver, useTilt } from '../tilt/tilt'
 import { type Motion, useDeviceTilt, useWakeLock } from '../tilt/useDeviceTilt'
+import { type Camera, useFrontCamera } from '../tilt/useFrontCamera'
 import { setViewing, useViewing } from '../tilt/viewing'
 import { useElementSize } from '../editor/useElementSize'
 import { PhoneLink } from './PhoneLink'
@@ -113,7 +114,9 @@ function settleTurns(side: number, speed = { x: 0, y: 0 }) {
  * be just one line"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint text, but for
  * the one line on hiding the UI and the button iPhone needs to ask for motion. Its controls are the canvas's own, in the
  * app's dark colours, so they sit quietly on black (the whole page turns dark while it shows, so the picker's list, the
- * menu and tooltips do too).
+ * menu and tooltips do too). On the dev server only for now, ⋯ also has Camera: the front camera, which sees where the
+ * eye is (`useFrontCamera`), its picture small at the top left while it looks, always switched on by hand (Keller, 13
+ * November: "people might not want cameras").
  */
 export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   project: Project
@@ -172,7 +175,11 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // A phone's own tilt is the banknote's, always (Keller, 12 November: "I don't think we even need a tilt toggle ... both
   // should be enabled"); drawn flat meanwhile, as the phone is what turns, and a drag turns it further in the hand
   const { motion, upright, allow, recentre } = useDeviceTilt(quarterTurns)
-  const flat = motion === 'on'
+  // The front camera, tried from ⋯ on the dev server (Keller, 13 November: "that can live in the playground for now", then
+  // "it doesn't have to be a separate page"); on a laptop, the screen standing still, the banknote is drawn flat too
+  const [camera, setCamera] = useState(false)
+  const { camera: cameraState, videoRef: cameraRef, rightRef: rightEyeRef, leftRef: leftEyeRef } = useFrontCamera(camera, motion === 'on', quarterTurns)
+  const flat = motion === 'on' || camera
   useWakeLock(true)
 
   useBlackPage()
@@ -482,6 +489,19 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           </div>
         )}
 
+        {/* The front camera's picture while it looks, mirrored as a mirror shows a face, with the two eyes it found; faded
+            rather than hidden with the UI, as a picture that isn't shown may stop coming */}
+        {camera && (
+          <div data-front-camera="" className={cn('pointer-events-none absolute overflow-hidden rounded-md border border-white/15 transition-opacity',
+            (!ui || cameraState !== 'on') && 'opacity-0')} style={{ top: BAR_INSET, left: BAR_INSET }}>
+            <div className="relative -scale-x-100">
+              <video ref={cameraRef} className="block h-24 w-auto" muted playsInline />
+              <span ref={rightEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
+              <span ref={leftEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
+            </div>
+          </div>
+        )}
+
         {/* Where Hide UI was, for 2 s once the UI hides, how to bring it back; taps go through it to the banknote */}
         {hint && (
           <div data-demo-hint="" role="status"
@@ -529,6 +549,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
                 <Segmented value={size} options={SIZES} onChange={pickSize} />
               </div>
               <LookMenu finalFocus={backToDemo} motion={motion} onRecentre={recentre}
+                camera={import.meta.env.DEV ? { on: camera, state: cameraState, onChange: setCamera } : undefined}
                 onCheckSize={size === 'real' ? () => setChecking(true) : undefined} />
               {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
               {onClose && (
@@ -552,21 +573,30 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
  * (since 13 November it makes how the phone is held then the neutral, moving the dial: "just one value"),
  * or in words once motion was refused (a page can't ask again until Safari is quit and reopened), and no switch for its
  * tilt, always on (Keller, 12 November); with it the neutral's dial (Keller, 13 November), how far from lying flat the
- * phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees");
+ * phone is looked at square on as Demo opens ("a dial ... making the default 90 degrees"), and on the dev server the
+ * front camera, on a laptop too ("Camera unavailable" while it couldn't start);
  * then the lamp, held to the light until switched off again, and Realistic, the
  * tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp off ("the default should just
  * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with Real size picked, its check
  * against a bank card. Toggles are ticked while on.
  */
-function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
+function LookMenu({ finalFocus, motion, onRecentre, camera, onCheckSize }: {
   finalFocus: () => boolean
   motion: Motion
   onRecentre: () => void
+  /** The front camera's switch, on the dev server only for now */
+  camera?: { on: boolean; state: Camera; onChange: (on: boolean) => void }
   /** Real size's check, while Real size is picked */
   onCheckSize?: () => void
 }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
+  const cameraItem = camera && (
+    <DropdownMenuCheckboxItem checked={camera.on} onCheckedChange={camera.onChange}>
+      <ScanFace />
+      {camera.state === 'failed' ? 'Camera unavailable' : 'Camera'}
+    </DropdownMenuCheckboxItem>
+  )
   return (
     <DropdownMenu>
       <Tooltip>
@@ -576,7 +606,7 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
         <TooltipContent>More</TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="end" className="w-auto" finalFocus={finalFocus}>
-        {(motion === 'on' || motion === 'denied') && (
+        {(motion === 'on' || motion === 'denied' || cameraItem) && (
           <>
             {motion === 'on' ? (
               <>
@@ -586,12 +616,13 @@ function LookMenu({ finalFocus, motion, onRecentre, onCheckSize }: {
                 </DropdownMenuItem>
                 <NeutralDial />
               </>
-            ) : (
+            ) : motion === 'denied' && (
               <DropdownMenuItem disabled>
                 <Rotate3d />
                 Motion not allowed
               </DropdownMenuItem>
             )}
+            {cameraItem}
             <DropdownMenuSeparator />
           </>
         )}

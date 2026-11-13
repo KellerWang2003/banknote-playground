@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orientationMatrix, tiltFromEye, type Vector } from '../src/lib/deviceTilt'
-import { EYE_M, heldDeg, neutralEye, toEarth, toPhone } from '../src/lib/viewer'
+import { EYE_M, SQUARE_ON, eyeToward, heldDeg, neutralEye, toEarth, toPhone } from '../src/lib/viewer'
 
 const unit = (v: Vector): Vector => {
   const length = Math.hypot(...v)
@@ -22,6 +22,16 @@ describe('the eye, kept in the room', () => {
     expect(tiltOf(toPhone(held(70), room)).y).toBeCloseTo(20, 9)
     // Its right edge turned 25° away: 25° right
     expect(tiltOf(toPhone(held(90, 0, 25), room)).x).toBeCloseTo(25, 9)
+  })
+
+  it('moves towards where the camera saw it, EYE_M away still', () => {
+    const seen = unit([0.3, 0, 1]).map((v) => v * EYE_M) as unknown as Vector
+    const half = eyeToward(SQUARE_ON, seen, 0.5)
+    expect(Math.hypot(...half)).toBeCloseTo(EYE_M, 12)
+    expect(tiltOf(half).x).toBeLessThan(0)
+    expect(tiltOf(half).x).toBeGreaterThan(tiltOf(seen).x)
+    eyeToward(SQUARE_ON, seen, 1).forEach((v, i) => expect(v).toBeCloseTo(seen[i], 12))
+    eyeToward(SQUARE_ON, seen, 0).forEach((v, i) => expect(v).toBeCloseTo(SQUARE_ON[i], 12))
   })
 })
 
