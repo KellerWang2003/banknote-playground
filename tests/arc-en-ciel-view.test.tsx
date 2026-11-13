@@ -8,7 +8,7 @@ import { ArcEnCielPanel } from '../src/editor/ArcEnCielPanel'
 import { ArcHandles, RidgeDial } from '../src/editor/ArcHandles'
 import { ColourList } from '../src/editor/ColourList'
 import { PlacingBox } from '../src/editor/PlacingBox'
-import { ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, linearRgb, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
+import { ARC_EASE, ARC_SLIDE_BANDS, ARC_SLIDE_DEG, DEFAULT_ARC, arcLight, linearRgb, newArcEnCiel, withBend, withLineMoved, withoutSpot, withSpot } from '../src/lib/arcEnCiel'
 import { turnDeg } from '../src/lib/back'
 import { bandLook, type BandShape } from '../src/lib/bandMap'
 import { perspectiveFor } from '../src/lib/frames'
@@ -99,12 +99,12 @@ describe("a NoteView's Arc-en-Ciel", () => {
     expect([canvas.width, canvas.height]).toEqual([60, 40])
     expect(lastPaint()).toEqual({ canvas, mask: masks.get('disc'), look: bandLook(note.arcEnCiel, undefined, { x: 0, y: 0 }) })
     const before = renders
-    // Halfway to ARC_SLIDE_DEG, a quarter of the way along, as it comes out the further it turns
+    // Halfway to ARC_SLIDE_DEG, as far along as `arcTurned` says
     act(() => setTilt({ angle: ARC_SLIDE_DEG / 2, angleX: 7 }))
-    expect(lastPaint().look).toMatchObject({ slide: ARC_SLIDE_BANDS / 4 })
+    expect(lastPaint().look).toMatchObject({ slide: ARC_SLIDE_BANDS * 0.5 ** ARC_EASE })
     // Rotated on screen, the bands still go by the banknote's own tilt
     act(() => setTilt({ quarterTurns: 1 }))
-    expect(lastPaint().look).toMatchObject({ slide: ARC_SLIDE_BANDS / 4 })
+    expect(lastPaint().look).toMatchObject({ slide: ARC_SLIDE_BANDS * 0.5 ** ARC_EASE })
     expect(renders).toBe(before)
   })
 
