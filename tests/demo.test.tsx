@@ -165,9 +165,14 @@ describe('Demo on the laptop', () => {
     // The banknote fills the screen less a 16 px margin and the bar, 12 px clear of it: 1248 px wide is the limit
     const box = document.querySelector('[data-demo-note]') as HTMLElement
     expect(parseFloat(box.style.width)).toBeCloseTo(1248)
-    // Its link for a phone carries the username, the project and the banknote
-    await user.click(screen.getByRole('button', { name: 'Open on your phone' }))
+    // Its link for a phone, from ⋯ (Keller, 14 November: the bar "just like 3 dots"; a button of its own until then),
+    // carries the username, the project and the banknote
+    expect(screen.queryByRole('button', { name: 'Open on your phone' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'More' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Open on your phone' }))
     expect(await screen.findByRole('img', { name: 'QR code for the link' })).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(demoLink('demo-ui-test', project.id, project.notes[1].id))
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('img', { name: 'QR code for the link' })).toBeNull())
     // That Esc only closed the popup; the next leaves Demo
@@ -178,7 +183,7 @@ describe('Demo on the laptop', () => {
     expect(document.querySelectorAll('[data-note-body]')).toHaveLength(3)
   })
 
-  it('leaves full screen first: Esc there is the browser’s, and ✕ leaves both', async () => {
+  it('leaves full screen first: Esc there is the browser’s, and Close Demo in ⋯ leaves both', async () => {
     const user = userEvent.setup()
     const exit = vi.fn(async () => {})
     let full: Element | null = null
@@ -189,12 +194,14 @@ describe('Demo on the laptop', () => {
     await openDemoHere(user)
     await user.keyboard('{Escape}')
     expect(demo()).toBeDefined()
-    await user.click(within(demo()).getByRole('button', { name: 'Close Demo (Esc)' }))
+    expect(within(demo()).queryByRole('button', { name: /Close Demo/ })).toBeNull()
+    await user.click(within(demo()).getByRole('button', { name: 'More' }))
+    await user.click(await screen.findByRole('menuitem', { name: /^Close Demo/ }))
     expect(screen.queryByRole('dialog', { name: 'Demo' })).toBeNull()
     expect(exit).toHaveBeenCalledOnce()
   })
 
-  it('steps through the banknotes with ← and → or the picker, hides the UI with H and brings it back with a double-click', async () => {
+  it('steps through the banknotes with ← and → or the strip of them in the bar, hides the UI with H and brings it back with a double-click', async () => {
     const user = userEvent.setup()
     const project = await openProject()
     await openDemoHere(user)
@@ -203,9 +210,17 @@ describe('Demo on the laptop', () => {
     expect(shownNote()).toBe(project.notes[1].id)
     await user.keyboard('{ArrowLeft}{ArrowLeft}')
     expect(shownNote()).toBe(project.notes[2].id)
-    await user.click(screen.getByRole('combobox', { name: 'Banknote' }))
-    await user.click(await screen.findByRole('option', { name: 'Two' }))
+    // Or the bar's strip of the project's banknotes, in order, the one shown pressed (Keller, 14 November: "lay the designs
+    // in that project out horizontally ... at the bottom, so I can just like quickly switch between different banknotes")
+    const strip = document.querySelector('[data-demo-strip]') as HTMLElement
+    expect(within(strip).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['One', 'Two', 'Three'])
+    expect(within(strip).getByRole('button', { name: 'Three' }).getAttribute('aria-pressed')).toBe('true')
+    await user.click(within(strip).getByRole('button', { name: 'Two' }))
     expect(shownNote()).toBe(project.notes[1].id)
+    expect(within(strip).getByRole('button', { name: 'Two' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(strip).getByRole('button', { name: 'Three' }).getAttribute('aria-pressed')).toBe('false')
+    // The keys are Demo's again, not the button's
+    expect(document.activeElement).toBe(demo())
 
     const bar = document.querySelector('[data-demo-bar]') as HTMLElement
     await user.keyboard('h')
@@ -244,7 +259,7 @@ describe('Demo on the laptop', () => {
     expect(useTilt.getState().flipped).toBe(true)
   })
 
-  it('turns over with Flip, hides the UI from a button of its own at the top centre, saying for 2 s how to bring it back, and keeps the lamp and Realistic in ⋯, the lamp off as it opens', async () => {
+  it('has only the banknotes and ⋯ in the bar, F turning it over, hides the UI from a button of its own at the top centre, saying for 2 s how to bring it back, and keeps the lamp and Realistic in ⋯, the lamp off as it opens', async () => {
     const user = userEvent.setup()
     await openProject()
     // The editor's lamp left on: Demo opens without it, and leaving gives it back
@@ -254,12 +269,13 @@ describe('Demo on the laptop', () => {
     const bar = document.querySelector('[data-demo-bar]') as HTMLElement
     const hide = document.querySelector('[data-demo-hide]') as HTMLElement
 
-    // One Flip, not Front | Back (Keller, 11 November)
-    expect(within(bar).queryByRole('button', { name: 'Front', exact: true })).toBeNull()
-    expect(within(bar).queryByRole('button', { name: 'Back', exact: true })).toBeNull()
-    await user.click(within(bar).getByRole('button', { name: 'Flip' }))
+    // The banknotes and ⋯, nothing else (Keller, 14 November: "the UI should just be like 3 dots"): no Flip, as F and a swipe
+    // turn it over ("since we have flip built in, we can just get rid of the flip button"), no Fit | Real size, no picker
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['One', 'Two', 'Three', 'More'])
+    expect(within(bar).queryByRole('combobox')).toBeNull()
+    await user.keyboard('f')
     expect(useTilt.getState().flipped).toBe(true)
-    await user.click(within(bar).getByRole('button', { name: 'Flip' }))
+    await user.keyboard('f')
     expect(useTilt.getState().flipped).toBe(false)
 
     // The lamp and Realistic aren't in the bar but its ⋯ menu, ticked while on: Realistic on, as it starts, the lamp off
@@ -313,7 +329,8 @@ describe('Demo on the laptop', () => {
     expect(screen.queryByRole('status')).toBeNull()
     vi.useRealTimers()
 
-    await user.click(within(bar).getByRole('button', { name: 'Close Demo (Esc)' }))
+    await user.click(within(bar).getByRole('button', { name: 'More' }))
+    await user.click(await screen.findByRole('menuitem', { name: /^Close Demo/ }))
     expect(useTilt.getState().backlit).toBe(true)
   })
 
@@ -424,8 +441,8 @@ describe('Demo on the laptop', () => {
     for (let i = 0; i < 120; i++) frame()
     expect(useTilt.getState()).toMatchObject({ flipped: true, turn: 1, angleX: 0, targetX: 0 })
     expect(back()).toBe(true)
-    // Flip still turns it back round to the front
-    fireEvent.click(within(document.querySelector('[data-demo-bar]') as HTMLElement).getByRole('button', { name: 'Flip' }))
+    // F still turns it back round to the front
+    fireEvent.keyDown(window, { key: 'f' })
     for (let i = 0; i < 60; i++) frame()
     expect(useTilt.getState()).toMatchObject({ flipped: false, turn: 0 })
     expect(back()).toBe(false)
@@ -460,7 +477,12 @@ describe('Demo of the sample project', () => {
     expect(fullScreen).toHaveBeenCalledOnce()
     expect(demo()).toBeDefined()
     expect(screen.queryByRole('img', { name: 'QR code for the link' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Open on your phone' })).toBeNull()
+    // Nor in ⋯; and its one banknote has no strip, the bar ⋯ alone
+    await user.click(within(demo()).getByRole('button', { name: 'More' }))
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).queryByRole('menuitem', { name: 'Open on your phone' })).toBeNull()
+    expect(within(menu).getByRole('menuitem', { name: /^Close Demo/ })).toBeDefined()
+    expect(document.querySelector('[data-demo-strip]')).toBeNull()
   })
 })
 
@@ -947,10 +969,17 @@ describe('real size', () => {
     expect(JSON.parse(localStorage.getItem('of-playground.real-size')!)).toEqual({ '1470x956': 11 })
   })
 
-  it('opens the card check the first time Real size is picked, and draws the banknote at the size kept', async () => {
+  it('opens the card check the first time Real size is ticked in ⋯, and draws the banknote at the size kept', async () => {
     const user = userEvent.setup()
     renderDemo()
-    await user.click(screen.getByRole('button', { name: 'Real size' }))
+    // Real size is ⋯'s (Keller, 14 November: "the real size should be an option in the 3-dot menu"), unticked as it opens
+    expect(screen.queryByRole('button', { name: 'Real size' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Fit' })).toBeNull()
+    const real = within(await openMenu()).getByRole('menuitemcheckbox', { name: 'Real size' })
+    expect(real.getAttribute('aria-checked')).toBe('false')
+    await user.click(real)
+    // The menu closes on it
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     const check = document.querySelector('[data-card-check]') as HTMLElement
     const outline = check.querySelector('[data-card-outline]') as HTMLElement
     const guess = realPxPerMm()
@@ -962,12 +991,17 @@ describe('real size', () => {
     expect(isChecked()).toBe(true)
     expect(realPxPerMm()).toBeCloseTo(guess * 1.005)
     expect(parseFloat((document.querySelector('[data-demo-note]') as HTMLElement).style.width)).toBeCloseTo(150 * guess * 1.005)
-    // Checked once: Real size again doesn't ask, but ⋯ has it checked again, only with Real size picked
-    await user.click(screen.getByRole('button', { name: 'Fit' }))
-    expect(within(await openMenu()).queryByRole('menuitem', { name: 'Check real size' })).toBeNull()
-    await user.keyboard('{Escape}')
+    // Unticked, it fits again; checked once, Real size again doesn't ask, but ⋯ has it checked again, only while it is ticked
+    let menu = await openMenu()
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Real size' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(menu).getByRole('menuitem', { name: 'Check real size' })).toBeDefined()
+    await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Real size' }))
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-    await user.click(screen.getByRole('button', { name: 'Real size' }))
+    expect(parseFloat((document.querySelector('[data-demo-note]') as HTMLElement).style.width)).toBeCloseTo(1248)
+    menu = await openMenu()
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Real size' }).getAttribute('aria-checked')).toBe('false')
+    expect(within(menu).queryByRole('menuitem', { name: 'Check real size' })).toBeNull()
+    await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Real size' }))
     expect(document.querySelector('[data-card-check]')).toBeNull()
     await user.click(within(await openMenu()).getByRole('menuitem', { name: 'Check real size' }))
     expect(document.querySelector('[data-card-check]')).not.toBeNull()
@@ -999,9 +1033,8 @@ describe('Demo links and the phone’s page', () => {
       headers: { 'Content-Type': 'application/json' },
     }))
     vi.stubGlobal('fetch', asked)
-    render(<TooltipProvider><PhoneLink link="http://localhost:3000/#/play/keller/p-1/n-2" /></TooltipProvider>)
+    render(<TooltipProvider><PhoneLink link="http://localhost:3000/#/play/keller/p-1/n-2" open onOpenChange={() => {}} anchor={{ current: document.body }} /></TooltipProvider>)
     await waitFor(() => expect(asked).toHaveBeenCalledWith('/__phone-address', expect.anything()))
-    await user.click(screen.getByRole('button', { name: 'Open on your phone' }))
     await user.click(await screen.findByRole('button', { name: 'Copy link' }))
     expect(await navigator.clipboard.readText()).toBe('https://192.168.1.23:6174/#/play/keller/p-1/n-2')
   })
@@ -1022,8 +1055,7 @@ describe('Demo links and the phone’s page', () => {
   it('keeps its own link where the dev server says of no door', async () => {
     const user = userEvent.setup()
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } })))
-    render(<TooltipProvider><PhoneLink link="http://localhost:3000/#/play/keller/p-1/n-2" /></TooltipProvider>)
-    await user.click(screen.getByRole('button', { name: 'Open on your phone' }))
+    render(<TooltipProvider><PhoneLink link="http://localhost:3000/#/play/keller/p-1/n-2" open onOpenChange={() => {}} anchor={{ current: document.body }} /></TooltipProvider>)
     await user.click(await screen.findByRole('button', { name: 'Copy link' }))
     expect(await navigator.clipboard.readText()).toBe('http://localhost:3000/#/play/keller/p-1/n-2')
   })
@@ -1039,13 +1071,14 @@ describe('Demo links and the phone’s page', () => {
     expect(screen.queryByPlaceholderText(/username/i)).toBeNull()
     expect(document.querySelector('[data-demo-skeleton]')).not.toBeNull()
     await screen.findByRole('dialog', { name: 'Demo' })
-    expect(shownNote()).toBe(project.notes[1].id)
-    expect(screen.getByRole('combobox', { name: 'Banknote' }).textContent).toContain('Two')
+    // Drawn once the screen is measured
+    await waitFor(() => expect(shownNote()).toBe(project.notes[1].id))
+    expect(screen.getByRole('button', { name: 'Two' }).getAttribute('aria-pressed')).toBe('true')
     // The same revision changes nothing; the next one swaps in, the banknote shown staying
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
     expect(cloud.calls).toBe(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Banknote' }).textContent).toContain('Two, renamed'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Two, renamed' }).getAttribute('aria-pressed')).toBe('true'))
     expect(shownNote()).toBe(project.notes[1].id)
     // Picking another keeps the address up to date, without a page in the history
     act(() => { fireEvent.keyDown(window, { key: 'ArrowRight' }) })
@@ -1062,7 +1095,8 @@ describe('Demo links and the phone’s page', () => {
     cloud.rows = [{ data: project, revision: 'r1', deleted_at: null }]
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await screen.findByRole('dialog', { name: 'Demo' })
-    expect(shownNote()).toBe(project.notes[0].id)
+    // Drawn once the screen is measured
+    await waitFor(() => expect(shownNote()).toBe(project.notes[0].id))
   })
 
   it('opens projects in Demo from the list on a phone, the tap asking iPhone for motion as it opens', async () => {

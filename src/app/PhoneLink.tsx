@@ -1,9 +1,8 @@
-import { Check, Copy, Smartphone } from 'lucide-react'
-import { useEffect, useMemo, useState, type ComponentProps } from 'react'
+import { Check, Copy } from 'lucide-react'
+import { useEffect, useMemo, useState, type ComponentProps, type RefObject } from 'react'
 import { encode } from 'uqr'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { reportError } from '../cloud/notices'
 import { forPhone } from '../lib/demoLink'
@@ -28,25 +27,25 @@ export function QrCode({ text, className }: { text: string; className?: string }
 }
 
 /**
- * The phone button in Demo's bar on the laptop: the banknote shown, on a phone, by its QR code, or its link to copy
- * (Keller, 10 November: like Figma's prototype mode, mirrored on the phone). From the dev server on localhost both go
- * through its door for phones on the Wi-Fi (Keller, 11 November: "when im on local, the link on my phone still works")
+ * The banknote shown, on a phone, by its QR code, or its link to copy: Demo's Open on your phone, in ⋯ on the laptop
+ * (Keller, 10 November: like Figma's prototype mode, mirrored on the phone; a button of its own in the bar until Keller,
+ * 14 November, wanted the bar "just like 3 dots"), opening above the bar as ⋯'s menu does. From the dev server on
+ * localhost both go through its door for phones on the Wi-Fi (Keller, 11 November: "when im on local, the link on my phone
+ * still works")
  */
-export function PhoneLink({ link, finalFocus = true }: {
+export function PhoneLink({ link, open, onOpenChange, anchor, finalFocus = true }: {
   link: string
-  /** Where the keys go once it closes (Demo itself), rather than back to the button, whose tooltip would take the next Esc */
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** What it opens above, its right edge on that one's: Demo's bar */
+  anchor: RefObject<Element | null>
+  /** Where the keys go once it closes (Demo itself) */
   finalFocus?: ComponentProps<typeof PopoverContent>['finalFocus']
 }) {
   const shown = forPhone(link, usePhoneDoor())
   return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger render={<PopoverTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Open on your phone" />} />}>
-          <Smartphone />
-        </TooltipTrigger>
-        <TooltipContent>Open on your phone</TooltipContent>
-      </Tooltip>
-      <PopoverContent side="top" sideOffset={12} className="w-56 items-center" finalFocus={finalFocus}>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverContent anchor={anchor} side="top" align="end" sideOffset={8} className="w-56 items-center" finalFocus={finalFocus}>
         <QrCode text={shown} className="size-48 rounded-md" />
         <CopyLink link={shown} />
       </PopoverContent>

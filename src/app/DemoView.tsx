@@ -1,5 +1,5 @@
-import { Ellipsis, EyeOff, FlipHorizontal2, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, ScanFace, Smartphone, Sparkles, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { Ellipsis, EyeOff, Lamp, LocateFixed, Minus, Plus, Rotate3d, Ruler, RulerDimensionLine, ScanFace, Smartphone, Sparkles, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -10,17 +10,16 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { IconButton, Panel, Segmented } from '../components/controls'
+import { IconButton, Panel } from '../components/controls'
 import { NoteView } from '../components/NoteView'
 import { TILT_LIMIT, clamp, perspectiveFor } from '../lib/frames'
 import { CARD_MM, CARD_RADIUS_MM, isChecked, realPxPerMm, setRealPxPerMm, useRealSize } from '../lib/realSize'
 import { setRealistic, useRealistic } from '../lib/realistic'
 import { type Quarter, ROTATE_SECONDS, onItsSide, quarterOf, unturn } from '../lib/rotate'
-import type { Project } from '../lib/types'
+import type { Note, Project } from '../lib/types'
 import { HALF_TURN, pressLight, releaseLight, rotateNotes, setTilt, turnOver, useTilt } from '../tilt/tilt'
 import { type Motion, useDeviceTilt, useWakeLock } from '../tilt/useDeviceTilt'
 import { type Camera, useFrontCamera } from '../tilt/useFrontCamera'
@@ -56,14 +55,17 @@ const FLICK_PX_PER_S = 500
 const FLICK_MS = 100
 const FLICK_STILL_MS = 50
 
+/** Fit fills the screen; Real size, ticked in ⋯, shows the banknote as big as it prints */
 type Size = 'fit' | 'real'
-const SIZES: { value: Size; label: string }[] = [{ value: 'fit', label: 'Fit' }, { value: 'real', label: 'Real size' }]
 /** Larger on a touch screen, for a finger */
 const TOUCH = 'pointer-coarse:size-9'
-const TOUCH_ROW = 'pointer-coarse:[&_button]:h-8'
+/** The strip's banknotes are at most this tall and this wide, px, sharing one scale so they keep their relative sizes */
+const STRIP_MAX = { height: 56, width: 72 }
+/** ⋯'s menu and the phone's QR code open this far above the bar, px, clear of the banknotes in it */
+const ABOVE_BAR = 8
 /** Demo's own controls, which a press or scroll on leaves the banknote alone: the bar, Hide UI and the button that asks for motion */
 const CONTROLS = '[data-demo-bar], [data-demo-hide], [data-demo-ask]'
-/** What a key goes to instead of Demo: a field, or a popup open over it (the picker, the phone's QR code) */
+/** What a key goes to instead of Demo: a field, or a popup open over it (⋯'s menu, the phone's QR code) */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"]'
 
 type Gesture =
@@ -108,15 +110,16 @@ function settleTurns(side: number, speed = { x: 0, y: 0 }) {
  * in the hand, springing back, both at once (Keller, 12 November: "it shouldn't be two modes"). Fit fills the screen with
  * a 16 px margin, Real size shows it as big as it prints (`src/lib/realSize.ts`), and Hide UI, a button of its own at the
  * top centre rather than one of the bar's, as it hides the bar (Keller, 11 and 12 November), leaves only the banknote,
- * saying for 2 s how to bring the UI back; ← and → step through the banknotes, F or Flip turns them over, as does a swipe
- * side to side past edge-on or flicked, L or pressing and holding holds them to the light, H hides and brings back the
- * UI, as does a double-click or double-tap. Recentre,
- * the lamp and Realistic wait in the bar's ⋯ menu, as they rarely change, so the bar is one line (Keller, 11 November:
- * "the default should just be with realistic mode on and lamp off. And this can live in a 3-dotted menu", then "it can
- * be just one line"). Left out on purpose: playback, the timeline, panels, labels, the tilt pad and hint text, but for
- * the one line on hiding the UI and the button iPhone needs to ask for motion. Its controls are the canvas's own, in the
- * app's dark colours, so they sit quietly on black (the whole page turns dark while it shows, so the picker's list, the
- * menu and tooltips do too). ⋯ also has Camera: the front camera, which sees where the eye is (`useFrontCamera`), its
+ * saying for 2 s how to bring the UI back; the bar's strip of the project's banknotes, or ← and →, shows another, F or a
+ * swipe side to side past edge-on or flicked turns them over, L or pressing and holding holds them to the light, H hides
+ * and brings back the UI, as does a double-click or double-tap. All else waits in the bar's ⋯ menu, as it rarely
+ * changes: Recentre, the lamp, Realistic and Real size, and on the laptop the phone's QR code and Close Demo, so the bar is
+ * the banknotes and ⋯ (Keller, 11 November: "the default should just be with realistic mode on and lamp off. And this can
+ * live in a 3-dotted menu"; 14 November: "the UI should just be like 3 dots"). Left out on purpose: playback, the
+ * timeline, panels, labels, the tilt pad and hint text, but for the one line on hiding the UI and the button iPhone needs
+ * to ask for motion. Its controls are the canvas's own, in the app's dark colours, so they sit quietly on black (the
+ * whole page turns dark while it shows, so the menu, the phone's QR code and tooltips do too). ⋯ also has Camera: the
+ * front camera, which sees where the eye is (`useFrontCamera`), its
  * picture small at the top left while it looks, always switched on by hand (Keller, 13 November: "people might not want
  * cameras"); on the dev server only at first, on the live site too since Keller wanted to try it out of doors ("push it
  * so i test it outside").
@@ -144,6 +147,12 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   const barSize = useElementSize(bar)
   const hide = useRef<HTMLDivElement>(null)
   const hideSize = useElementSize(hide)
+  // The bar's panel, which ⋯'s menu and the phone's QR code open above, clear of the banknotes in it
+  const barPanel = useRef<HTMLDivElement>(null)
+  // The phone's QR code, from ⋯ on the laptop (Keller, 14 November: the bar "just like 3 dots"; a button of its own in the
+  // bar until then); `phoneComing` keeps ⋯ from taking the keys back to Demo as it closes for it
+  const [phoneShown, setPhoneShown] = useState(false)
+  const phoneComing = useRef(false)
   const [size, setSize] = useState<Size>('fit')
   const [ui, setUi] = useState(true)
   // How to bring the UI back, for 2 s once it hides, then fading (Keller, 12 November: "have a like prompt that stays for
@@ -290,6 +299,12 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // first control in the bar, Demo taking focus but not Tab, and the picker takes a letter as a banknote's name
   const backToDemo = () => {
     queueMicrotask(() => root.current?.focus({ preventScroll: true }))
+    return false
+  }
+  // ⋯ closed for the phone's QR code, which takes the keys itself and gives them back to Demo as it closes
+  const menuClosed = () => {
+    if (!phoneComing.current) return backToDemo()
+    phoneComing.current = false
     return false
   }
 
@@ -545,38 +560,30 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
           </div>
         )}
 
-        {/* One line, on a phone too (Keller, 11 November: "it can be just one line"): the picker gives up width, its name
-            cut short, before anything else does, and only a screen under 360 px wraps it. Hidden with Hide UI, not taken
-            away, so it is measured for the room it leaves */}
+        {/* The bar, at the bottom: the project's banknotes in a row, and ⋯ (Keller, 14 November: "the UI should just be like
+            3 dots ... lay the designs in that project out horizontally ... at the bottom, so I can just like quickly switch
+            between different banknotes"). Flip went, as a swipe or F turns the banknote over ("since we have flip built in,
+            we can just get rid of the flip button"), Fit | Real size went into ⋯ as Real size ("the real size should be an
+            option in the 3-dot menu"), and on the laptop the phone button and ✕ too; the strip took the picker's place,
+            and a project of one banknote has ⋯ alone. Hidden with Hide UI, not taken away, so it is measured for the room
+            it leaves */}
         {note && (
           <div ref={bar} data-demo-bar="" className={cn('absolute inset-x-3 flex justify-center', !ui && 'invisible')} style={{ bottom: BAR_INSET }}>
-            <Panel className="flex max-w-full items-center justify-center gap-1.5 p-1.5 max-[359px]:flex-wrap pointer-coarse:gap-1">
-              <Select value={note.id} items={notes.map((n) => ({ value: n.id, label: n.name }))} onValueChange={(id) => { if (id) onPick(id) }}>
-                <SelectTrigger aria-label="Banknote" size="sm" className="w-40 min-w-0 pointer-coarse:h-8 *:data-[slot=select-value]:block *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:truncate">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent side="top" alignItemWithTrigger={false} finalFocus={backToDemo}>
-                  {notes.map((n) => <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {/* One button that turns it over, as F does, not Front | Back (Keller, 11 November) */}
-              <Button variant="ghost" size="sm" className="pointer-coarse:h-8" title="Turn it over (F)" onClick={() => turnOver()}>
-                <FlipHorizontal2 />
-                Flip
-              </Button>
-              <div className={cn('w-36 shrink-0', TOUCH_ROW)}>
-                <Segmented value={size} options={SIZES} onChange={pickSize} />
-              </div>
-              <LookMenu finalFocus={backToDemo} motion={motion} onRecentre={recentre}
-                camera={{ on: camera, state: cameraState, onChange: setCamera }}
-                onCheckSize={size === 'real' ? () => setChecking(true) : undefined} />
-              {phoneLink && <PhoneLink link={phoneLink} finalFocus={backToDemo} />}
-              {onClose && (
-                <IconButton className={TOUCH} label="Close Demo (Esc)" onClick={onClose}>
-                  <X />
-                </IconButton>
-              )}
-            </Panel>
+            <div ref={barPanel} className="flex max-w-full min-w-0">
+              <Panel className="flex max-w-full min-w-0 items-center gap-1.5 p-1.5">
+                {notes.length > 1 && (
+                  <>
+                    <NoteStrip notes={notes} shownId={note.id} onPick={(id) => { onPick(id); backToDemo() }} />
+                    <div className="h-7 w-px shrink-0 bg-border" aria-hidden="true" />
+                  </>
+                )}
+                <LookMenu finalFocus={menuClosed} anchor={barPanel} motion={motion} onRecentre={recentre}
+                  camera={{ on: camera, state: cameraState, onChange: setCamera }}
+                  size={size} onSize={pickSize} onCheckSize={() => setChecking(true)}
+                  onPhone={phoneLink ? () => { phoneComing.current = true; setPhoneShown(true) } : undefined} onClose={onClose} />
+              </Panel>
+            </div>
+            {phoneLink && <PhoneLink link={phoneLink} open={phoneShown} onOpenChange={setPhoneShown} anchor={barPanel} finalFocus={backToDemo} />}
           </div>
         )}
 
@@ -588,7 +595,46 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
 }
 
 /**
- * ⋯, all that rarely changes, so the bar stays one line (Keller, 11 November). On a phone first Recentre while it tilts
+ * The project's banknotes in a row, in the bar (Keller, 14 November: "lay the designs in that project out horizontally ...
+ * at the bottom, so I can just like quickly switch between different banknotes"): their fronts at one scale, at most
+ * `STRIP_MAX`, bottoms lined up, as the project list's cards show them, the one shown outlined and the others dimmed, and a
+ * tap shows one, its name in a tooltip. Drawn flat, as the Banknotes list draws them. More than fit scroll sideways, the
+ * one shown kept in sight, as ← and → step through them too
+ */
+function NoteStrip({ notes, shownId, onPick }: { notes: Note[]; shownId: string; onPick: (noteId: string) => void }) {
+  const strip = useRef<HTMLDivElement>(null)
+  const shown = useRef<HTMLButtonElement>(null)
+  const scale = Math.min(STRIP_MAX.height / Math.max(...notes.map((n) => n.heightMm), 1), STRIP_MAX.width / Math.max(...notes.map((n) => n.widthMm), 1))
+  useLayoutEffect(() => {
+    const box = strip.current
+    const button = shown.current
+    if (!box || !button) return
+    const left = button.offsetLeft
+    const right = left + button.offsetWidth
+    if (left < box.scrollLeft) box.scrollLeft = left - 8
+    else if (right > box.scrollLeft + box.clientWidth) box.scrollLeft = right - box.clientWidth + 8
+  }, [shownId])
+  return (
+    <div ref={strip} data-demo-strip=""
+      className="relative flex min-w-0 touch-pan-x items-end gap-2 overflow-x-auto overflow-y-hidden p-[5px] [scrollbar-width:none] pointer-coarse:gap-2.5 [&::-webkit-scrollbar]:hidden">
+      {notes.map((n) => {
+        const on = n.id === shownId
+        return (
+          <button key={n.id} ref={on ? shown : undefined} type="button" title={n.name} aria-label={n.name} aria-pressed={on}
+            className={cn('shrink-0 transition-opacity focus-visible:outline-2 focus-visible:outline-ring', !on && 'opacity-50 hover:opacity-80')}
+            style={on ? { outline: '1.5px solid white', outlineOffset: 2.5 } : undefined}
+            onClick={() => onPick(n.id)}>
+            <NoteView note={n} scale={scale} />
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * ⋯, all else, so the bar is only the banknotes and ⋯ (Keller, 11 November; 14 November: "the UI should just be like 3
+ * dots"). On a phone first Recentre while it tilts
  * (since 13 November it makes how the phone is held then the neutral, moving the dial: "just one value"),
  * or in words once motion was refused (a page can't ask again until Safari is quit and reopened), and no switch for its
  * tilt, always on (Keller, 12 November); with it the neutral's dial (Keller, 13 November), how far from lying flat the
@@ -596,29 +642,40 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
  * too ("Camera unavailable" while it couldn't start);
  * then the lamp, held to the light until switched off again, and Realistic, the
  * tilt card's two toggles, Realistic on until switched off and Demo opening with the lamp off ("the default should just
- * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); and with Real size picked, its check
- * against a bank card. Toggles are ticked while on.
+ * be with realistic mode on and lamp off. And this can live in a 3-dotted menu"); then Real size, ticked, Fit unticked
+ * ("the real size should be an option in the 3-dot menu"; Fit | Real size in the bar until then), and while it is, its
+ * check against a bank card; and on the laptop the phone's QR code and Close Demo. Toggles are ticked while on. It opens
+ * above the bar, lined up with the bar's right end, clear of the banknotes in it
  */
-function LookMenu({ finalFocus, motion, onRecentre, camera, onCheckSize }: {
+function LookMenu({ finalFocus, anchor, motion, onRecentre, camera, size, onSize, onCheckSize, onPhone, onClose }: {
   finalFocus: () => boolean
+  /** What it opens above: the bar's panel */
+  anchor: RefObject<Element | null>
   motion: Motion
   onRecentre: () => void
   /** The front camera's switch */
   camera: { on: boolean; state: Camera; onChange: (on: boolean) => void }
-  /** Real size's check, while Real size is picked */
-  onCheckSize?: () => void
+  /** Fit, or Real size ticked */
+  size: Size
+  onSize: (size: Size) => void
+  /** Real size's check, while Real size is ticked */
+  onCheckSize: () => void
+  /** The phone's QR code (on the laptop) */
+  onPhone?: () => void
+  /** Leaves Demo (on the laptop), as Esc does */
+  onClose?: () => void
 }) {
   const backlit = useTilt((s) => s.backlit)
   const realistic = useRealistic((s) => s.on)
   return (
     <DropdownMenu>
       <Tooltip>
-        <TooltipTrigger render={<DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" className={TOUCH} />} />}>
+        <TooltipTrigger render={<DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" className={cn('shrink-0', TOUCH)} />} />}>
           <Ellipsis />
         </TooltipTrigger>
         <TooltipContent>More</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent side="top" align="end" className="w-auto" finalFocus={finalFocus}>
+      <DropdownMenuContent anchor={anchor} side="top" align="end" sideOffset={ABOVE_BAR} className="w-auto" finalFocus={finalFocus}>
         {motion === 'on' ? (
           <>
             <DropdownMenuItem onClick={onRecentre}>
@@ -647,14 +704,31 @@ function LookMenu({ finalFocus, motion, onRecentre, camera, onCheckSize }: {
           <Sparkles />
           Realistic
         </DropdownMenuCheckboxItem>
-        {onCheckSize && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onCheckSize}>
-              <Ruler />
-              Check real size
-            </DropdownMenuItem>
-          </>
+        <DropdownMenuSeparator />
+        {/* The menu closes on it, as the banknote changes size, or the card check opens the first time */}
+        <DropdownMenuCheckboxItem checked={size === 'real'} closeOnClick onCheckedChange={(on) => onSize(on ? 'real' : 'fit')}>
+          <RulerDimensionLine />
+          Real size
+        </DropdownMenuCheckboxItem>
+        {size === 'real' && (
+          <DropdownMenuItem onClick={onCheckSize}>
+            <Ruler />
+            Check real size
+          </DropdownMenuItem>
+        )}
+        {(onPhone || onClose) && <DropdownMenuSeparator />}
+        {onPhone && (
+          <DropdownMenuItem onClick={onPhone}>
+            <Smartphone />
+            Open on your phone
+          </DropdownMenuItem>
+        )}
+        {onClose && (
+          <DropdownMenuItem onClick={onClose}>
+            <X />
+            Close Demo
+            <DropdownMenuShortcut className="pl-4 pointer-coarse:hidden">Esc</DropdownMenuShortcut>
+          </DropdownMenuItem>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
