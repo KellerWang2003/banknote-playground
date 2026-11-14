@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { TILT_LIMIT, clamp } from '../lib/frames'
 import { oneEuro, screenAngleNow, tiltFromEye } from '../lib/deviceTilt'
 import { type Face, faceDetector } from '../lib/faceDetector'
-import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, type Seen, cameraEye } from '../lib/frontCamera'
+import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, type Seen, cameraEye, wellInView } from '../lib/frontCamera'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { EYE_M } from '../lib/viewer'
 import { setTilt, useTilt } from './tilt'
@@ -10,6 +10,12 @@ import { sightEye } from './useDeviceTilt'
 
 /** How long a camera's picture takes to reach the page, ms, where the browser doesn't say when it was taken: a phone's, near enough */
 const CAMERA_LAG_MS = 50
+/**
+ * How many pictures running must find the face well inside (`wellInView`) before what they say counts, after one that
+ * didn't: a face glimpsed for a moment (something in the room behind once the face has gone, or the face coming back in
+ * at an edge) doesn't move the eye
+ */
+const SEEN_IN_A_ROW = 3
 
 /** Where the camera stands: off, coming on (asking for the camera, fetching the detector), on, or it couldn't */
 export type Camera = 'off' | 'starting' | 'on' | 'failed'
@@ -26,7 +32,11 @@ const area = (face: Face) => (face.boundingBox ? face.boundingBox.width * face.b
  * Its picture plays in `videoRef`'s <video>, which the caller shows, as wide as `aspect` says for its height, and the
  * two eyes found in it go to `rightRef` and `leftRef`'s two dots over it, placed as shares of it each picture without a
  * render. A phone held sideways with rotation locked (`upright`, which way up it is in the hand) still gives its picture
- * as the screen is, the face in it on its side: it is looked for turned as the view is, upright.
+ * as the screen is, the face in it on its side: it is looked for turned as the view is, upright. Only a face well inside
+ * the picture counts (`wellInView`), and only once SEEN_IN_A_ROW pictures running have found one: while none does, as
+ * when the phone is tilted further than the camera sees round (Keller, 14 November: "my eye would just go off screen ...
+ * we need to have a mechanism where it kind of stays ... based on gyroscope data"), the phone's motion alone carries the
+ * tilt, the eye kept where it was last seen in the room (useDeviceTilt), and the dots hide.
  */
 export function useFrontCamera(on: boolean, phone: boolean, turns: number, upright: Quarter = 0) {
   const [camera, setCamera] = useState<Camera>('off')
@@ -74,6 +84,8 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
       measure()
       setCamera('on')
       let stamp = 0
+      /** Pictures running that found the face well inside */
+      let inARow = 0
       const look = (now: number, picture?: VideoFrameCallbackMetadata) => {
         if (!live) return
         next()
@@ -85,13 +97,16 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
         try {
           faces = detector.detectForVideo(el, stamp, { rotationDegrees: upright === 3 ? -90 : upright * 90 }).detections
         } catch {
+          inARow = 0
           return
         }
         const face = faces.reduce<Face | undefined>((big, f) => (!big || area(f) > area(big) ? f : big), undefined)
         const [r, l] = face?.keypoints ?? []
-        place(dots.right, r)
-        place(dots.left, l)
-        if (!r || !l) return
+        inARow = r && l && wellInView(r, l, el.videoWidth, el.videoHeight) ? inARow + 1 : 0
+        const counts = inARow >= SEEN_IN_A_ROW
+        place(dots.right, counts ? r : undefined)
+        place(dots.left, counts ? l : undefined)
+        if (!counts || !r || !l) return
         const screenAngle = screenAngleNow()
         const eye = phone
           ? cameraEye(r, l, el.videoWidth, el.videoHeight, screenAngle, PHONE_CAMERA_M, CAMERA_FOV_DEG.phone)

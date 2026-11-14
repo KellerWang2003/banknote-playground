@@ -51,3 +51,17 @@ export function cameraEye(right: Seen, left: Seen, width: number, height: number
   const length = Math.hypot(eye[0], eye[1], eye[2])
   return [(eye[0] / length) * EYE_M, (eye[1] / length) * EYE_M, (eye[2] / length) * EYE_M]
 }
+
+/**
+ * Whether the viewer's two eyes (`right` and `left`, as `cameraEye` takes them) are well inside the camera's picture
+ * (`width` × `height` px): each at least half as far from every edge as the two are apart. Nearer an edge than that, the
+ * face partly out of the picture, the face detector still finds it, often as surely as a whole one, but puts its eyes
+ * nearer the middle than they are (a probe, 14 November: eyes just over a 640 px picture's top edge came back 29 px and
+ * then 40 px further in than they were, found 0.57 and 0.53 sure), which would pull Demo's eye back towards square on just
+ * as the face leaves the picture (Keller, 14 November: tilting far, "my eye would just go off screen")
+ */
+export function wellInView(right: Seen, left: Seen, width: number, height: number) {
+  const margin = Math.hypot((right.x - left.x) * width, (right.y - left.y) * height) / 2
+  return [right, left].every(({ x, y }) =>
+    x * width >= margin && x * width <= width - margin && y * height >= margin && y * height <= height - margin)
+}

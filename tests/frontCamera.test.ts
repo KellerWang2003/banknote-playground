@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orientationMatrix, tiltFromEye, type Vector } from '../src/lib/deviceTilt'
-import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye } from '../src/lib/frontCamera'
+import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye, wellInView } from '../src/lib/frontCamera'
 import { EYE_M, toPhone } from '../src/lib/viewer'
 
 const RAD = Math.PI / 180
@@ -83,5 +83,29 @@ describe('a laptop’s camera', () => {
     const laptop = tiltOf(cameraEye(right, left, 480, 640, 0, 0, CAMERA_FOV_DEG.laptop)!).x
     expect(phone).toBeLessThan(laptop)
     expect(Math.tan(-phone * RAD) / Math.tan(-laptop * RAD)).toBeCloseTo(Math.tan(43 * RAD) / Math.tan(37.5 * RAD), 6)
+  })
+})
+
+describe('a face well inside the camera’s picture', () => {
+  const W = 480, H = 640
+
+  it('counts two eyes each at least half their spacing in from every edge', () => {
+    // 96 px apart, so at least 48 px in
+    expect(wellInView({ x: 0.3, y: 0.5 }, { x: 0.5, y: 0.5 }, W, H)).toBe(true)
+    expect(wellInView({ x: 0.11, y: 0.5 }, { x: 0.31, y: 0.5 }, W, H)).toBe(true)
+    expect(wellInView({ x: 0.09, y: 0.5 }, { x: 0.29, y: 0.5 }, W, H)).toBe(false)
+    // 106 px apart, the left eye 38 px from the right edge
+    expect(wellInView({ x: 0.7, y: 0.5 }, { x: 0.92, y: 0.5 }, W, H)).toBe(false)
+    expect(wellInView({ x: 0.45, y: 0.95 }, { x: 0.65, y: 0.95 }, W, H)).toBe(false)
+  })
+
+  it('turns down a face half over an edge, whose eyes come back nearer the middle than they are', () => {
+    // As the face detector gave them for eyes 13 px over a 640 px picture's top: 15 px inside it, 83 px apart
+    expect(wellInView({ x: 0.425, y: 0.024 }, { x: 0.598, y: 0.024 }, W, H)).toBe(false)
+  })
+
+  it('measures a face on its side alike, a phone held sideways', () => {
+    expect(wellInView({ x: 0.5, y: 0.3 }, { x: 0.5, y: 0.45 }, W, H)).toBe(true)
+    expect(wellInView({ x: 0.08, y: 0.3 }, { x: 0.08, y: 0.45 }, W, H)).toBe(false)
   })
 })
