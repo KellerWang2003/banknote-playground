@@ -25,16 +25,21 @@ const UP_BETA = 0.05 * (180 / Math.PI)
 const SIGHT_MS = 500
 /**
  * How long an eye seen from outside takes to bring Demo's most of the way there (all but 1/e), ms, the phone held still.
- * The phone's own motion leads, as it knows a turn at once and exactly, and the camera follows on behind, putting right
- * what the motion can't know (the head moving, the gyroscope drifting), as its picture comes late and shakes (Keller, 13
- * November: with each picture taking the eye most of the way there, "when i am tilting, it is napping back to normal")
+ * The phone's own motion leads, as it knows a turn at once and exactly, and the camera follows close behind, putting right
+ * what the motion can't know (the head moving with the phone, the gyroscope drifting): Keller, 14 November, turning his
+ * head up with the phone, of the line the banknote follows, "the pink line doesn't immediately follow, and it kind of like
+ * slowly goes into it", and "even when I'm like moving my head slowly" (500 ms until then, after Keller, 13 November, with
+ * each picture taking the eye most of the way there: "when i am tilting, it is napping back to normal", since put right
+ * by a wider field of view and by going only by a face well inside the picture). The tilt's own One Euro filter steadies
+ * what shake comes through
  */
-const SIGHT_EASE_MS = 500
+const SIGHT_EASE_MS = 60
 /**
  * How fast the phone turns the eye across its screen, degrees a second, at which a picture counts for half as much: the
- * faster, the less, as a picture taken mid-turn is the most out of step with the motion
+ * faster, the less, as a picture taken mid-turn is the most out of step with the motion (60 until 14 November: a head
+ * turned with the phone, at 30° to 60° a second, now counts nearly in full)
  */
-const SIGHT_TURN_DEG_S = 60
+const SIGHT_TURN_DEG_S = 120
 /** Over how long that is measured, ms */
 const TURN_SPAN_MS = 100
 /** The longest wait for a picture that counts, ms: after a pause, the next moves the eye no further than after this long */
