@@ -16,9 +16,9 @@ import { createNote, createProject } from '../src/lib/notes'
 import { CARD_MM, guessPxPerMm, isChecked, realPxPerMm, screenKey, setRealPxPerMm, useRealSize, type Device } from '../src/lib/realSize'
 import { useProjects } from '../src/lib/store'
 import type { Project } from '../src/lib/types'
-import { EYE_M } from '../src/lib/viewer'
+import { EYE_M, angleApart } from '../src/lib/viewer'
 import { setTilt, useTilt, useTiltLoop } from '../src/tilt/tilt'
-import { sightEye } from '../src/tilt/useDeviceTilt'
+import { eyeNow, inRoom, sightEye } from '../src/tilt/useDeviceTilt'
 import { useViewing } from '../src/tilt/viewing'
 
 const cloud = vi.hoisted(() => ({ rows: [] as unknown[], fail: undefined as Error | undefined, calls: 0 }))
@@ -43,8 +43,8 @@ vi.mock('../src/cloud/repository', async (importOriginal) => {
   }) }
 })
 
-// The front camera's face detector comes from a CDN: here it never comes
-vi.mock('../src/lib/faceDetector', () => ({ faceDetector: () => new Promise(() => {}) }))
+// The front camera's face tracker comes from a CDN: here it never comes
+vi.mock('../src/lib/faceTracker', () => ({ faceTracker: () => new Promise(() => {}) }))
 
 // The sample project's artwork is drawn on a canvas, which jsdom lacks: it opens one plain banknote instead
 vi.mock('../src/lib/demo', async () => {
@@ -665,6 +665,40 @@ describe('Demo on a phone', () => {
       orient(0, 20, 0)
     }
     expect(useTilt.getState().target).toBeCloseTo(10, 0)
+  })
+
+  it('puts an eye seen from outside in the room beside its own, where a head stays put while the phone turns', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    // Nothing to go by before motion comes
+    expect(inRoom([0, 0, EYE_M], now)).toBeUndefined()
+    renderDemo()
+    orient(0, 90, 0)
+    await motionOn()
+    // Held as it was opened, square on: an eye seen square on is where Demo has it
+    const first = inRoom([0, 0, EYE_M], now)!
+    expect(angleApart(first.seen, first.eye)).toBeCloseTo(0, 6)
+    // Tipped back 40°, the eye kept where it was in the room: seen where the motion has it now, it is the same eye there,
+    // and one seen square on now is 40° from it (something else in the room, or the viewer moved with the phone)
+    for (let i = 0; i < 20; i++) {
+      now += 100
+      orient(0, 50, 0)
+    }
+    const kept = inRoom(eyeNow()!, now)!
+    expect(angleApart(kept.seen, kept.eye)).toBeCloseTo(0, 6)
+    expect(kept.eye).toEqual(first.eye)
+    const square = inRoom([0, 0, EYE_M], now)!
+    expect(angleApart(square.seen, square.eye)).toBeCloseTo(40, 6)
+    // A picture of a moment ago is placed as the phone was turned then: tipped back 20° more over a fifth of a second,
+    // one taken as that began is 40° off still, one taken now 60°
+    for (let i = 1; i <= 4; i++) {
+      now += 50
+      orient(0, 50 - 5 * i, 0)
+    }
+    const before = inRoom([0, 0, EYE_M], now - 200)!
+    const after = inRoom([0, 0, EYE_M], now)!
+    expect(angleApart(before.seen, before.eye)).toBeCloseTo(40, 6)
+    expect(angleApart(after.seen, after.eye)).toBeCloseTo(60, 6)
   })
 
   it('tries the front camera from ⋯, never on by itself, saying so when it can’t start', async () => {

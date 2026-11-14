@@ -35,6 +35,10 @@ const atEye = (v: Vector): Vector | undefined => {
   return length > 1e-9 && Number.isFinite(length) ? [(v[0] * EYE_M) / length, (v[1] * EYE_M) / length, (v[2] * EYE_M) / length] : undefined
 }
 
+/** The angle between two directions, degrees */
+export const angleApart = (a: Vector, b: Vector) =>
+  Math.acos(clamp((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b) || 1), -1, 1)) * (180 / Math.PI)
+
 /** Looking straight at the screen: the eye square on */
 export const SQUARE_ON: Vector = [0, 0, EYE_M]
 

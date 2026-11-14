@@ -23,11 +23,30 @@ export const PHONE_CAMERA_M = 0.065
 export const LAPTOP_CAMERA_M = 0.1
 /** How far apart a grown-up's eyes are, metres: how far away a face is, from how far apart its eyes look */
 export const EYES_APART_M = 0.063
+/**
+ * The nearest and the farthest a face looking at the screen is taken to be from the camera, metres (`faceAway`): one
+ * that reads nearer or farther isn't whoever holds the phone, or sits at the laptop, but something else in the picture
+ * (Keller, 14 November: "it is making another mistake thinking my background is my eyes")
+ */
+export const FACE_AWAY_M = { nearest: 0.15, farthest: 1.2 }
 
 /** A point in the camera's picture, as a share of its width (from the left) and height (from the top) */
 export interface Seen {
   x: number
   y: number
+}
+
+/** How far from the camera its picture lies, px: `width` × `height` px, seen `fovDeg` across its diagonal */
+const focal = (width: number, height: number, fovDeg: number) => Math.hypot(width, height) / 2 / Math.tan((fovDeg * RAD) / 2)
+
+/**
+ * How far from the camera a face is, metres, from how far apart its two eyes (`right` and `left`, shares of the
+ * `width` × `height` px picture) show in a picture seen `fovDeg` across its diagonal, taking them EYES_APART_M apart
+ * and level to the camera (turned away, a face reads farther than it is). Undefined when the two eyes are one
+ */
+export function faceAway(right: Seen, left: Seen, width: number, height: number, fovDeg = CAMERA_FOV_DEG.phone): number | undefined {
+  const apart = Math.hypot((right.x - left.x) * width, (right.y - left.y) * height)
+  return apart > 1 ? (focal(width, height, fovDeg) * EYES_APART_M) / apart : undefined
 }
 
 /**
@@ -37,10 +56,9 @@ export interface Seen {
  * `above` the screen's middle and sees `fovDeg` across its picture's diagonal. Undefined when the two eyes are one
  */
 export function cameraEye(right: Seen, left: Seen, width: number, height: number, screenAngle: number, above = PHONE_CAMERA_M, fovDeg = CAMERA_FOV_DEG.phone): Vector | undefined {
-  const f = Math.hypot(width, height) / 2 / Math.tan((fovDeg * RAD) / 2)
-  const apart = Math.hypot((right.x - left.x) * width, (right.y - left.y) * height)
-  if (!(apart > 1)) return undefined
-  const away = (f * EYES_APART_M) / apart
+  const f = focal(width, height, fovDeg)
+  const away = faceAway(right, left, width, height, fovDeg)
+  if (away === undefined) return undefined
   // From the camera, along the page as the screen shows it (x right, y up): what is to the page's right shows on the
   // picture's left, as the camera faces the other way from whoever looks at the screen
   const px = (-(((right.x + left.x) / 2) * width - width / 2) / f) * away

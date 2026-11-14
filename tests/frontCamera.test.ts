@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orientationMatrix, tiltFromEye, type Vector } from '../src/lib/deviceTilt'
-import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye, sightLine, wellInView } from '../src/lib/frontCamera'
+import { CAMERA_FOV_DEG, FACE_AWAY_M, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye, faceAway, sightLine, wellInView } from '../src/lib/frontCamera'
 import { EYE_M, toPhone } from '../src/lib/viewer'
 
 const RAD = Math.PI / 180
@@ -83,6 +83,44 @@ describe('a laptop’s camera', () => {
     const laptop = tiltOf(cameraEye(right, left, 480, 640, 0, 0, CAMERA_FOV_DEG.laptop)!).x
     expect(phone).toBeLessThan(laptop)
     expect(Math.tan(-phone * RAD) / Math.tan(-laptop * RAD)).toBeCloseTo(Math.tan(43 * RAD) / Math.tan(37.5 * RAD), 6)
+  })
+})
+
+describe('how far away a face is', () => {
+  const W = 480, H = 640
+  const eyes = (apart: number) => [{ x: 0.5 - apart / 2 / W, y: 0.4 }, { x: 0.5 + apart / 2 / W, y: 0.4 }] as const
+
+  it('is told from how far apart its eyes show: half as far apart, twice as far away', () => {
+    // A phone's camera sees 86° across its picture's diagonal: 429 px from it lies the 480 × 640 picture
+    expect(faceAway(...eyes(96), W, H)).toBeCloseTo(0.2815, 4)
+    expect(faceAway(...eyes(48), W, H)).toBeCloseTo(0.563, 4)
+    // The same on its side, a phone held sideways
+    expect(faceAway({ x: 0.5, y: 0.4 - 48 / H }, { x: 0.5, y: 0.4 + 48 / H }, W, H)).toBeCloseTo(0.2815, 4)
+    // A laptop's sees narrower, so the same picture of a face is of one further off
+    expect(faceAway(...eyes(96), W, H, CAMERA_FOV_DEG.laptop)).toBeGreaterThan(0.33)
+    expect(faceAway({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, W, H)).toBeUndefined()
+  })
+
+  it('is the distance the eye is seen from', () => {
+    // In the picture's middle the eye is straight out from the camera, as far as its face is away
+    const [right, left] = [{ x: 0.4, y: 0.5 }, { x: 0.6, y: 0.5 }]
+    const eye = cameraEye(right, left, W, H, 0, 0)!
+    expect(eye[0]).toBeCloseTo(0, 12)
+    expect(eye[1]).toBeCloseTo(0, 12)
+    // And off the middle, as far out from the camera's plane
+    const away = faceAway({ x: 0.1, y: 0.2 }, { x: 0.3, y: 0.2 }, W, H)!
+    const off = cameraEye({ x: 0.1, y: 0.2 }, { x: 0.3, y: 0.2 }, W, H, 0, 0)!
+    const f = Math.hypot(W, H) / 2 / Math.tan((CAMERA_FOV_DEG.phone / 2) * RAD)
+    expect(off[0] / off[2]).toBeCloseTo((0.3 * W) / f, 9)
+    expect(away).toBeCloseTo(0.2815, 4)
+  })
+
+  it('takes a viewer to be within arm’s length and a little more, and not right up against the camera', () => {
+    // Eyes 22 px apart in that picture are 1.23 m away, 181 px apart 14.9 cm: neither is whoever holds the phone
+    expect(faceAway(...eyes(22), W, H)!).toBeGreaterThan(FACE_AWAY_M.farthest)
+    expect(faceAway(...eyes(23), W, H)!).toBeLessThan(FACE_AWAY_M.farthest)
+    expect(faceAway(...eyes(181), W, H)!).toBeLessThan(FACE_AWAY_M.nearest)
+    expect(faceAway(...eyes(180), W, H)!).toBeGreaterThan(FACE_AWAY_M.nearest)
   })
 })
 

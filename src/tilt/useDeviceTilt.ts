@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { TILT_LIMIT, clamp } from '../lib/frames'
 import { nearestTurn, oneEuro, orientationMatrix, roomTilt, screenAngleNow, tiltFromEye, uprightQuarter, type Matrix, type Vector } from '../lib/deviceTilt'
 import { type Quarter, quarterOf } from '../lib/rotate'
-import { EYE_M, eyeToward, heldDeg, neutralEye, toEarth, toPhone } from '../lib/viewer'
+import { EYE_M, angleApart, eyeToward, heldDeg, neutralEye, toEarth, toPhone } from '../lib/viewer'
 import { setTilt, useTilt } from './tilt'
 import { setViewing, useViewing } from './viewing'
 
@@ -45,10 +45,6 @@ const TURN_SPAN_MS = 100
 /** The longest wait for a picture that counts, ms: after a pause, the next moves the eye no further than after this long */
 const SIGHT_GAP_MS = 100
 
-/** The angle between two directions, degrees */
-const angleApart = (a: Vector, b: Vector) =>
-  Math.acos(clamp((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b) || 1), -1, 1)) * (180 / Math.PI)
-
 /** Where an eye seen from outside Demo goes: to the hook showing Demo's tilt, while it does */
 let sighted: ((seen: Vector, at: number) => void) | undefined
 /**
@@ -59,6 +55,17 @@ let sighted: ((seen: Vector, at: number) => void) | undefined
  * until switched on
  */
 export const sightEye = (seen: Vector, at: number) => sighted?.(seen, at)
+
+/** How an eye seen from outside Demo is put in the room beside Demo's own, while it shows the phone's tilt */
+let placing: ((seen: Vector, at: number) => { seen: Vector; eye: Vector } | undefined) | undefined
+/**
+ * An eye seen from outside Demo, as `sightEye` takes it (in the phone's own axes as it was turned at `at`), and Demo's
+ * own, both in the room, where a head stays put while the phone turns: how far apart the two are there says whether what
+ * was seen is the viewer or something else in the room, and two eyes seen there a moment apart whether they are one face's
+ * (`useFrontCamera`; Keller, 14 November: "it is making another mistake thinking my background is my eyes"). Undefined
+ * before motion comes
+ */
+export const inRoom = (seen: Vector, at: number) => placing?.(seen, at)
 
 /** How Demo's eye is found now, while it shows the phone's tilt */
 let seeing: (() => Vector | undefined) | undefined
@@ -258,12 +265,19 @@ export function useDeviceTilt(turns: number) {
     // An eye seen from outside: into the room as the phone was turned then (the reading nearest), where the eye is kept,
     // moving it there as far as the time since the last says, the less the faster the phone was turning
     seeing = () => (r.eye && r.now ? toPhone(r.now, r.eye) : undefined)
-    sighted = (seen, at) => {
+    /** The reading nearest `time`, or undefined before any */
+    const near = (time: number) => {
       const last = r.past.at(-1)
-      if (!r.eye || !last) return
-      const near = (time: number) => r.past.reduce((nearest, p) => (Math.abs(p.at - time) < Math.abs(nearest.at - time) ? p : nearest), last)
+      return last && r.past.reduce((nearest, p) => (Math.abs(p.at - time) < Math.abs(nearest.at - time) ? p : nearest), last)
+    }
+    placing = (seen, at) => {
+      const then = near(at)
+      return r.eye && then ? { seen: toEarth(then.turn, seen), eye: r.eye } : undefined
+    }
+    sighted = (seen, at) => {
       const then = near(at)
       const before = near(at - TURN_SPAN_MS)
+      if (!r.eye || !then || !before) return
       const speed = then.at > before.at ? (angleApart(toPhone(then.turn, r.eye), toPhone(before.turn, r.eye)) * 1000) / (then.at - before.at) : 0
       const gap = r.seenAt === undefined ? 0 : clamp(at - r.seenAt, 0, SIGHT_GAP_MS)
       r.seenAt = Math.max(at, r.seenAt ?? at)
@@ -285,6 +299,7 @@ export function useDeviceTilt(turns: number) {
       clearTimeout(wait.current)
       relisten.current = () => {}
       sighted = undefined
+      placing = undefined
       seeing = undefined
       window.removeEventListener('deviceorientation', onOrientation)
       document.removeEventListener('visibilitychange', onVisible)
