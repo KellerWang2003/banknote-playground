@@ -65,3 +65,23 @@ export function wellInView(right: Seen, left: Seen, width: number, height: numbe
   return [right, left].every(({ x, y }) =>
     x * width >= margin && x * width <= width - margin && y * height >= margin && y * height <= height - margin)
 }
+
+/**
+ * A line of sight drawn in the camera's picture (Keller, 14 November: its picture should "show the line that is coming
+ * out of my eye so that I can identify what is going wrong"): from between the two eyes there, the way the eye at `eye`
+ * (in the phone's own axes from the screen's middle, as `cameraEye` gives it) looks to the banknote at the screen's middle,
+ * as long as its angle off square on over 90°, as a share of the picture's height, and nothing square on. In the picture
+ * as the camera sees it, unmirrored (x right, y down); `screenAngle` is the page's turn on the phone, as `cameraEye` takes it
+ */
+export function sightLine(eye: Vector, screenAngle = 0): { x: number; y: number } {
+  const c = Math.cos(screenAngle * RAD), s = Math.sin(screenAngle * RAD)
+  // Where the eye lies off square on, along the page (x right, y up)
+  const px = c * eye[0] - s * eye[1]
+  const py = s * eye[0] + c * eye[1]
+  const off = Math.hypot(px, py)
+  if (!(off > 1e-9)) return { x: 0, y: 0 }
+  const share = Math.atan2(off, eye[2]) / RAD / 90
+  // An eye to the page's right looks back to its left, which the camera, facing the other way, has on its right; one above
+  // looks down
+  return { x: (px / off) * share, y: (py / off) * share }
+}

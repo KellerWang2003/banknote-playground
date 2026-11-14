@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { TILT_LIMIT, clamp } from '../lib/frames'
 import { oneEuro, screenAngleNow, tiltFromEye } from '../lib/deviceTilt'
 import { type Face, faceDetector } from '../lib/faceDetector'
-import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, type Seen, cameraEye, wellInView } from '../lib/frontCamera'
+import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, type Seen, cameraEye, sightLine, wellInView } from '../lib/frontCamera'
 import { type Quarter, quarterOf } from '../lib/rotate'
 import { EYE_M } from '../lib/viewer'
 import { setTilt, useTilt } from './tilt'
-import { sightEye } from './useDeviceTilt'
+import { eyeNow, sightEye } from './useDeviceTilt'
 
 /** How long a camera's picture takes to reach the page, ms, where the browser doesn't say when it was taken: a phone's, near enough */
 const CAMERA_LAG_MS = 50
@@ -36,7 +36,11 @@ const area = (face: Face) => (face.boundingBox ? face.boundingBox.width * face.b
  * the picture counts (`wellInView`), and only once SEEN_IN_A_ROW pictures running have found one: while none does, as
  * when the phone is tilted further than the camera sees round (Keller, 14 November: "my eye would just go off screen ...
  * we need to have a mechanism where it kind of stays ... based on gyroscope data"), the phone's motion alone carries the
- * tilt, the eye kept where it was last seen in the room (useDeviceTilt), and the dots hide.
+ * tilt, the eye kept where it was last seen in the room (useDeviceTilt), and the dots hide. From between the two eyes,
+ * two lines of sight are drawn over the picture, as long as each is far off square on (`sightLine`; Keller, 14 November:
+ * "show the line that is coming out of my eye so that I can identify what is going wrong"): `seenRef`'s, the eye as this
+ * picture alone has it, and `usedRef`'s, the eye the banknote follows (`eyeNow`, the phone's motion and the pictures so
+ * far; on a phone only), so where the two part, the one the banknote follows is slow to the other.
  */
 export function useFrontCamera(on: boolean, phone: boolean, turns: number, upright: Quarter = 0) {
   const [camera, setCamera] = useState<Camera>('off')
@@ -45,12 +49,15 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
   const videoRef = useRef<HTMLVideoElement>(null)
   const rightRef = useRef<HTMLElement>(null)
   const leftRef = useRef<HTMLElement>(null)
+  const seenRef = useRef<SVGLineElement>(null)
+  const usedRef = useRef<SVGLineElement>(null)
   const latest = useRef({ phone, turns, upright })
   useEffect(() => { latest.current = { phone, turns, upright } })
 
   useEffect(() => {
     const el = videoRef.current
     const dots = { right: rightRef.current, left: leftRef.current }
+    const lines = { seen: seenRef.current, used: usedRef.current }
     if (!on || !el) return
     let live = true
     let stream: MediaStream | undefined
@@ -63,6 +70,17 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
         dot.style.left = `${seen.x * 100}%`
         dot.style.top = `${seen.y * 100}%`
       }
+    }
+    // A line of sight from `from`, `toward` it (`sightLine`, shares of the picture's height), the picture `tall` times as
+    // tall as it is wide; hidden without them
+    const draw = (line: SVGLineElement | null, from?: Seen, toward?: { x: number; y: number }, tall = 1) => {
+      if (!line) return
+      line.style.opacity = from && toward ? '1' : '0'
+      if (!from || !toward) return
+      line.setAttribute('x1', `${from.x * 100}%`)
+      line.setAttribute('y1', `${from.y * 100}%`)
+      line.setAttribute('x2', `${(from.x + toward.x * tall) * 100}%`)
+      line.setAttribute('y2', `${(from.y + toward.y) * 100}%`)
     }
     setCamera('starting')
     // The picture's shape, as it comes and whenever it changes (a phone turned, its picture turning with the page)
@@ -106,12 +124,19 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
         const counts = inARow >= SEEN_IN_A_ROW
         place(dots.right, counts ? r : undefined)
         place(dots.left, counts ? l : undefined)
-        if (!counts || !r || !l) return
+        if (!counts || !r || !l) {
+          draw(lines.seen)
+          draw(lines.used)
+          return
+        }
         const screenAngle = screenAngleNow()
         const eye = phone
           ? cameraEye(r, l, el.videoWidth, el.videoHeight, screenAngle, PHONE_CAMERA_M, CAMERA_FOV_DEG.phone)
           : cameraEye(r, l, el.videoWidth, el.videoHeight, screenAngle, LAPTOP_CAMERA_M, CAMERA_FOV_DEG.laptop)
         if (!eye) return
+        const between = { x: (r.x + l.x) / 2, y: (r.y + l.y) / 2 }
+        const tall = el.videoHeight / el.videoWidth
+        draw(lines.seen, between, sightLine(eye, screenAngle), tall)
         // When the picture was taken, where the browser says, else a moment before it reached the page
         const taken = picture?.captureTime
         const came = picture?.presentationTime
@@ -119,6 +144,8 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
           : (came !== undefined && now - came >= 0 && now - came < 500 ? came : now) - CAMERA_LAG_MS
         if (phone) {
           sightEye(eye, at)
+          const used = eyeNow()
+          draw(lines.used, between, used && sightLine(used, screenAngle), tall)
           return
         }
         const tilt = tiltFromEye([eye[0] / EYE_M, eye[1] / EYE_M, eye[2] / EYE_M], screenAngle, quarterOf(turns), TILT_LIMIT)
@@ -146,6 +173,8 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
       el.srcObject = null
       place(dots.right)
       place(dots.left)
+      draw(lines.seen)
+      draw(lines.used)
       setCamera('off')
       // A laptop's tilt, the camera's, back to flat; a phone's is its motion's
       const s = useTilt.getState()
@@ -153,5 +182,5 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
     }
   }, [on])
 
-  return { camera, aspect, videoRef, rightRef, leftRef }
+  return { camera, aspect, videoRef, rightRef, leftRef, seenRef, usedRef }
 }

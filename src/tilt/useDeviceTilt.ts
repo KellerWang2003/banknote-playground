@@ -55,6 +55,15 @@ let sighted: ((seen: Vector, at: number) => void) | undefined
  */
 export const sightEye = (seen: Vector, at: number) => sighted?.(seen, at)
 
+/** How Demo's eye is found now, while it shows the phone's tilt */
+let seeing: (() => Vector | undefined) | undefined
+/**
+ * Demo's eye now, in the phone's own axes as it is turned now: what the banknote's tilt follows, the phone's motion and
+ * the camera's pictures as they have it (the front camera's picture draws it, `useFrontCamera`), or undefined before
+ * motion comes
+ */
+export const eyeNow = () => seeing?.()
+
 type Answer = 'granted' | 'denied'
 /** What iPhone answered, or `tap` when it couldn't ask, as Safari asks only from a tap: asked again at the next */
 type Asked = Answer | 'tap'
@@ -243,6 +252,7 @@ export function useDeviceTilt(turns: number) {
     }
     // An eye seen from outside: into the room as the phone was turned then (the reading nearest), where the eye is kept,
     // moving it there as far as the time since the last says, the less the faster the phone was turning
+    seeing = () => (r.eye && r.now ? toPhone(r.now, r.eye) : undefined)
     sighted = (seen, at) => {
       const last = r.past.at(-1)
       if (!r.eye || !last) return
@@ -270,6 +280,7 @@ export function useDeviceTilt(turns: number) {
       clearTimeout(wait.current)
       relisten.current = () => {}
       sighted = undefined
+      seeing = undefined
       window.removeEventListener('deviceorientation', onOrientation)
       document.removeEventListener('visibilitychange', onVisible)
       r.eye = undefined

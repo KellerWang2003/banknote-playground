@@ -181,7 +181,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   // The front camera, tried from ⋯ (Keller, 13 November: "it doesn't have to be a separate page"), off until switched on;
   // on a laptop, the screen standing still, the banknote is drawn flat too
   const [camera, setCamera] = useState(false)
-  const { camera: cameraState, aspect: cameraAspect, videoRef: cameraRef, rightRef: rightEyeRef, leftRef: leftEyeRef } =
+  const { camera: cameraState, aspect: cameraAspect, videoRef: cameraRef, rightRef: rightEyeRef, leftRef: leftEyeRef, seenRef: seenLineRef, usedRef: usedLineRef } =
     useFrontCamera(camera, motion === 'on', quarterTurns, upright)
   const flat = motion === 'on' || camera
   useWakeLock(true)
@@ -501,13 +501,20 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
         {/* The front camera's picture while it looks, mirrored as a mirror shows a face, with the two eyes it found; faded
             rather than hidden with the UI, as a picture that isn't shown may stop coming. Its box is the picture's own shape
             (Keller, 13 November: "the camara preview is not showing up properly"), so the dots sit on the eyes, and it stays
-            as the screen is while a view for a phone held sideways turns, as the picture does */}
+            as the screen is while a view for a phone held sideways turns, as the picture does. From between the eyes go two
+            lines of sight, as long as each is far off square on: white, as this picture has the eye, and pink, the eye the
+            banknote follows (Keller, 14 November: "show the line that is coming out of my eye so that I can identify what
+            is going wrong") */}
         {camera && (
           <div data-front-camera="" className={cn('pointer-events-none absolute overflow-hidden rounded-md bg-black ring-1 ring-white/15 transition-opacity',
             (!ui || cameraState !== 'on') && 'opacity-0')} style={{ top: BAR_INSET, left: BAR_INSET, width: pictureBox.width, height: pictureBox.height }}>
             <div className="absolute top-1/2 left-1/2 transition-transform ease-in-out motion-reduce:transition-none"
               style={{ width: picture.width, height: picture.height, transform: `translate(-50%, -50%) rotate(${-viewDeg}deg) scaleX(-1)`, transitionDuration: `${ROTATE_SECONDS}s` }}>
               <video ref={cameraRef} className="absolute inset-0 size-full object-fill" muted playsInline />
+              <svg className="absolute inset-0 size-full" aria-hidden="true">
+                <line ref={usedLineRef} className="opacity-0" stroke="#f472b6" strokeWidth={2.5} strokeLinecap="round" />
+                <line ref={seenLineRef} className="opacity-0" stroke="#ffffff" strokeWidth={1.5} strokeLinecap="round" />
+              </svg>
               <span ref={rightEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
               <span ref={leftEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
             </div>

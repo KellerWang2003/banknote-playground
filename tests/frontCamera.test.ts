@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { orientationMatrix, tiltFromEye, type Vector } from '../src/lib/deviceTilt'
-import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye, wellInView } from '../src/lib/frontCamera'
+import { CAMERA_FOV_DEG, LAPTOP_CAMERA_M, PHONE_CAMERA_M, cameraEye, sightLine, wellInView } from '../src/lib/frontCamera'
 import { EYE_M, toPhone } from '../src/lib/viewer'
 
 const RAD = Math.PI / 180
@@ -107,5 +107,39 @@ describe('a face well inside the camera’s picture', () => {
   it('measures a face on its side alike, a phone held sideways', () => {
     expect(wellInView({ x: 0.5, y: 0.3 }, { x: 0.5, y: 0.45 }, W, H)).toBe(true)
     expect(wellInView({ x: 0.08, y: 0.3 }, { x: 0.08, y: 0.45 }, W, H)).toBe(false)
+  })
+})
+
+describe('the line of sight drawn in the camera’s picture', () => {
+  const at = (x: number, y: number, z: number): Vector => unit([x, y, z]).map((v) => v * EYE_M) as unknown as Vector
+
+  it('is nothing square on, and as long as the eye is far off it, 90° the picture’s height', () => {
+    const none = sightLine(at(0, 0, 1))
+    expect(Math.hypot(none.x, none.y)).toBe(0)
+    // 30° above the screen: it looks down, a third of the picture's height
+    const above = sightLine(at(0, Math.sin(30 * RAD), Math.cos(30 * RAD)))
+    expect(above.x).toBeCloseTo(0, 12)
+    expect(above.y).toBeCloseTo(1 / 3, 12)
+    // 45° to the screen's right: it looks back left, which the camera has on its right
+    const right = sightLine(at(1, 0, 1))
+    expect(right.x).toBeCloseTo(0.5, 12)
+    expect(right.y).toBeCloseTo(0, 12)
+  })
+
+  it('goes along the page however it is turned on the phone', () => {
+    // The page turned a quarter: the phone's right is the page's up
+    const line = sightLine(at(Math.sin(30 * RAD), 0, Math.cos(30 * RAD)), 90)
+    expect(line.x).toBeCloseTo(0, 12)
+    expect(line.y).toBeCloseTo(1 / 3, 12)
+  })
+
+  it('points from a face seen off the middle of the picture back towards the banknote', () => {
+    const W = 480, H = 640
+    // High in the picture: down; on its left (the screen's right): right
+    const high = sightLine(cameraEye({ x: 0.4, y: 0.15 }, { x: 0.6, y: 0.15 }, W, H, 0)!)
+    expect(high.y).toBeGreaterThan(0.1)
+    expect(Math.abs(high.x)).toBeLessThan(1e-9)
+    const left = sightLine(cameraEye({ x: 0.05, y: 0.4 }, { x: 0.25, y: 0.4 }, W, H, 0)!)
+    expect(left.x).toBeGreaterThan(0.1)
   })
 })
