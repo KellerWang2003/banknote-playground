@@ -10,6 +10,7 @@ import { DemoView } from '../src/app/DemoView'
 import { PhoneLink } from '../src/app/PhoneLink'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import { demoLink, forPhone, readDemoLink } from '../src/lib/demoLink'
+import { useTrackerLoading } from '../src/lib/faceTracker'
 import { lensState } from '../src/lib/lens'
 import { playbackPlan } from '../src/lib/moves'
 import { createNote, createProject } from '../src/lib/notes'
@@ -44,7 +45,10 @@ vi.mock('../src/cloud/repository', async (importOriginal) => {
 })
 
 // The front camera's face tracker comes from a CDN: here it never comes
-vi.mock('../src/lib/faceTracker', () => ({ faceTracker: () => new Promise(() => {}) }))
+vi.mock('../src/lib/faceTracker', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/faceTracker')>()),
+  faceTracker: () => new Promise(() => {}),
+}))
 
 // The sample project's artwork is drawn on a canvas, which jsdom lacks: it opens one plain banknote instead
 vi.mock('../src/lib/demo', async () => {
@@ -756,6 +760,47 @@ describe('Demo on a phone', () => {
       expect(document.querySelector('[data-front-camera]')).toBeNull()
     } finally {
       vi.unstubAllEnvs()
+    }
+  })
+
+  it('shows how much of the camera’s face tracker has come, as a bar where its picture will be, until the camera is on or can’t start', async () => {
+    let deny!: (error: Error) => void
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>((_, reject) => { deny = reject }))
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      renderDemo()
+      await userEvent.setup().click(within(await openMenu()).getByRole('menuitemcheckbox', { name: 'Camera' }))
+      const place = document.querySelector('[data-front-camera]')!
+      // The picture's place shows as the camera starts, and no bar in it while the tracker isn't on its way: it is here
+      // already, from a camera switched on before
+      await waitFor(() => expect(place.classList.contains('opacity-0')).toBe(false))
+      expect(screen.queryByRole('progressbar')).toBeNull()
+      // On its way (Keller, 14 November: "it just feels like it is stuck when loading"): a bar, as far along as it is
+      act(() => useTrackerLoading.setState({ fetched: 0 }))
+      const bar = screen.getByRole('progressbar', { name: 'Loading the camera' })
+      expect(place.contains(bar)).toBe(true)
+      expect(bar.getAttribute('aria-valuenow')).toBe('0')
+      act(() => useTrackerLoading.setState({ fetched: 0.42 }))
+      expect(bar.getAttribute('aria-valuenow')).toBe('42')
+      expect(bar.querySelector<HTMLElement>('[data-slot="progress-indicator"]')!.style.width).toBe('42%')
+      expect(bar.classList.contains('animate-pulse')).toBe(false)
+      // All of it here, being set up: full, and pulsing
+      act(() => useTrackerLoading.setState({ fetched: 1 }))
+      expect(bar.getAttribute('aria-valuenow')).toBe('100')
+      expect(bar.classList.contains('animate-pulse')).toBe(true)
+      // Ready, the picture still to come: it stays, full
+      act(() => useTrackerLoading.setState({ fetched: undefined }))
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('100')
+      // In no words (CLAUDE.md, Loading states): neither a label nor the figure beside it
+      expect(place.querySelector('[data-slot="progress-label"], [data-slot="progress-value"]')).toBeNull()
+      // The camera couldn't start: the bar gone, its place hidden
+      await act(async () => { deny(new Error('Permission denied')) })
+      await waitFor(() => expect(screen.queryByRole('progressbar')).toBeNull())
+      expect(place.classList.contains('opacity-0')).toBe(true)
+    } finally {
+      act(() => useTrackerLoading.setState({ fetched: undefined }))
+      Reflect.deleteProperty(navigator, 'mediaDevices')
     }
   })
 

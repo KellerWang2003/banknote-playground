@@ -1,3 +1,4 @@
+import { create } from 'zustand'
 import { type Seen } from './frontCamera'
 
 /** MediaPipe's tasks for the web, the face landmarker among them: fetched as the camera first comes on, never bundled */
@@ -12,6 +13,12 @@ const VISION = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.0'
  * two as it leaves over an edge, where the detector alone put them up to 40 px further in than they were
  */
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+/**
+ * How big the two big files it needs are, bytes: MediaPipe's code (WebAssembly, `vision_wasm_internal.wasm`) and the
+ * models, 18 MB between them, fewer as they come, the code squeezed. The bar that shows them coming goes by these
+ * (`useTrackerLoading`), as a file that comes squeezed doesn't say how big it will be
+ */
+const BYTES = { code: 14_466_654, models: 3_758_596 }
 /**
  * How surely the mesh must fit, 0 to 1, for there to be a face. Real faces fitted as surely at 0.7 as at 0.5 however
  * small, dim, blurred or turned over; at 0.9 a blurred one was lost sooner
@@ -48,9 +55,14 @@ export interface FaceTracker {
 interface Landmarker {
   detect(picture: HTMLVideoElement, options?: { rotationDegrees?: number }): { faceLandmarks?: Seen[][] }
 }
+/** Where MediaPipe's code is: the script that starts it, and the WebAssembly that script fetches */
+interface Files {
+  wasmLoaderPath: string
+  wasmBinaryPath: string
+}
 interface Vision {
-  FilesetResolver: { forVisionTasks(path: string): Promise<unknown> }
-  FaceLandmarker: { createFromOptions(files: unknown, options: object): Promise<Landmarker> }
+  FilesetResolver: { forVisionTasks(path: string): Promise<Files> }
+  FaceLandmarker: { createFromOptions(files: Files, options: object): Promise<Landmarker> }
 }
 
 const between = (a: Seen, b: Seen): Seen => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
@@ -65,23 +77,84 @@ export function eyesOf(mesh: Seen[]): Eyes | undefined {
     : undefined
 }
 
+/**
+ * How much of the tracker's code and models has come, 0 to 1, from when it is first asked for until it can look, so 1
+ * while it is set up; undefined before and after, and once it couldn't be had. Demo shows it as a bar where the
+ * camera's picture will be (Keller, 14 November: "lets add a little progress abr for the google thing to load as right
+ * now it just feels like it is stuck when loading")
+ */
+export const useTrackerLoading = create<{ fetched: number | undefined }>(() => ({ fetched: undefined }))
+
+/** `url` fetched whole, as a file of that `type`, `came` told how many bytes there are so far as each piece comes */
+async function fetchedFrom(url: string, type: string, signal: AbortSignal, came: (bytes: number) => void) {
+  const response = await fetch(url, { signal })
+  if (!response.ok || !response.body) throw new Error(`${response.status}: ${url}`)
+  const reader = response.body.getReader()
+  const pieces: BlobPart[] = []
+  let bytes = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return new Blob(pieces, { type })
+    pieces.push(value)
+    bytes += value.length
+    came(bytes)
+  }
+}
+
+const looking = (landmarker: Landmarker): FaceTracker => ({
+  eyesIn: (video, rotationDegrees = 0) =>
+    (landmarker.detect(video, { rotationDegrees }).faceLandmarks ?? []).flatMap((mesh) => eyesOf(mesh) ?? []),
+})
+
 let tracking: Promise<FaceTracker> | undefined
-/** The face tracker for the front camera (`useFrontCamera`), made once and kept: on the GPU where it can be, else the CPU */
+/**
+ * The face tracker for the front camera (`useFrontCamera`), made once and kept: on the GPU where it can be, else the
+ * CPU. Its code and models are fetched here, both at once, and handed to MediaPipe, rather than left for it to fetch,
+ * one after the other and saying nothing meanwhile, so that how much has come can be told as it comes
+ * (`useTrackerLoading`). One that can't be fetched here is left to MediaPipe as before
+ */
 export const faceTracker = () =>
   (tracking ??= (async (): Promise<FaceTracker> => {
-    const vision = (await import(/* @vite-ignore */ `${VISION}/vision_bundle.mjs`)) as Vision
-    const files = await vision.FilesetResolver.forVisionTasks(`${VISION}/wasm`)
-    const make = (delegate: 'GPU' | 'CPU') =>
-      vision.FaceLandmarker.createFromOptions(files, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate },
-        runningMode: MODE,
-        numFaces: FACES,
-        minFacePresenceConfidence: SURE,
+    const came = { code: 0, models: 0 }
+    const stop = new AbortController()
+    let over = false
+    // How much has come, in hundredths, said as it changes
+    const say = () => {
+      const fetched = Math.floor(((came.code + came.models) / (BYTES.code + BYTES.models)) * 100) / 100
+      if (!over && fetched !== useTrackerLoading.getState().fetched) useTrackerLoading.setState({ fetched })
+    }
+    // One of the two files, or undefined if it couldn't be fetched here; all of it counted as come either way
+    const part = (name: keyof typeof BYTES, url: string, type: string) =>
+      fetchedFrom(url, type, stop.signal, (bytes) => {
+        came[name] = Math.min(bytes, BYTES[name])
+        say()
+      }).catch(() => undefined).finally(() => {
+        came[name] = BYTES[name]
+        say()
       })
-    const landmarker = await make('GPU').catch(() => make('CPU'))
-    return {
-      eyesIn: (video, rotationDegrees = 0) =>
-        (landmarker.detect(video, { rotationDegrees }).faceLandmarks ?? []).flatMap((mesh) => eyesOf(mesh) ?? []),
+    say()
+    try {
+      const models = part('models', FACE_MODEL, 'application/octet-stream')
+      const vision = (await import(/* @vite-ignore */ `${VISION}/vision_bundle.mjs`)) as Vision
+      const files = await vision.FilesetResolver.forVisionTasks(`${VISION}/wasm`)
+      const [code, model] = await Promise.all([part('code', files.wasmBinaryPath, 'application/wasm'), models])
+      // The code as an address of its own, which lasts until it is let go, and the models as bytes
+      const codeUrl = code && URL.createObjectURL(code)
+      const modelBytes = model && new Uint8Array(await model.arrayBuffer())
+      const make = (delegate: 'GPU' | 'CPU') =>
+        vision.FaceLandmarker.createFromOptions(codeUrl ? { ...files, wasmBinaryPath: codeUrl } : files, {
+          baseOptions: { ...(modelBytes ? { modelAssetBuffer: modelBytes } : { modelAssetPath: FACE_MODEL }), delegate },
+          runningMode: MODE,
+          numFaces: FACES,
+          minFacePresenceConfidence: SURE,
+        })
+      return looking(await make('GPU').catch(() => make('CPU')).finally(() => {
+        if (codeUrl) URL.revokeObjectURL(codeUrl)
+      }))
+    } finally {
+      over = true
+      stop.abort()
+      useTrackerLoading.setState({ fetched: undefined })
     }
   })().catch((error: unknown) => {
     tracking = undefined

@@ -10,11 +10,13 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Progress } from '@/components/ui/progress'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { IconButton, Panel } from '../components/controls'
 import { NoteView } from '../components/NoteView'
+import { useTrackerLoading } from '../lib/faceTracker'
 import { TILT_LIMIT, clamp, perspectiveFor } from '../lib/frames'
 import { CARD_MM, CARD_RADIUS_MM, isChecked, realPxPerMm, setRealPxPerMm, useRealSize } from '../lib/realSize'
 import { setRealistic, useRealistic } from '../lib/realistic'
@@ -122,7 +124,8 @@ function settleTurns(side: number, speed = { x: 0, y: 0 }) {
  * front camera, which sees where the eye is (`useFrontCamera`), its
  * picture small at the top left while it looks, always switched on by hand (Keller, 13 November: "people might not want
  * cameras"); on the dev server only at first, on the live site too since Keller wanted to try it out of doors ("push it
- * so i test it outside").
+ * so i test it outside"). While its face tracker is fetched, a bar in the picture's place shows how much has come
+ * (`TrackerLoading`).
  */
 export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
   project: Project
@@ -519,10 +522,11 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
             as the screen is while a view for a phone held sideways turns, as the picture does. From between the eyes go two
             lines of sight, as long as each is far off square on: white, as this picture has the eye, and pink, the eye the
             banknote follows (Keller, 14 November: "show the line that is coming out of my eye so that I can identify what
-            is going wrong") */}
+            is going wrong"). Its place shows, black, from when the camera is switched on, with a bar in it for how much
+            of the face tracker has come while that is fetched (`TrackerLoading`) */}
         {camera && (
           <div data-front-camera="" className={cn('pointer-events-none absolute overflow-hidden rounded-md bg-black ring-1 ring-white/15 transition-opacity',
-            (!ui || cameraState !== 'on') && 'opacity-0')} style={{ top: BAR_INSET, left: BAR_INSET, width: pictureBox.width, height: pictureBox.height }}>
+            (!ui || (cameraState !== 'on' && cameraState !== 'starting')) && 'opacity-0')} style={{ top: BAR_INSET, left: BAR_INSET, width: pictureBox.width, height: pictureBox.height }}>
             <div className="absolute top-1/2 left-1/2 transition-transform ease-in-out motion-reduce:transition-none"
               style={{ width: picture.width, height: picture.height, transform: `translate(-50%, -50%) rotate(${-viewDeg}deg) scaleX(-1)`, transitionDuration: `${ROTATE_SECONDS}s` }}>
               <video ref={cameraRef} className="absolute inset-0 size-full object-fill" muted playsInline />
@@ -533,6 +537,7 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
               <span ref={rightEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
               <span ref={leftEyeRef} className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 ring-1 ring-black/60" />
             </div>
+            {cameraState === 'starting' && <TrackerLoading />}
           </div>
         )}
 
@@ -591,6 +596,26 @@ export function DemoView({ project, noteId, onPick, onClose, phoneLink }: {
       </div>
       {!note && <p className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">This project has no banknotes yet</p>}
     </div>
+  )
+}
+
+/**
+ * How much of the front camera's face tracker has come (`useTrackerLoading`), as a bar across the middle of the picture's
+ * place while the camera starts (Keller, 14 November: "lets add a little progress abr for the google thing to load as
+ * right now it just feels like it is stuck when loading"): the 18 MB it fetches the first time, which said nothing as it
+ * came. Only if the tracker was still on its way as the camera started, and then until the picture takes its place: full,
+ * and pulsing, once all of it is here and it is being set up. In no words, as nothing that loads says so (CLAUDE.md,
+ * Loading states)
+ */
+function TrackerLoading() {
+  const fetched = useTrackerLoading((s) => s.fetched)
+  const [shown, setShown] = useState(false)
+  if (fetched !== undefined && !shown) setShown(true)
+  if (fetched === undefined && !shown) return null
+  const percent = Math.round((fetched ?? 1) * 100)
+  return (
+    <Progress data-tracker-loading="" aria-label="Loading the camera" value={percent}
+      className={cn('absolute inset-x-3 top-1/2 -translate-y-1/2', percent === 100 && 'animate-pulse motion-reduce:animate-none')} />
   )
 }
 

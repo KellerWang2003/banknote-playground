@@ -47,6 +47,13 @@ const LOOK_REST = { times: 3, most: 200 }
 
 /** Where the camera stands: off, coming on (asking for the camera, fetching the face tracker), on, or it couldn't */
 export type Camera = 'off' | 'starting' | 'on' | 'failed'
+/**
+ * The shape a camera's picture will likely have, its width over its height, before it comes: a phone's or a tablet's
+ * comes turned as its screen is, so tall on one held upright, and a laptop's comes wide. Its place shows meanwhile
+ * (DemoView), and so doesn't change shape as the picture comes
+ */
+const likelyAspect = () =>
+  typeof matchMedia === 'function' && matchMedia('(pointer: coarse) and (orientation: portrait)').matches ? 3 / 4 : 4 / 3
 
 /** A face found in a picture that could be the viewer's: its eyes, the eye they make, the point between them, and how far apart they show, px */
 interface Found extends Eyes {
@@ -94,8 +101,8 @@ interface Run {
  */
 export function useFrontCamera(on: boolean, phone: boolean, turns: number, upright: Quarter = 0) {
   const [camera, setCamera] = useState<Camera>('off')
-  /** The picture's width over its height, a laptop's until it comes */
-  const [aspect, setAspect] = useState(4 / 3)
+  /** The picture's width over its height, as it will likely be until it comes */
+  const [aspect, setAspect] = useState(likelyAspect)
   const videoRef = useRef<HTMLVideoElement>(null)
   const rightRef = useRef<HTMLElement>(null)
   const leftRef = useRef<HTMLElement>(null)
@@ -133,6 +140,7 @@ export function useFrontCamera(on: boolean, phone: boolean, turns: number, uprig
       line.setAttribute('y2', `${(from.y + toward.y) * 100}%`)
     }
     setCamera('starting')
+    setAspect(likelyAspect())
     // The picture's shape, as it comes and whenever it changes (a phone turned, its picture turning with the page)
     const measure = () => {
       if (el.videoWidth && el.videoHeight) setAspect(el.videoWidth / el.videoHeight)

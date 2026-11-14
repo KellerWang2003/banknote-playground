@@ -60,6 +60,12 @@ function Camera({ phone }: { phone: boolean }) {
   )
 }
 
+/** The camera's picture's shape and where the camera stands, as the hook has them */
+function Shape({ on }: { on: boolean }) {
+  const { aspect, camera, videoRef } = useFrontCamera(on, true, 0)
+  return <video data-testid="shape" data-aspect={aspect} data-camera={camera} ref={videoRef} />
+}
+
 describe('the front camera, a face coming and going', () => {
   const frames: ((now: number, picture: object) => void)[] = []
   const restore: (() => void)[] = []
@@ -277,6 +283,36 @@ describe('the front camera, a face coming and going', () => {
     picture(lowerLeft)
     expect(useTilt.getState()).not.toBe(first)
     expect(dotsShow()).toBe(true)
+  })
+
+  it('takes its picture’s shape, before it comes, to be a phone’s as its screen is held or a laptop’s, then the picture’s own', async () => {
+    const shape = () => Number(screen.getByTestId('shape').dataset.aspect)
+    const stands = () => screen.getByTestId('shape').dataset.camera
+    let grant!: (stream: { getTracks: () => never[] }) => void
+    stub(navigator, 'mediaDevices', { value: { getUserMedia: () => new Promise((resolve) => { grant = resolve }) } })
+    /** A touch screen, held upright or on its side */
+    let upright = true
+    const phone = () => stub(window, 'matchMedia', { value: (query: string) => ({ matches: query === '(pointer: coarse) and (orientation: portrait)' && upright }) })
+    // A laptop's, wide, until its picture comes: 480 × 640 here
+    const laptop = render(<Shape on />)
+    expect(stands()).toBe('starting')
+    expect(shape()).toBeCloseTo(4 / 3, 12)
+    await act(async () => { grant({ getTracks: () => [] }) })
+    await vi.waitFor(() => expect(stands()).toBe('on'))
+    expect(shape()).toBeCloseTo(480 / 640, 12)
+    laptop.unmount()
+    // A phone held upright: tall from the first, as its picture will be
+    phone()
+    const held = render(<Shape on={false} />)
+    held.rerender(<Shape on />)
+    expect(stands()).toBe('starting')
+    expect(shape()).toBeCloseTo(3 / 4, 12)
+    // Switched off, its screen turned on its side, and on again: wide
+    held.rerender(<Shape on={false} />)
+    upright = false
+    held.rerender(<Shape on />)
+    expect(stands()).toBe('starting')
+    expect(shape()).toBeCloseTo(4 / 3, 12)
   })
 
   it('lets pictures go by after a slow look, so that looking takes no more than a third of the time', async () => {
