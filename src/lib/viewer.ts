@@ -5,12 +5,14 @@
  * `toEarth`, `toPhone`); where the eye really is, were the head to move with the phone, only a camera could see, and the
  * front camera, switched on from Demo's ⋯, moves it there (`eyeToward`; frontCamera.ts).
  *
- * Where the eye starts, as Demo opens and on coming back to it, is the neutral (Keller: "the point where like everything
- * is at its default should be if the banknote is like holding at 90 degrees ... completely vertical in space", with a
- * slider in ⋯ for it): the phone held NEUTRAL_DEG from lying flat, facing whoever holds it, is looked at square on. It is
- * one value however it is set ("just one value that we change in multiple ways"): by its dial, or by Recentre, which
- * makes it how far from lying flat the phone is held then (`heldDeg`: "if I put it on a stand ... I can just hit that,
- * and the stand wherever it is ... is the flat").
+ * Where the eye starts is the neutral: the phone held that far from lying flat, facing whoever holds it, is looked at
+ * square on. It is one value however it is set ("just one value that we change in multiple ways"): as Demo opens and on
+ * coming back to it, how far from lying flat the phone is held then (Keller, 14 November: "a previous logic where we had
+ * the center or the neutral position to sit whenever the user opens the site is more smart ... matches more what I expect
+ * when I first load the site"), and meanwhile by its dial in ⋯, or by Recentre, which makes it how far the phone is held
+ * then too (`heldDeg`: "if I put it on a stand ... I can just hit that, and the stand wherever it is ... is the flat").
+ * From 13 November until then it started fixed, upright (NEUTRAL_DEG: Keller, "the point where like everything is at its
+ * default should be if the banknote is like holding at 90 degrees"), which is still what it is before motion comes.
  */
 import { clamp } from './frames'
 import { heldEye, type Matrix, type Vector } from './deviceTilt'
@@ -18,7 +20,7 @@ import { type Quarter } from './rotate'
 
 /** How far the eye is taken to be from the screen, metres: a phone held to look at, about arm's length bent */
 export const EYE_M = 0.35
-/** The neutral: how far from lying flat, degrees, the phone is looked at square on where the eye starts. Upright */
+/** The neutral before motion comes: how far from lying flat, degrees, the phone is looked at square on. Upright */
 export const NEUTRAL_DEG = 90
 
 /** `v` from the phone's own axes to the earth's, the phone turned `m` (deviceTilt's `Matrix`) */

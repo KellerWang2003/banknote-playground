@@ -88,10 +88,12 @@ export function askForMotion(): Promise<Asked> {
 /**
  * The phone's own tilt as every banknote's, in Demo (`src/lib/deviceTilt.ts`): the banknote shown as the viewer's eye sees
  * the phone (src/lib/viewer.ts), steadied, into the tilt store as the `device` source, measured along the banknote's own
- * axes (`turns`, its quarter turns on the view, and the view's own for a phone with rotation locked). The eye starts at
- * the neutral, the phone held upright square on unless its dial in ⋯ says otherwise (Keller, 13 November: "the default
- * position is set to be wherever the site loads ... Let's keep it fixed"), as motion starts and on coming back to the
- * page, and then stays put in the room as the phone turns, as the gyroscope says (Keller, 13 November: finding where the
+ * axes (`turns`, its quarter turns on the view, and the view's own for a phone with rotation locked). The eye starts
+ * square on as the phone is held when motion starts and on coming back to the page, how far from lying flat it is held
+ * then becoming the neutral, as Recentre makes it, its dial in ⋯ moving there (Keller, 14 November: "a previous logic where
+ * we had the center or the neutral position to sit whenever the user opens the site is more smart ... matches more what I
+ * expect when I first load the site"; from 13 November until then it started at the neutral, upright unless the dial said
+ * otherwise: "Let's keep it fixed"), and then stays put in the room as the phone turns, as the gyroscope says (Keller, 13 November: finding where the
  * eye really is "should just be the camera, and gyro should be how it behaves right now"), and with the front camera on
  * (⋯) where it sees the eye moves it there (`sightEye`). Also says which way up the
  * phone is held (`upright`), for such a phone's view to turn to, read as motion starts and then once it has been held
@@ -125,8 +127,11 @@ export function useDeviceTilt(turns: number) {
     /** How the phone lay in the room at the last reading, steadied (`roomTilt`), which Recentre leaves be */
     room?: { x: number; y: number; up: readonly [number, number, number] }
     glide?: { from: { x: number; y: number }; at: number }
-    /** The eye to the neutral at the next reading (it has just come back, or the neutral moved), the tilt gliding there or not */
-    again?: { glide: boolean }
+    /**
+     * The eye to the neutral at the next reading (it has just come back, or the neutral moved), the tilt gliding there or
+     * not; `held`: how the phone is held then is square on, that the neutral now (it has just come back)
+     */
+    again?: { glide: boolean; held?: boolean }
     /** Another way up the phone has been held, since when */
     turning?: { to: Quarter; since: number }
     /** A reading has come */
@@ -183,8 +188,14 @@ export function useDeviceTilt(turns: number) {
           setUpright(way)
         }
       } else r.turning = undefined
-      // The eye: at the neutral as motion starts or comes back, or as the neutral moves (with Recentre, gliding there); and
-      // otherwise where it was in the room as the phone turns
+      // The eye: square on as the phone is held when motion starts or comes back, how far from lying flat it is held then
+      // the neutral now, as Recentre makes it, its dial moving there; at the neutral as that moves (the dial, or Recentre,
+      // gliding there); and otherwise where it was in the room as the phone turns
+      if (!r.eye || r.again?.held) {
+        const deg = heldDeg(now)
+        latest.current.neutralDeg = deg
+        if (useViewing.getState().neutralDeg !== deg) setViewing({ neutralDeg: deg })
+      }
       const { neutralDeg } = latest.current
       if (!r.eye || r.again) {
         if (r.eye && r.again?.glide) r.glide = { from: r.shown, at }
@@ -226,9 +237,9 @@ export function useDeviceTilt(turns: number) {
         setTilt({ source: 'device', target: y, targetX: x, room })
       }
     }
-    // Back on the page: the eye at the neutral again, gliding there
+    // Back on the page: square on again as it is held then, gliding there
     const onVisible = () => {
-      if (document.visibilityState === 'visible') r.again = { glide: true }
+      if (document.visibilityState === 'visible') r.again = { glide: true, held: true }
     }
     // An eye seen from outside: into the room as the phone was turned then (the reading nearest), where the eye is kept,
     // moving it there as far as the time since the last says, the less the faster the phone was turning
@@ -298,7 +309,7 @@ export function useDeviceTilt(turns: number) {
   // The neutral moved (its dial in ⋯): the eye goes there at once
   useEffect(() => {
     const r = reading.current
-    if (r.eye && r.neutral !== neutralDeg) r.again = { glide: r.again?.glide ?? false }
+    if (r.eye && r.neutral !== neutralDeg) r.again = { ...r.again, glide: r.again?.glide ?? false }
   }, [neutralDeg])
 
   /**

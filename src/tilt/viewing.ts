@@ -6,7 +6,7 @@ import { NEUTRAL_DEG } from '../lib/viewer'
  * of looking, not part of a project: remembered per browser, as Realistic is
  */
 interface Viewing {
-  /** The neutral, degrees from lying flat: the phone held that far is looked at square on as Demo opens */
+  /** The neutral, degrees from lying flat: the phone held that far is looked at square on (how it is held as Demo opens) */
   neutralDeg: number
 }
 

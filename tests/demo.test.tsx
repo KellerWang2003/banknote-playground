@@ -519,37 +519,72 @@ describe('Demo on a phone', () => {
     expect(useTilt.getState().targetX).toBeCloseTo(0, 1)
   })
 
-  it('opens square on held upright, not wherever it happened to be held, and its neutral dial in ⋯ moves that', async () => {
+  it('opens square on however it is held, that the neutral, and its dial in ⋯ moves that', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     const onClose = vi.fn()
     renderDemo(undefined, undefined, onClose)
-    // Held tipped back 60° as it opens: 30° short of upright, its top 30° away (Keller, 13 November: "the default position
-    // is set to be wherever the site loads ... Let's keep it fixed")
+    // Held tipped back 60° as it opens: square on, 60° the neutral (Keller, 14 November: the neutral set "whenever the
+    // user opens the site is more smart ... matches more what I expect when I first load the site")
     orient(0, 60, 0)
     await motionOn()
-    expect(useTilt.getState().target).toBeCloseTo(30, 9)
-    // The dial at 90°; set to 60°, held there is square on, at once
+    expect(useTilt.getState().target).toBeCloseTo(0, 9)
+    expect(useViewing.getState().neutralDeg).toBe(60)
+    // The dial there; set to 90°, held at 60° is 30° off square on, its top further away, at once
     const menu = await openMenu()
     // Found by its label: its thumb stays hidden until it is laid out, which jsdom never does
     const dial = within(menu).getByLabelText('Neutral')
-    expect(dial.getAttribute('aria-valuenow')).toBe('90')
-    // A degree a step, ten at a time with Page Down
+    expect(dial.getAttribute('aria-valuenow')).toBe('60')
+    // A degree a step, ten at a time with Page Up
     fireEvent.keyDown(dial, { key: 'ArrowLeft' })
-    expect(useViewing.getState().neutralDeg).toBe(89)
+    expect(useViewing.getState().neutralDeg).toBe(59)
     fireEvent.keyDown(dial, { key: 'ArrowRight' })
-    for (let i = 0; i < 3; i++) fireEvent.keyDown(dial, { key: 'PageDown' })
-    expect(useViewing.getState().neutralDeg).toBe(60)
-    expect(within(menu).getByText('60°')).toBeDefined()
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(dial, { key: 'PageUp' })
+    expect(useViewing.getState().neutralDeg).toBe(90)
+    expect(within(menu).getByText('90°')).toBeDefined()
     now += 100
     orient(0, 60, 0)
-    expect(useTilt.getState().target).toBeCloseTo(0, 6)
-    // Remembered in this browser
-    expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ neutralDeg: 60 })
+    expect(useTilt.getState().target).toBeCloseTo(30, 6)
+    // Remembered in this browser, until Demo opens again
+    expect(JSON.parse(localStorage.getItem('of-playground.viewing')!)).toEqual({ neutralDeg: 90 })
     // Its keys are its own, but Esc on it still closes ⋯, and only that
     fireEvent.keyDown(dial, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('comes back to the page square on as it is held then, gliding there', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    renderDemo()
+    orient(0, 90, 0)
+    await motionOn()
+    // Tipped back 40°: the top 40° further away
+    for (let i = 0; i < 20; i++) {
+      now += 100
+      orient(0, 50, 0)
+    }
+    expect(useTilt.getState().target).toBeCloseTo(40, 1)
+    // Away from the page and back, held so: square on, 50° the neutral, the banknote gliding back there
+    const shown = (state: 'hidden' | 'visible') => act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    try {
+      shown('hidden')
+      shown('visible')
+      now += 100
+      orient(0, 50, 0)
+      expect(useViewing.getState().neutralDeg).toBe(50)
+      expect(useTilt.getState().target).toBeGreaterThan(10)
+      for (let i = 0; i < 5; i++) {
+        now += 100
+        orient(0, 50, 0)
+      }
+      expect(useTilt.getState().target).toBeCloseTo(0, 1)
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState
+    }
   })
 
   it('makes how far from lying flat it is held the neutral with Recentre, on a stand say, the dial moving there', async () => {
